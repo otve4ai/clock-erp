@@ -13,6 +13,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from app.domain_schema_migrations import validate_orders_database
+from app.clients.bitrix_orders import refresh_order_sync_state
 from app.services.customer_identity import link_order_safely
 from app.services.customer_order_sync import publish_orders
 from app.services.order_presentation import status_key
@@ -265,7 +266,7 @@ class OrdersSnapshotStore:
             if field in {"items", "products"} and not value and merged.get(field):
                 continue
             merged[field] = value
-        return merged
+        return refresh_order_sync_state(merged)
 
     def _upsert_bitrix_in_connection(
         self, connection, orders, loaded_at, preserve_existing_local=False,
@@ -568,7 +569,7 @@ class OrdersSnapshotStore:
         payload = json.loads(row["payload_json"])
         payload["item_units"] = row["item_units"]
         payload["customer_id"] = row["customer_id"]
-        return payload
+        return refresh_order_sync_state(payload)
 
     def get_by_identity(self, source, external_order_id):
         """Resolve the canonical local record by source identity."""
@@ -584,7 +585,7 @@ class OrdersSnapshotStore:
         payload = json.loads(row["payload_json"])
         payload["item_units"] = row["item_units"]
         payload["customer_id"] = row["customer_id"]
-        return payload
+        return refresh_order_sync_state(payload)
 
     def set_item_units(self, order_id, item_units):
         self.initialize()
@@ -619,6 +620,7 @@ class OrdersSnapshotStore:
                 value = detail.get(field)
                 if value not in (None, ""):
                     payload[field] = value
+            payload = refresh_order_sync_state(payload)
             connection.execute("UPDATE orders_snapshot SET work_status=? WHERE order_id=?",
                                (status_key(payload), order_id))
             units = order_item_units(detail)
@@ -854,7 +856,7 @@ class OrdersSnapshotStore:
             payload["item_units"] = row["item_units"]
             payload["customer_id"] = row["customer_id"]
             payload["ui_status"] = row["effective_status"]
-            result_rows.append(payload)
+            result_rows.append(refresh_order_sync_state(payload))
         counts = {}
         source_counts = {"all": 0, "tictactoy": 0, "wildberries": 0}
         for row in status_rows:

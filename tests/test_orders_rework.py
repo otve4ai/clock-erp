@@ -5,6 +5,7 @@ from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
 from app import web
+from app.clients.bitrix_orders import normalize_order, refresh_order_sync_state
 from app.catalog_db import CatalogDatabase
 from app.services.excel_product_catalog import ExcelProductCatalog
 from app.services.sales_inventory import SalesInventory
@@ -82,6 +83,42 @@ class OrdersReworkTest(unittest.TestCase):
         result = web.build_order_sale_readiness(order, mapping)
         self.assertFalse(result["ready"])
         self.assertIn("Недостаточно остатка", result["issues"])
+
+    def test_loaded_items_without_contacts_allow_sale_but_keep_safety_checks(self):
+        order = normalize_order({
+            "id": 21147, "status": "A", "price": "41404.02",
+            "products": [
+                {"id": "line-1", "product_id": "bx-1", "quantity": 1, "price": "40425"},
+                {"id": "line-2", "product_id": "bx-2", "quantity": 1, "price": "979.02"},
+            ],
+        })
+        order.update(sync_state="partial", sync_missing=["customer", "phone", "items"])
+        order = refresh_order_sync_state(order)
+        mapping = {
+            "line:line-1": {"state": "mapped", "product": {"id": "1", "stock": 1}},
+            "line:line-2": {"state": "mapped", "product": {"id": "2", "stock": 1}},
+        }
+        state = web.build_order_sale_state(order, mapping)
+        self.assertTrue(state["can_create_sale"])
+        self.assertTrue(state["readiness"]["ready"])
+        for changes in (
+            {"products": []}, {"status": "N"}, {"sync_state": "error"},
+            {"calculation_complete": False}, {"calculation_consistent": False},
+        ):
+            with self.subTest(changes=changes):
+                self.assertFalse(web.build_order_sale_readiness(dict(order, **changes), mapping)["ready"])
+        self.assertFalse(web.build_order_sale_readiness(order, {})["ready"])
+        self.assertFalse(web.build_order_sale_readiness(order, mapping, already_conducted=True)["ready"])
+
+    def test_21147_actual_amount_difference_is_not_bypassed(self):
+        order = normalize_order({
+            "id": 21147, "status": "O", "price": "41404.00",
+            "products": [{"id": 1, "quantity": 1, "price": "40425"},
+                         {"id": 2, "quantity": 1, "price": "979.02"}],
+        })
+        self.assertEqual(order["sync_missing"], [])
+        self.assertFalse(order["calculation_complete"])
+        self.assertFalse(web.build_order_sale_state(order, {})["can_create_sale"])
 
     def test_unknown_status_and_three_versioned_modes_are_rendered(self):
         order = {

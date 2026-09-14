@@ -283,6 +283,37 @@ def status_presentation(value):
     }
 
 
+def order_sync_missing(items, total, status_known):
+    """Only operational fields determine completeness, not optional contacts."""
+    missing = []
+    if not items:
+        missing.append("items")
+    if total is None:
+        missing.append("total")
+    if not status_known:
+        missing.append("status")
+    return missing
+
+
+def refresh_order_sync_state(order):
+    """Reconcile cached completeness with the final, merged card in memory."""
+    if order.get("sync_state") not in {"complete", "partial"}:
+        return order
+    result = dict(order)
+    items = order.get("products") or order.get("items") or []
+    missing = order_sync_missing(
+        [item for item in items if isinstance(item, dict)],
+        money(first_value(order, "total", "order_total", "price", "PRICE")),
+        status_presentation(first_value(order, "status", "STATUS_ID", "status_id"))["known"],
+    )
+    # Unknown failure reasons must not be silently cleared.
+    missing.extend(key for key in (order.get("sync_missing") or [])
+                   if key not in {"customer", "phone", "items", "total", "status"})
+    result["sync_missing"] = missing
+    result["sync_state"] = "partial" if missing else "complete"
+    return result
+
+
 def normalize_order(order):
     if not isinstance(order, dict):
         return None
@@ -415,14 +446,7 @@ def normalize_order(order):
         or properties.get("LOCATION")
         or properties.get("LOCATION_ID")
     )
-    required = {
-        "customer": customer,
-        "phone": first_value(order, "phone", "PHONE") or user.get("phone") or properties.get("PHONE"),
-        "items": items,
-        "total": total,
-        "status": status["known"],
-    }
-    missing = [key for key, value in required.items() if value in (None, "", [], False)]
+    missing = order_sync_missing(items, total, status["known"])
     sync_state = "complete" if not missing else "partial"
 
     return {
