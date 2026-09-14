@@ -316,20 +316,69 @@ class BitrixOrderNormalizationTest(unittest.TestCase):
         self.assertIsNone(order["region"])
         self.assertIsNone(order["city"])
 
-    def test_delivery_is_derived_only_from_fully_priced_reconciled_order(self):
+    def test_unexplained_positive_difference_is_not_invented_as_delivery(self):
         order = normalize_order({
             "id": 7, "status": "A", "price": "1250",
             "user": {"name": "Клиент", "phone": "+70000000000"},
             "products": [{"id": 1, "name": "Часы", "quantity": 1, "price": 1000}],
         })
         self.assertEqual(order["products_total"], 1000.0)
-        self.assertEqual(order["delivery_price"], 250.0)
-        self.assertEqual(
-            order["delivery_price_source"], "derived_reconciled_remainder"
-        )
+        self.assertIsNone(order["delivery_price"])
+        self.assertIsNone(order["discount"])
+        self.assertFalse(order["calculation_complete"])
+        self.assertFalse(order["calculation_consistent"])
+        self.assertEqual(order["sync_state"], "complete")
+
+    def test_order_money_reconciliation_in_kopecks(self):
+        cases = [
+            ({"price": "41404.02"}, True),
+            ({"price": "41404.00"}, False),
+            ({"price": "41405.02"}, False),
+            ({"price": "41504.02", "delivery_price": "100"}, True),
+            ({"price": "41304.02", "discount": "100"}, True),
+            ({"price": "41404.02", "delivery_price": "0", "discount": "0"}, True),
+            ({"price": "41404.02", "delivery_price": "unknown"}, False),
+            ({"price": "41404.02", "discount": "unknown"}, False),
+            ({"price": "41404.02", "delivery_price": "100"}, False),
+            ({"price": "41404.02", "discount": "100"}, False),
+            ({"price": "41404.02", "discount": "100", "delivery_price": "100"}, True),
+            ({"price": "41404.02", "discount": "NaN"}, False),
+            ({"price": "41404.02", "delivery_price": "-1"}, False),
+            ({"price": "41404.02", "properties": {"DELIVERY_PRICE": "unknown"}}, False),
+            ({"price": "41304.02", "properties": {"DISCOUNT_PRICE": "100"}}, True),
+        ]
+        for amounts, allowed in cases:
+            with self.subTest(amounts=amounts):
+                order = normalize_order({
+                    "id": 21147, "status": "D", "customer": "Test", "phone": "Test",
+                    "products": [
+                        {"id": 1, "quantity": "1.00", "price": "40425.0000"},
+                        {"id": 2, "quantity": "1.00", "price": "979.0200"},
+                    ], **amounts,
+                })
+                self.assertEqual(order["products_total"], 41404.02)
+                self.assertEqual(order["calculation_complete"], allowed)
+                self.assertEqual(order["calculation_consistent"], allowed)
+
+    def test_fractional_money_has_no_float_arithmetic_error(self):
+        order = normalize_order({
+            "price": "0.30", "products": [
+                {"quantity": 1, "price": "0.10"},
+                {"quantity": 1, "price": "0.20"},
+            ],
+        })
         self.assertTrue(order["calculation_complete"])
         self.assertTrue(order["calculation_consistent"])
-        self.assertEqual(order["sync_state"], "complete")
+        self.assertEqual(order["delivery_price"], 0)
+        self.assertEqual(order["discount"], 0)
+
+    def test_explicit_adjustments_do_not_hide_inconsistent_total(self):
+        order = normalize_order({
+            "price": "100.01", "delivery_price": "0", "discount": "0",
+            "products": [{"quantity": 1, "price": "100"}],
+        })
+        self.assertTrue(order["calculation_complete"])
+        self.assertFalse(order["calculation_consistent"])
 
     def test_total_is_not_used_as_delivery_without_priced_items(self):
         order = normalize_order({"id": 7, "status": "A", "price": "1250"})

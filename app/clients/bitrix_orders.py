@@ -224,15 +224,19 @@ class BitrixOrdersReadOnlyClient:
         return order
 
 
-def money(value):
+def decimal_money(value):
     if value in (None, ""):
         return None
     try:
-        return float(
-            Decimal(str(value).replace(",", ".")).quantize(Decimal("0.01"))
-        )
+        amount = Decimal(str(value).replace(",", "."))
+        return amount.quantize(Decimal("0.01")) if amount.is_finite() else None
     except (InvalidOperation, TypeError, ValueError):
         return None
+
+
+def money(value):
+    amount = decimal_money(value)
+    return float(amount) if amount is not None else None
 
 
 def number(value, default=None):
@@ -353,42 +357,57 @@ def normalize_order(order):
         })
 
     status = status_presentation(first_value(order, "status", "STATUS_ID", "status_id"))
-    products_total = money(sum(
+    products_amount = sum(
         Decimal(str(item["line_total"])) for item in items
         if item.get("line_total") is not None
-    )) if items and all(item.get("line_total") is not None for item in items) else None
-    discount = money(first_value(
+    ) if items and all(item.get("line_total") is not None for item in items) else None
+    products_total = money(products_amount)
+    raw_discount = first_value(
         order, "discount", "DISCOUNT", "discount_price", "DISCOUNT_PRICE"
-    ))
-    delivery_price = money(first_value(
+    )
+    if raw_discount is None:
+        raw_discount = first_value(properties, "DISCOUNT", "DISCOUNT_PRICE")
+    raw_delivery = first_value(
         order, "delivery_price", "DELIVERY_PRICE", "price_delivery",
         "PRICE_DELIVERY", "shipment_price", "SHIPMENT_PRICE"
-    ))
-    delivery_price_source = "api" if delivery_price is not None else None
-    if delivery_price is None:
-        delivery_price = money(
-            properties.get("DELIVERY_PRICE") or properties.get("PRICE_DELIVERY")
-        )
-        if delivery_price is not None:
+    )
+    delivery_price_source = "api" if raw_delivery is not None else None
+    if raw_delivery is None:
+        raw_delivery = first_value(properties, "DELIVERY_PRICE", "PRICE_DELIVERY")
+        if raw_delivery is not None:
             delivery_price_source = "property"
-    total = money(first_value(order, "price", "PRICE", "sum", "SUM", "total"))
-    comparable = None not in (products_total, total)
-    if comparable and discount is None:
-        discount = 0.0
-    if comparable and delivery_price is None:
-        derived_delivery = (
-            Decimal(str(total)) - Decimal(str(products_total))
-            + Decimal(str(discount or 0))
-        ).quantize(Decimal("0.01"))
-        if derived_delivery >= 0:
-            delivery_price = money(derived_delivery)
-            delivery_price_source = "derived_reconciled_remainder"
-    reconciliation_complete = comparable and delivery_price is not None
+    discount_amount = decimal_money(raw_discount)
+    delivery_amount = decimal_money(raw_delivery)
+    total_amount = decimal_money(first_value(order, "price", "PRICE", "sum", "SUM", "total"))
+    comparable = products_amount is not None and total_amount is not None
+    invalid_adjustment = (
+        (raw_discount is not None and discount_amount is None)
+        or (raw_delivery is not None and delivery_amount is None)
+        or (discount_amount is not None and discount_amount < 0)
+        or (delivery_amount is not None and delivery_amount < 0)
+    )
+    # Missing adjustments may be zero only when known amounts reconcile exactly.
+    # Never invent a delivery charge or discount from an unexplained difference.
+    if comparable and not invalid_adjustment and (
+        products_amount - (discount_amount or Decimal("0"))
+        + (delivery_amount or Decimal("0")) == total_amount
+    ):
+        if raw_discount is None:
+            discount_amount = Decimal("0.00")
+        if raw_delivery is None:
+            delivery_amount = Decimal("0.00")
+            delivery_price_source = "reconciled_zero"
+    reconciliation_complete = bool(
+        comparable and not invalid_adjustment
+        and discount_amount is not None and delivery_amount is not None
+    )
     reconciliation_ok = bool(
         reconciliation_complete
-        and money(Decimal(str(products_total)) - Decimal(str(discount or 0))
-                  + Decimal(str(delivery_price))) == total
+        and products_amount - discount_amount + delivery_amount == total_amount
     )
+    discount = money(discount_amount)
+    delivery_price = money(delivery_amount)
+    total = money(total_amount)
 
     first_name = first_value(user, "first_name", "FIRST_NAME", "name", "NAME")
     last_name = first_value(user, "last_name", "LAST_NAME")

@@ -5,6 +5,7 @@ from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
 from app import web
+from app.clients.bitrix_orders import normalize_order
 from app.catalog_db import CatalogDatabase
 from app.services.excel_product_catalog import ExcelProductCatalog
 from app.services.sales_inventory import SalesInventory
@@ -125,6 +126,23 @@ class OrdersReworkTest(unittest.TestCase):
         ):
             html = self.client.get("/app/orders").get_data(as_text=True)
         self.assertIn('data-has-selected-order="0"', html)
+
+    def test_reconciled_missing_adjustments_allow_sale_readiness(self):
+        mapping = {
+            "line:1": {"state": "mapped", "product": {"id": "1", "stock": 1}},
+            "line:2": {"state": "mapped", "product": {"id": "2", "stock": 1}},
+        }
+        for total, ready in (("41404.02", True), ("41404", False), ("41405.02", False)):
+            with self.subTest(total=total):
+                order = normalize_order({
+                    "id": 21147, "status": "D", "price": total,
+                    "customer": "Test", "phone": "Test",
+                    "products": [
+                        {"id": "1", "quantity": 1, "price": "40425"},
+                        {"id": "2", "quantity": 1, "price": "979.02"},
+                    ],
+                })
+                self.assertEqual(web.build_order_sale_readiness(order, mapping)["ready"], ready)
 
     def test_incomplete_calculation_blocks_sale_before_inventory_change(self):
         order = {
