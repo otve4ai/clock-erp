@@ -154,8 +154,9 @@
         return group;
     }
 
-    function applyOrder(context) {
-        const {table, order, keys} = context;
+    function applyOrder(context, requestedOrder) {
+        const {table, keys} = context;
+        const order = requestedOrder || context.order;
         const rows = [context.header];
         Array.from(table.tBodies).forEach((section) => rows.push(...section.rows));
         if (table.tFoot) rows.push(...table.tFoot.rows);
@@ -316,6 +317,7 @@
     function initialize(table) {
         if (managed.has(table) || table.dataset.erpColumnControls === "off" || table.closest("[data-erp-column-controls='off']")) return;
         if (root.matchMedia && root.matchMedia("(max-width: 767px)").matches) return;
+        if (table.classList.contains("orders-split-table")) return;
         if (!table.isConnected || table.hidden || table.getClientRects().length === 0) return;
         const header = headerRow(table);
         if (!header) {
@@ -373,6 +375,12 @@
                 initialize(table);
                 return;
             }
+            if (table.classList.contains("orders-split-table")) {
+                applyOrder(context, context.keys);
+                table.dataset.erpColumnsSuspended = "true";
+                return;
+            }
+            delete table.dataset.erpColumnsSuspended;
             tagCells(table, context.keys);
             applyOrder(context);
             applyWidths(context);
@@ -388,7 +396,7 @@
     function start() {
         refresh();
         const observer = new MutationObserver(queueRefresh);
-        observer.observe(document.body, {subtree: true, childList: true, attributes: true, attributeFilter: ["hidden"]});
+        observer.observe(document.body, {subtree: true, childList: true, attributes: true, attributeFilter: ["class", "hidden"]});
         root.addEventListener("pageshow", queueRefresh);
         root.addEventListener("resize", queueRefresh, {passive: true});
         root.addEventListener("pagehide", (event) => {

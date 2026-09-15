@@ -9,6 +9,12 @@ table[data-erp-column-controls="managed"] {
     max-width: none !important;
 }
 
+table.orders-split-table[data-erp-column-controls="managed"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: auto !important;
+}
+
 table[data-erp-column-controls="managed"] > thead > tr > th[data-erp-column-key] {
     position: relative;
     cursor: grab;
@@ -97,20 +103,6 @@ body.erp-column-table-resizing,
 body.erp-column-table-resizing * {
     cursor: col-resize !important;
     user-select: none !important;
-}
-
-@media (min-width: 768px) {
-    table[data-erp-column-controls="managed"] > thead > tr,
-    table[data-erp-column-controls="managed"] > tbody > tr,
-    table[data-erp-column-controls="managed"] > tfoot > tr {
-        display: table-row !important;
-    }
-
-    table[data-erp-column-controls="managed"] > thead > tr > th,
-    table[data-erp-column-controls="managed"] > tbody > tr > td,
-    table[data-erp-column-controls="managed"] > tfoot > tr > td {
-        display: table-cell !important;
-    }
 }
 
 @media (max-width: 767px) {
