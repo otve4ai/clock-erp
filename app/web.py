@@ -11572,6 +11572,17 @@ def get_sales_product_metadata(lookup, product_id, product_name):
     }
 
 
+def is_warranty_sale_product(product_name):
+    normalized_name = " ".join(
+        str(product_name or "").split()
+    ).casefold()
+    warranty_prefix = "гарантия на товар"
+    return (
+        normalized_name == warranty_prefix
+        or normalized_name.startswith(warranty_prefix + " ")
+    )
+
+
 def sale_override_value(override, source, field, *source_aliases):
     """Keep an explicit empty override instead of reviving source data."""
     if field in override:
@@ -13473,6 +13484,9 @@ def sales_page():
     sales_product_images = {}
     for sale in sales:
         sale["search_text"] = build_sales_search_text(sale, active_source)
+        sale["is_warranty_item"] = is_warranty_sale_product(
+            sale.get("product_name")
+        )
         product_id = str(sale.get("product_id") or "").strip()
         current_product = current_sale_products.get(product_id)
         product_image_url = str(
