@@ -134,11 +134,15 @@ class BackupAdminServiceTest(unittest.TestCase):
         backup = self.service.list_backups(public=False)[0]
         self.service.metadata_root.mkdir()
         self.service._metadata_path(backup["backup_id"]).write_text(json.dumps({
+            "metadata_version": 2,
             "backup_id": backup["backup_id"], "type": "manual",
             "timestamp": backup["timestamp"],
             "integrity_status": "verified", "git_commit": "a" * 40,
             "git_branch": "main", "schema_versions": {"catalog.db": 4},
             "size": path.stat().st_size,
+            "database_manifest": {"catalog.db": {"user_version": 4, "schema_digest": "a" * 64}},
+            "file_manifest": {"catalog.db": {"size": 1, "sha256": "c" * 64}},
+            "recovery_contract": "b" * 64,
         }), encoding="utf-8")
         with mock.patch.object(self.service, "service_status", return_value={"active": True}), \
              mock.patch.object(self.service, "git_status", return_value={"available": True, "history": []}), \
@@ -255,8 +259,9 @@ class BackupAdminServiceTest(unittest.TestCase):
         js = (project_root / "app/static/js/backups.js").read_text(encoding="utf-8")
         self.assertIn(".backup-operation[hidden] { display: none; }", css)
         self.assertIn(".backup-grid-primary .backup-table-wrap { max-height: 430px; overflow: auto; }", css)
-        self.assertIn("panel.hidden = !operation.active", js)
+        self.assertIn("panel.hidden = !operation.active && !persistentFailure", js)
         self.assertIn('not_checked: "Не проверен"', js)
+        self.assertIn("if (watchedOperationId) scheduleRefresh(2500)", js)
 
 
 class shutil_usage:
@@ -271,6 +276,7 @@ class BackupAdminAuthorizationTest(unittest.TestCase):
         self.original_config = dict(web.app.config)
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
+        self.maintenance_marker = root / "maintenance.json"
         backup_root = root / "backups"
         backup_root.mkdir()
         cron = root / "cron"
@@ -283,6 +289,7 @@ class BackupAdminAuthorizationTest(unittest.TestCase):
             ERP_BACKUP_ROOT=str(backup_root), ERP_BACKUP_SCRIPT="/bin/false",
             ERP_BACKUP_CRON=str(cron),
             ERP_BACKUP_REMOTE_CHECK=False,
+            ERP_MAINTENANCE_MARKER=str(self.maintenance_marker),
         )
         web.app.extensions.pop("backup_admin_service", None)
         self.store = auth.AuthStore(web.app.config["AUTH_DATABASE"])
@@ -336,6 +343,14 @@ class BackupAdminAuthorizationTest(unittest.TestCase):
         self.assertEqual(self.client.get("/app/backups").status_code, 403)
         self.assertEqual(self.client.get("/api/v1/backups/status").status_code, 403)
         self.assertEqual(self.client.post("/api/v1/backups").status_code, 403)
+        self.assertEqual(
+            self.client.post("/api/v1/backups/{}/restore".format("f" * 24)).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post("/api/v1/backups/code/{}/rollback".format("a" * 40)).status_code,
+            403,
+        )
 
     def test_destructive_get_is_absent_and_csrf_is_required(self):
         self.insert_user("backup-security@example.com", "admin")
@@ -344,6 +359,37 @@ class BackupAdminAuthorizationTest(unittest.TestCase):
         response = self.client.post("/api/v1/backups")
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.get_json()["code"], "CSRF_INVALID")
+        restore = self.client.post(
+            "/api/v1/backups/" + "f" * 24 + "/restore",
+            json={"confirmation": "ВОССТАНОВИТЬ"},
+            headers={"X-Idempotency-Key": "restore-request-1"},
+        )
+        self.assertEqual(restore.status_code, 403)
+        self.assertEqual(restore.get_json()["code"], "CSRF_INVALID")
+
+    def test_owner_can_start_validated_recovery_operation(self):
+        self.insert_user("backup-recovery-owner@example.com", "admin")
+        self.login("backup-recovery-owner@example.com")
+        fake = mock.Mock()
+        fake.start_recovery.return_value = {
+            "id": "a" * 32, "kind": "data_restore", "active": True,
+            "status": "pending",
+        }
+        with mock.patch.object(web, "_backup_admin_service", return_value=fake):
+            response = self.client.post(
+                "/api/v1/backups/" + "f" * 24 + "/restore",
+                json={"confirmation": "ВОССТАНОВИТЬ"},
+                headers={
+                    "X-CSRF-Token": self.csrf(),
+                    "X-Idempotency-Key": "restore-request-2",
+                },
+            )
+        self.assertEqual(response.status_code, 202)
+        fake.start_recovery.assert_called_once()
+        self.assertEqual(
+            fake.start_recovery.call_args.kwargs["idempotency_key"],
+            "restore-request-2",
+        )
 
     def test_unknown_backup_id_is_rejected_after_confirmation(self):
         self.insert_user("backup-unknown@example.com", "admin")
@@ -403,6 +449,14 @@ class BackupAdminAuthorizationTest(unittest.TestCase):
         self.login("backup-nav-employee@example.com")
         settings = self.client.get("/app/settings").get_data(as_text=True)
         self.assertNotIn('data-navigation-key="backups"', settings)
+
+    def test_maintenance_blocks_business_routes_but_keeps_recovery_status(self):
+        self.insert_user("backup-maintenance@example.com", "admin")
+        self.login("backup-maintenance@example.com")
+        self.maintenance_marker.write_text("{}", encoding="utf-8")
+        self.assertEqual(self.client.get("/app/settings").status_code, 503)
+        self.assertEqual(self.client.get("/api/v1/backups/status").status_code, 200)
+        self.assertEqual(self.client.post("/api/v1/backups").status_code, 503)
 
 
 if __name__ == "__main__":

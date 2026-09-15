@@ -331,11 +331,42 @@ app.wsgi_app = ProxyFix(
     x_proto=TRUSTED_PROXY_COUNT,
     x_host=TRUSTED_PROXY_COUNT,
 )
+
+
+@app.before_request
+def enforce_recovery_maintenance():
+    """Block business traffic while the out-of-process helper owns the data."""
+    marker = Path(app.config.get(
+        "ERP_MAINTENANCE_MARKER", "/run/clock-erp-maintenance.json"
+    ))
+    if not marker.is_file():
+        return None
+    allowed_gets = {"/login", "/app/backups", "/api/v1/backups/status"}
+    if request.method == "GET" and (
+        request.path in allowed_gets or request.path.startswith("/static/")
+    ):
+        return None
+    if request.path.startswith("/api/"):
+        return api_error(
+            "ERP_MAINTENANCE",
+            "ERP временно недоступна — выполняется восстановление.",
+            503,
+        )
+    return render_template("maintenance.html"), 503
+
+
 configure_auth(app, PROJECT_ROOT)
 from app.request_timing import register_order_request_timing
 register_order_request_timing(app)
 from app.orders_response import register_orders_response
 register_orders_response(app)
+
+
+app.config.setdefault(
+    "ERP_SOURCE_ROOT",
+    os.getenv("ERP_SOURCE_ROOT", "").strip()
+    or str(Path("/opt/clock-erp") if Path("/opt/clock-erp/.git").is_dir() else PROJECT_ROOT),
+)
 app.config.setdefault(
     "TASKS_DATABASE",
     os.getenv("ERP_TASKS_DATABASE", "").strip()
@@ -375,7 +406,7 @@ app.config.setdefault(
     os.getenv("ERP_BACKUP_ROOT", "").strip()
     or str(
         Path("/opt/clock-erp-backups")
-        if PROJECT_ROOT == Path("/opt/clock-erp")
+        if Path(app.config["ERP_SOURCE_ROOT"]) == Path("/opt/clock-erp")
         else PROJECT_ROOT / "instance" / "backups"
     ),
 )
@@ -394,6 +425,30 @@ app.config.setdefault(
     or "/etc/cron.d/clock-erp-backup-retention",
 )
 app.config.setdefault("ERP_BACKUP_REMOTE_CHECK", True)
+app.config.setdefault(
+    "ERP_RECOVERY_HELPER",
+    os.getenv("ERP_RECOVERY_HELPER", "").strip()
+    or str(
+        Path("/usr/local/sbin/clock-erp-recovery")
+        if Path("/usr/local/sbin/clock-erp-recovery").is_file()
+        else PROJECT_ROOT / "scripts" / "clock_erp_recovery.py"
+    ),
+)
+app.config.setdefault(
+    "ERP_RECOVERY_CONTRACT",
+    os.getenv("ERP_RECOVERY_CONTRACT", "").strip()
+    or str(PROJECT_ROOT / "ops" / "recovery-schema-contract.json"),
+)
+app.config.setdefault(
+    "ERP_CURRENT_RELEASE",
+    os.getenv("ERP_CURRENT_RELEASE", "").strip() or "/opt/clock-erp-current",
+)
+app.config.setdefault(
+    "ERP_MAINTENANCE_MARKER",
+    os.getenv("ERP_MAINTENANCE_MARKER", "").strip()
+    or "/run/clock-erp-maintenance.json",
+)
+
 
 # Gunicorn imports this module once per worker. Pay the one required schema
 # verification during worker startup so the first ERP screen never inherits it.
@@ -24998,21 +25053,28 @@ def _backup_owner_required():
 
 def _backup_admin_service():
     cache_key = (
+        str(app.config["ERP_SOURCE_ROOT"]),
         str(app.config["ERP_BACKUP_ROOT"]),
         str(app.config["ERP_BACKUP_SCRIPT"]),
         str(app.config["ERP_BACKUP_CRON"]),
         bool(app.config["ERP_BACKUP_REMOTE_CHECK"]),
+        str(app.config["ERP_RECOVERY_HELPER"]),
+        str(app.config["ERP_RECOVERY_CONTRACT"]),
+        str(app.config["ERP_CURRENT_RELEASE"]),
     )
     cached = app.extensions.get("backup_admin_service")
     if cached and cached[0] == cache_key:
         return cached[1]
     service = BackupAdminService(
-        PROJECT_ROOT,
+        app.config["ERP_SOURCE_ROOT"],
         app.config["ERP_BACKUP_ROOT"],
         app.config["ERP_BACKUP_SCRIPT"],
         service_name="clock-erp",
         cron_path=app.config["ERP_BACKUP_CRON"],
         remote_check=app.config["ERP_BACKUP_REMOTE_CHECK"],
+        recovery_helper=app.config["ERP_RECOVERY_HELPER"],
+        recovery_contract=app.config["ERP_RECOVERY_CONTRACT"],
+        current_release=app.config["ERP_CURRENT_RELEASE"],
     )
     app.extensions["backup_admin_service"] = (cache_key, service)
     return service
@@ -25088,13 +25150,30 @@ def api_backup_restore(backup_id):
         )
         return api_error("RESTORE_CONFIRMATION_REQUIRED", "Для восстановления введите ВОССТАНОВИТЬ.", 422)
     try:
-        _backup_admin_service().blocked_restore_attempt(
-            _backup_actor(), "data_restore", backup_id=backup_id
+        operation = _backup_admin_service().start_recovery(
+            _backup_actor(), "data_restore", backup_id=backup_id,
+            idempotency_key=request.headers.get("X-Idempotency-Key"),
         )
+        return api_success(operation, status=202)
     except BackupNotFoundError as error:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "data_restore", backup_id=backup_id,
+            reason="unknown backup id",
+        )
         return api_error("BACKUP_NOT_FOUND", str(error), 404)
     except BackupAdminError as error:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "data_restore", backup_id=backup_id,
+            reason=type(error).__name__,
+        )
         return api_error("RESTORE_BLOCKED", str(error), 409)
+    except Exception as error:
+        app.logger.exception("Data restore could not be started")
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "data_restore", backup_id=backup_id,
+            reason=type(error).__name__,
+        )
+        return api_error("RESTORE_FAILED", "Не удалось запустить восстановление данных.", 503)
 
 
 @app.post("/api/v1/backups/code/<commit>/rollback")
@@ -25124,13 +25203,30 @@ def api_backup_code_rollback(commit):
             409,
         )
     try:
-        _backup_admin_service().blocked_restore_attempt(
-            _backup_actor(), "code_rollback", target_commit=commit
+        operation = _backup_admin_service().start_recovery(
+            _backup_actor(), "code_rollback", target_commit=commit,
+            idempotency_key=request.headers.get("X-Idempotency-Key"),
         )
+        return api_success(operation, status=202)
     except BackupNotFoundError as error:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "code_rollback", target_commit=commit,
+            reason="unknown commit",
+        )
         return api_error("COMMIT_NOT_FOUND", str(error), 404)
     except BackupAdminError as error:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "code_rollback", target_commit=commit,
+            reason=type(error).__name__,
+        )
         return api_error("ROLLBACK_BLOCKED", str(error), 409)
+    except Exception as error:
+        app.logger.exception("Code rollback could not be started")
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "code_rollback", target_commit=commit,
+            reason=type(error).__name__,
+        )
+        return api_error("ROLLBACK_FAILED", "Не удалось запустить откат кода.", 503)
 
 
 @app.post("/api/v1/backups/<backup_id>/restore-system")
@@ -25164,14 +25260,31 @@ def api_backup_restore_system(backup_id):
                 "Полное восстановление заблокировано: совместимость кода и данных не подтверждена.",
                 409,
             )
-        _backup_admin_service().blocked_restore_attempt(
+        operation = _backup_admin_service().start_recovery(
             _backup_actor(), "full_restore", backup_id=backup_id,
             target_commit=backup.get("git_commit"),
+            idempotency_key=request.headers.get("X-Idempotency-Key"),
         )
+        return api_success(operation, status=202)
     except BackupNotFoundError as error:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "full_restore", backup_id=backup_id,
+            reason="unknown restore point",
+        )
         return api_error("RESTORE_POINT_NOT_FOUND", str(error), 404)
     except BackupAdminError as error:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "full_restore", backup_id=backup_id,
+            reason=type(error).__name__,
+        )
         return api_error("FULL_RESTORE_BLOCKED", str(error), 409)
+    except Exception as error:
+        app.logger.exception("Full restore could not be started")
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "full_restore", backup_id=backup_id,
+            reason=type(error).__name__,
+        )
+        return api_error("FULL_RESTORE_FAILED", "Не удалось запустить полное восстановление.", 503)
 
 
 @app.delete("/api/v1/mail/settings")
