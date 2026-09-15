@@ -734,9 +734,24 @@ else
     PREVIOUS_RELEASE="$PROJECT_DIR"
 fi
 APPLICATION_RELEASE="$RELEASE_ROOT/$CURRENT_COMMIT"
+if [[ -d "$APPLICATION_RELEASE" ]] && {
+    [[ ! -L "$APPLICATION_RELEASE/instance" ]] ||
+    [[ "$(readlink -f "$APPLICATION_RELEASE/instance")" != "$PROJECT_DIR/instance" ]] ||
+    [[ ! -L "$APPLICATION_RELEASE/venv" ]] ||
+    [[ "$(readlink -f "$APPLICATION_RELEASE/venv")" != "$PROJECT_DIR/venv" ]];
+}; then
+    [[ "$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)" != "$APPLICATION_RELEASE" ]] \
+        || { printf 'RELEASE_RUNTIME_FAILED: active release has invalid runtime links\n' >&2; false; }
+    incomplete_release="$BACKUP_DIR/temporary/incomplete-release-${CURRENT_COMMIT}-$(date +%Y%m%d-%H%M%S)"
+    mv "$APPLICATION_RELEASE" "$incomplete_release"
+    printf 'RELEASE_RUNTIME_QUARANTINED=%s\n' "$incomplete_release"
+fi
 if [[ ! -d "$APPLICATION_RELEASE" ]]; then
     release_pending="$(mktemp -d "$RELEASE_ROOT/.release-XXXXXX")"
     git archive "$CURRENT_COMMIT" | tar -x -C "$release_pending"
+    if [[ -e "$release_pending/instance" || -L "$release_pending/instance" ]]; then
+        rm -rf -- "$release_pending/instance"
+    fi
     ln -s "$PROJECT_DIR/instance" "$release_pending/instance"
     ln -s "$PROJECT_DIR/venv" "$release_pending/venv"
     if [[ -f "$PROJECT_DIR/.env" ]]; then

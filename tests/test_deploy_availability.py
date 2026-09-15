@@ -171,6 +171,16 @@ class DeployAvailabilityTest(unittest.TestCase):
         self.assertIn("secrets.token_urlsafe", smoke)
         self.assertIn("app.config.update(TESTING=True, AUTH_TESTING=True)", smoke)
 
+    def test_release_replaces_tracked_instance_directory_with_runtime_link(self):
+        script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        release = script.index('APPLICATION_RELEASE="$RELEASE_ROOT/$CURRENT_COMMIT"')
+        remove_instance = script.index('rm -rf -- "$release_pending/instance"', release)
+        link_instance = script.index(
+            'ln -s "$PROJECT_DIR/instance" "$release_pending/instance"', release
+        )
+        self.assertLess(remove_instance, link_instance)
+        self.assertIn("RELEASE_RUNTIME_QUARANTINED", script)
+
     def test_customer_backfill_does_not_expand_an_empty_array_on_bash_42(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         self.assertNotIn('customer_rebuild_argument[@]', script)
