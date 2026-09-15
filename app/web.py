@@ -5130,6 +5130,227 @@ def inventory_cancel_api(inventory_id):
     })
 
 
+PRODUCT_REPORT_SORT_FIELDS = {
+    "name", "stock", "price", "article", "brand", "category", "model", "cell",
+}
+
+
+def _product_report_parameters():
+    def valid_id(name):
+        value = (request.args.get(name) or "").strip()
+        return value if value.isdigit() else ""
+
+    def valid_date(name):
+        value = (request.args.get(name) or "").strip()
+        try:
+            time.strptime(value, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            return ""
+        return value
+
+    stock_state = (request.args.get("stock_state") or "all").strip()
+    if stock_state not in {"all", "in", "out"}:
+        stock_state = "all"
+    activity = (request.args.get("activity") or "active").strip()
+    if activity not in {"all", "active", "inactive"}:
+        activity = "active"
+    check_state = (request.args.get("check_state") or "all").strip()
+    if check_state not in {"all", "unchecked", "partial", "complete"}:
+        check_state = "all"
+    if stock_state != "out":
+        check_state = "all"
+    sort_by = (request.args.get("sort_by") or "name").strip()
+    if sort_by not in PRODUCT_REPORT_SORT_FIELDS:
+        sort_by = "name"
+    sort_dir = (request.args.get("sort_dir") or "asc").strip()
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "asc"
+    date_from = valid_date("date_from")
+    date_to = valid_date("date_to")
+    if date_from and date_to and date_from > date_to:
+        date_from, date_to = date_to, date_from
+    try:
+        page = max(1, int(request.args.get("page") or 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = int(request.args.get("per_page") or 50)
+    except (TypeError, ValueError):
+        per_page = 50
+    if per_page not in {50, 100, 200}:
+        per_page = 50
+    return {
+        "query": (request.args.get("q") or "").strip(),
+        "brand_id": valid_id("brand_id") or None,
+        "category_id": valid_id("category_id") or None,
+        "model_id": valid_id("model_id") or None,
+        "cell": (request.args.get("cell") or "").strip(),
+        "stock_state": stock_state, "check_state": check_state,
+        "activity": activity, "created_from": date_from,
+        "created_to": date_to, "sort_by": sort_by, "sort_dir": sort_dir,
+        "page": page, "per_page": per_page,
+    }
+
+
+def _product_report_catalog_filters(parameters):
+    return {
+        key: parameters[key]
+        for key in (
+            "query", "brand_id", "category_id", "model_id", "cell",
+            "stock_state", "check_state", "activity", "created_from",
+            "created_to", "sort_by", "sort_dir",
+        )
+    }
+
+
+def _normalize_product_report_taxonomy(parameters):
+    shared_catalog = SharedCatalog()
+    brands = shared_catalog.list_brands(limit=500)
+    brand_ids = {str(item.get("id") or "") for item in brands}
+    if parameters["brand_id"] not in brand_ids:
+        parameters["brand_id"] = None
+        parameters["category_id"] = None
+        parameters["model_id"] = None
+    categories = shared_catalog.list_category_options(
+        brand_id=parameters["brand_id"], limit=500, only_used_by_brand=True,
+    ) if parameters["brand_id"] else []
+    category_ids = {
+        str(category_id)
+        for item in categories
+        for category_id in [item.get("id"), *(item.get("category_ids") or [])]
+        if category_id not in (None, "")
+    }
+    if parameters["category_id"] not in category_ids:
+        parameters["category_id"] = None
+        parameters["model_id"] = None
+    models = shared_catalog.list_model_options(
+        parameters["brand_id"], parameters["category_id"], limit=500,
+    ) if parameters["brand_id"] and parameters["category_id"] else []
+    model_ids = {str(item.get("id") or "") for item in models}
+    if parameters["model_id"] not in model_ids:
+        parameters["model_id"] = None
+    return brands, categories, models
+
+
+def _product_report_excel_value(value):
+    if isinstance(value, str) and value[:1] in {"=", "+", "-", "@"}:
+        return "'" + value
+    return value
+
+
+@app.route("/app/products/report")
+def products_report_page():
+    parameters = _product_report_parameters()
+    brands, categories, models = _normalize_product_report_taxonomy(parameters)
+    catalog_service = ExcelProductCatalog()
+    result = catalog_service.list_products(
+        **_product_report_catalog_filters(parameters),
+        page=parameters["page"], per_page=parameters["per_page"],
+        include_facets=False, include_cell_item_names=False,
+    )
+    items = build_excel_warehouse_items(result["items"])
+    for item, raw in zip(items, result["items"]):
+        item["status_label"] = "Активен" if raw.get("active") else "Неактивен"
+    facet_result = catalog_service.list_products(
+        page=1, per_page=1, include_facets=True, include_cell_item_names=False,
+    )
+    cell_options = [item["cell"] for item in facet_result.get("cell_groups", [])]
+    pagination = build_erp_pagination(
+        "products_report_page", result["total"], result["page"],
+        parameters["per_page"], per_page_options=(50, 100, 200),
+    )
+    query_without_page = {
+        key: value for key, value in request.args.items()
+        if key not in {"page", "per_page"} and value != ""
+    }
+    sort_urls = {
+        field: url_for(
+            "products_report_page", **query_without_page, sort_by=field,
+            sort_dir=("desc" if parameters["sort_by"] == field
+                      and parameters["sort_dir"] == "asc" else "asc"),
+            per_page=parameters["per_page"],
+        )
+        for field in PRODUCT_REPORT_SORT_FIELDS
+    }
+    return render_template(
+        "products_report.html", items=items, result=result,
+        parameters=parameters, brands=brands, categories=categories,
+        models=models, cell_options=cell_options, pagination=pagination,
+        sort_urls=sort_urls,
+        excel_url=url_for("products_report_excel", **query_without_page),
+        format_stock_number=format_stock_number,
+    )
+
+
+@app.route("/app/products/report.xlsx")
+def products_report_excel():
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    parameters = _product_report_parameters()
+    _normalize_product_report_taxonomy(parameters)
+    filters = _product_report_catalog_filters(parameters)
+    catalog_service = ExcelProductCatalog()
+    page_size = 1000
+    first = catalog_service.list_products(
+        **filters, page=1, per_page=page_size, include_facets=False,
+        include_cell_item_names=False,
+    )
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Товары"
+    headers = (
+        "Фото", "Название", "Остаток", "Цена", "Артикул", "Бренд",
+        "Категория", "Модель", "Статус", "Штрих-код", "Ячейка",
+    )
+    sheet.append(headers)
+    page, result = 1, first
+    while True:
+        for product in result["items"]:
+            item = build_excel_warehouse_items([product])[0]
+            sheet.append([
+                _product_report_excel_value(item.get("thumbnail_url") or ""),
+                _product_report_excel_value(item.get("name") or ""),
+                item.get("stock") or 0, item.get("price"),
+                _product_report_excel_value(item.get("article") or ""),
+                _product_report_excel_value(item.get("brand") or ""),
+                _product_report_excel_value(item.get("category") or ""),
+                _product_report_excel_value(item.get("model") or ""),
+                "Активен" if product.get("active") else "Неактивен",
+                _product_report_excel_value(item.get("barcode") or ""),
+                _product_report_excel_value(item.get("cell") or ""),
+            ])
+        if page >= result["pages"]:
+            break
+        page += 1
+        result = catalog_service.list_products(
+            **filters, page=page, per_page=page_size, include_facets=False,
+            include_cell_item_names=False,
+        )
+    fill = PatternFill("solid", fgColor="1D4ED8")
+    for cell in sheet[1]:
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.fill = fill
+        cell.alignment = Alignment(horizontal="center")
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = "A1:K{}".format(max(1, sheet.max_row))
+    for column, width in zip("ABCDEFGHIJK", (36, 42, 12, 14, 20, 20, 24, 20, 14, 22, 15)):
+        sheet.column_dimensions[column].width = width
+    stream = io.BytesIO()
+    workbook.save(stream)
+    stream.seek(0)
+    filename = "products_report_{}.xlsx".format(
+        datetime.now(ERP_TIMEZONE).date().isoformat()
+    )
+    response = send_file(
+        stream,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True, download_name=filename,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.route("/warehouse")
 @app.route("/app/products")
 def warehouse_page():

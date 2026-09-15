@@ -1,10 +1,20 @@
-{% macro products_workspace_header(active_view, product_metrics, add_button=false, export_filtered_url='') %}
+{% macro products_workspace_header(active_view, product_metrics, add_button=false, export_filtered_url='', report_url='') %}
 <header class="erp-workspace-header products-workspace-header">
     <div class="erp-workspace-heading">
         <h1>Товары</h1>
         <p>Каталог и складские остатки</p>
     </div>
     <div class="erp-workspace-actions products-workspace-actions">
+        {% if report_url %}
+            <a class="products-workspace-button is-report" href="{{ report_url }}">
+                <svg class="products-workspace-report-icon" viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M5.5 2.75h5.75l3.25 3.5v10.5a.5.5 0 0 1-.5.5H5.5a.5.5 0 0 1-.5-.5V3.25a.5.5 0 0 1 .5-.5Z"></path>
+                    <path d="M11 2.75v3.5h3.5"></path>
+                    <path d="M7.5 10h4.5M7.5 13h4.5"></path>
+                </svg>
+                <span>Отчёт</span>
+            </a>
+        {% endif %}
         {% if add_button %}
             <div class="products-add-menu">
                 <button id="openWarehouseAddModal" class="products-workspace-button is-primary" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleProductsAddMenu(event)">Добавить товар ▾</button>
