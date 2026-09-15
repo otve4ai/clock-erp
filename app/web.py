@@ -61,6 +61,7 @@ from app.services.bitrix_catalog_importer import BitrixCatalogImporter
 from app.services.bitrix_erp_product_sync import (
     BitrixERPProductSync,
     enrichment_from_product,
+    single_import_quantity,
 )
 from app.services.audit_journal import AuditJournal
 from app.services.order_presentation import present_order, status_key, status_label, navigation_counts
@@ -175,7 +176,6 @@ from app.services.out_of_stock import OutOfStockChecks
 from app.services.product_excel_export import ProductExcelExport
 from app.services.receipt_inventory import (
     ReceiptInventory,
-    positive_integer as positive_receipt_integer,
 )
 from app.services.shared_catalog import (
     CatalogReferenceError,
@@ -19602,7 +19602,7 @@ def api_bitrix_product_import(bitrix_id):
     store = ProductImageStore(database)
     prepared = None
     try:
-        quantity = None if supply_id else positive_receipt_integer(payload.get("quantity"), "Количество")
+        quantity = None if supply_id else single_import_quantity(payload.get("quantity"), action)
         client = _bitrix_single_client()
         product = client.get_product(bitrix_id)
         if product is None:

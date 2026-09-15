@@ -140,8 +140,12 @@
 <header><div><h2 id="add-item-heading">Добавить товар в поставку</h2><p class="picker-subtitle">Выберите товар ERP, добавьте из Bitrix или создайте самостоятельно</p></div><button id="close-add-item" class="button" aria-label="Закрыть добавление">×</button></header>
 <form id="add-item-form" class="picker-form">
 <div class="picker-search">
+<div class="supply-picker-toolbar">
+<div class="supply-picker-source">
 <label for="supply-product-source">Источник</label><select id="supply-product-source"><option value="erp">Выбрать существующий товар ERP</option><option value="bitrix">Добавить из Bitrix</option></select>
+</div>
 <button id="create-manual-supply-product" class="button" type="button">Создать самостоятельно</button>
+</div>
 <input id="supply-product-search" type="search" placeholder="Поиск товара по названию, артикулу или Bitrix ID" aria-label="Поиск товара по названию, артикулу или Bitrix ID" autocomplete="off">
 <div id="supply-search-status" class="picker-status" role="status" aria-live="polite"></div>
 </div>

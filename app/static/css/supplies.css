@@ -260,6 +260,46 @@ details {
     border-radius: 8px;
   }
 }
+#add-item-dialog .supply-picker-toolbar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-bottom: 9px;
+}
+#add-item-dialog .supply-picker-source {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  flex: 0 1 340px;
+  min-width: 0;
+}
+#add-item-dialog .supply-picker-source label {
+  margin: 0;
+}
+#add-item-dialog #supply-product-source,
+#add-item-dialog #create-manual-supply-product {
+  box-sizing: border-box;
+  height: 45px;
+  margin: 0;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+#add-item-dialog #supply-product-source {
+  width: 100%;
+  min-width: 0;
+}
+#add-item-dialog #supply-product-search {
+  height: 45px;
+}
+@media (max-width: 600px) {
+  #add-item-dialog .supply-picker-source,
+  #add-item-dialog #create-manual-supply-product {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+}
 [hidden] {
   display: none !important;
 }
