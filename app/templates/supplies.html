@@ -15,7 +15,7 @@
 <script defer src="{{ url_for('static', filename='js/supplies.js') }}">
 </script>
 </head>
-<body class="receipts-page">
+<body class="receipts-page" data-is-admin="{{ '1' if not current_user or current_user.role == 'admin' else '0' }}">
 <div class="app">
 {% include '_sidebar.html' %}
 <main class="main" id="main-content" tabindex="-1">
@@ -131,9 +131,46 @@
 <div id="dialog-message" role="alert" aria-atomic="true" hidden>
 </div>
 <footer>
-<button id="delete-supply" class="button danger">Удалить черновик</button>
+<button id="delete-supply" class="button danger">Удалить поставку</button>
 <button id="save-supply" class="button">Сохранить черновик</button>
 <button id="post-supply" class="button primary erp-primary-action">Провести поставку</button>
+</footer>
+</dialog>
+<dialog id="delete-confirm-dialog" class="delete-confirm-dialog" aria-labelledby="delete-confirm-heading">
+<header>
+<div class="delete-confirm-title"><span class="delete-icon" aria-hidden="true">🗑</span><h2 id="delete-confirm-heading">Удалить поставку?</h2></div>
+<button class="button" data-close-delete aria-label="Закрыть">×</button>
+</header>
+<p id="delete-confirm-text">Вы собираетесь удалить проведённую поставку. ERP проверит все позиции и покажет, как удаление повлияет на товары и продажи.</p>
+<div id="delete-confirm-message" role="alert" hidden></div>
+<footer>
+<button class="button" data-close-delete>Отмена</button>
+<button id="continue-delete" class="button danger">Продолжить</button>
+</footer>
+</dialog>
+<dialog id="delete-preview-dialog" class="delete-preview-dialog" aria-labelledby="delete-preview-heading">
+<header>
+<div><h2 id="delete-preview-heading">Что произойдёт после удаления</h2><p>Мы проверили все позиции этой поставки и показали, как удаление повлияет на остатки товаров.</p></div>
+<button class="button" data-close-preview aria-label="Закрыть">×</button>
+</header>
+<div id="delete-preview-warning" class="delete-warning" hidden></div>
+<div class="table-scroll delete-preview-table">
+<table aria-label="Проверка позиций перед удалением поставки">
+<thead><tr><th>Товар</th><th>Было принято</th><th>Текущий остаток</th><th>После удаления</th><th>Статус</th></tr></thead>
+<tbody id="delete-preview-items"></tbody>
+</table>
+</div>
+<section class="delete-totals" aria-labelledby="delete-totals-heading">
+<h3 id="delete-totals-heading">Итого</h3>
+<div><strong id="delete-total-positions">0</strong><span>позиций<br>будут уменьшены</span></div>
+<div><strong id="delete-total-quantity">0</strong><span>шт.<br>со склада</span></div>
+<div><strong id="delete-total-skipped">0</strong><span>позиций<br>пропущено</span></div>
+</section>
+<div class="delete-info">После удаления поставки запись о ней будет удалена из списка. Это действие будет зафиксировано в журнале системы.</div>
+<div id="delete-preview-message" role="alert" hidden></div>
+<footer class="delete-preview-actions">
+<button class="button" data-close-preview>Отмена</button>
+<button id="confirm-delete" class="button danger">Удалить поставку</button>
 </footer>
 </dialog>
 <dialog id="add-item-dialog" class="product-picker" aria-labelledby="add-item-heading">

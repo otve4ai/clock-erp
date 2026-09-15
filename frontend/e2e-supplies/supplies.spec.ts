@@ -33,7 +33,7 @@ test('supply posts two local movements and remains read-only', async ({ page }) 
   await page.locator('#post-supply').click();
   await expect(page.locator('#dialog-message')).toContainText('Поставка проведена');
   await expect(page.locator('#post-supply')).toBeHidden();
-  await expect(page.locator('#title')).toBeDisabled();
+  await expect(page.locator('#title')).toBeEnabled();
   await expect(page.locator('[data-quantity]')).toHaveCount(0);
   await page.locator('#close-supply').click();
   await page.locator('[data-tab="all"]').click();
@@ -41,7 +41,7 @@ test('supply posts two local movements and remains read-only', async ({ page }) 
   await page.locator('#filters').getByRole('button', { name: 'Найти', exact: true }).click();
   await expect(page.locator('#records tbody tr')).toHaveCount(2);
   await page.locator('#records [data-open]').first().click();
-  await expect(page.locator('#title')).toBeDisabled();
+  await expect(page.locator('#title')).toBeEnabled();
   await page.locator('#close-supply').click();
   for (const width of [1440, 1024, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
@@ -92,6 +92,9 @@ test('draft validation, duplicate prevention, search and pagination', async ({ p
   await expect(page.locator('#dialog-message')).toContainText('Черновик сохранён');
   await page.screenshot({ path: '/tmp/clock-erp-supplies-desktop.png', fullPage: true });
   await page.locator('#delete-supply').click();
+  await page.locator('#continue-delete').click();
+  await expect(page.locator('#delete-preview-dialog')).toContainText('Черновик будет удалён');
+  await page.locator('#confirm-delete').click();
   await expect(page.locator('#supply-dialog')).not.toBeVisible();
   await page.locator('[data-tab="cancellations"]').click();
   await page.locator('#filters').getByRole('button', { name: 'Сбросить' }).click();
@@ -125,6 +128,73 @@ test('period filter uses the displayed local calendar day', async ({ page }) => 
   await page.locator('#filters').getByRole('button', { name: 'Найти', exact: true }).click();
   await expect(page.locator('#count')).toHaveText('1');
   await expect(page.locator('#records')).toContainText('08.09.2026');
+});
+
+test('admin edits and deletes a posted supply through the two-stage preview', async ({
+  page,
+  request,
+}) => {
+  const product = (await (await request.post('/api/v1/receipts/bitrix/90101')).json()).data;
+  const supply = (
+    await (
+      await request.post('/api/v1/receipts/supplies', {
+        data: {
+          title: 'Delete preview smoke',
+          comment: 'Before edit',
+          items: [{ product_id: product.id, quantity: 2 }],
+        },
+      })
+    ).json()
+  ).data;
+  await request.post(`/api/v1/receipts/supplies/${supply.id}/post`);
+
+  await page.goto('/app/receipts?tab=supplies');
+  await page
+    .locator('#records tr')
+    .filter({ hasText: 'Delete preview smoke' })
+    .getByRole('button', { name: 'Открыть' })
+    .click();
+  await page.locator('#title').fill('Delete preview edited');
+  await page.locator('#comment').fill('Only neutral fields changed');
+  await page.locator('#save-supply').click();
+  await expect(page.locator('#dialog-message')).toContainText('Остаток не изменён');
+
+  await page.locator('#delete-supply').click();
+  await expect(page.locator('#delete-confirm-dialog')).toBeVisible();
+  await page.locator('#delete-confirm-dialog [data-close-delete]').last().click();
+  await expect(page.locator('#delete-confirm-dialog')).not.toBeVisible();
+  await page.locator('#delete-supply').click();
+  await page.locator('#continue-delete').click();
+  await expect(page.locator('#delete-preview-dialog')).toBeVisible();
+  await expect(page.locator('#delete-preview-dialog')).toContainText('Остаток будет уменьшен');
+  await expect(page.locator('#delete-preview-items tr')).toHaveCount(1);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(
+    false,
+  );
+  const dialog = await page.locator('#delete-preview-dialog').boundingBox();
+  const footer = await page.locator('.delete-preview-actions').boundingBox();
+  expect(dialog && dialog.width <= 390).toBe(true);
+  expect(footer && footer.y + footer.height <= 845).toBe(true);
+
+  let deleteRequests = 0;
+  page.on('request', (event) => {
+    if (
+      event.method() === 'DELETE' &&
+      event.url().endsWith(`/supplies/${encodeURIComponent(supply.id)}`)
+    ) {
+      deleteRequests += 1;
+    }
+  });
+  await page.locator('#confirm-delete').evaluate((button: HTMLButtonElement) => {
+    button.click();
+    button.click();
+  });
+  await expect(page.locator('#delete-preview-dialog')).not.toBeVisible();
+  expect(deleteRequests).toBe(1);
+  await expect(page.locator('#message')).toContainText('Поставка удалена');
+  await expect(page.locator('#records')).not.toContainText('Delete preview edited');
 });
 
 test('append goods to a posted supply using the shared ERP picker', async ({ page, request }) => {
@@ -177,7 +247,9 @@ test('append goods to a posted supply using the shared ERP picker', async ({ pag
   expect(writes.every((url) => url.endsWith('/items'))).toBe(true);
   await page.locator('#add-item').click();
   await page.locator('#supply-product-search').fill('NONEXISTENT-SUPPLY-SKU');
-  await expect(page.locator('#add-item-form')).toContainText('Выберите источник Bitrix для поиска и импорта');
+  await expect(page.locator('#add-item-form')).toContainText(
+    'Выберите источник Bitrix для поиска и импорта',
+  );
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(

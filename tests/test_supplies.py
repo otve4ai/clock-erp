@@ -61,8 +61,50 @@ class SupplyTest(unittest.TestCase):
         self.engine.post(d['id'])
         self.assertEqual(self.stock(ps[0]),8)
         self.assertEqual(len(self.engine.movements()),3)
-        for fn in [lambda:self.engine.delete(d['id']),lambda:self.engine.update(d['id'],'x','',[])]:
-            with self.assertRaises(SupplyError): fn()
+        with self.assertRaises(SupplyError):
+            self.engine.update(d['id'], 'x', '', [])
+
+    def test_posted_supply_preview_details_and_delete_use_shared_inventory(self):
+        product = self.product(3)
+        draft = self.draft([(product, 5)])
+        self.engine.post(draft['id'], 'Poster')
+        preview = self.engine.preview_delete(draft['id'])
+        self.assertEqual(preview['items'][0]['status'], 'WILL_DECREASE')
+        updated = self.engine.update_details(
+            draft['id'], 'Новое название', 'Новый комментарий', 'Максим'
+        )
+        self.assertEqual((updated['title'], updated['comment']), ('Новое название', 'Новый комментарий'))
+        result = self.engine.delete(draft['id'], 'Максим')
+        self.assertEqual(result['decreased_quantity'], 5)
+        self.assertEqual(self.stock(product), 3)
+        with self.assertRaises(SupplyError):
+            self.engine.get(draft['id'])
+        with self.db.connect() as connection:
+            actions = [row[0] for row in connection.execute(
+                "SELECT action FROM erp_audit_events WHERE entity_type='receipt' AND entity_id=? ORDER BY id",
+                (draft['id'],),
+            )]
+            movements = connection.execute(
+                'SELECT COUNT(*) FROM catalog_stock_movements WHERE receipt_id=? OR source_id=?',
+                (draft['id'], draft['id']),
+            ).fetchone()[0]
+        self.assertIn('updated', actions)
+        self.assertIn('deleted', actions)
+        self.assertEqual(movements, 0)
+
+    def test_later_sale_keeps_current_stock_when_supply_is_deleted(self):
+        product = self.product(3)
+        draft = self.draft([(product, 5)])
+        self.engine.post(draft['id'])
+        SalesInventory(self.db).create_sale(
+            {'id': 'sale-after-supply', 'source': 'Tictactoy', 'order_number': '22001'},
+            product, 1, 100,
+        )
+        preview = self.engine.preview_delete(draft['id'])
+        self.assertEqual(preview['items'][0]['status'], 'SKIPPED_DUE_TO_LATER_SALE')
+        self.engine.delete(draft['id'])
+        self.assertEqual(self.stock(product), 7)
+        self.assertIsNotNone(SalesInventory(self.db).get_sale('sale-after-supply'))
 
     def test_concurrent_double_post(self):
         p = self.product()

@@ -188,11 +188,12 @@ class UnifiedCatalogApiTest(unittest.TestCase):
         self.assertEqual(cancelled.status_code,200)
         self.assertEqual(self.stock(),10)
         self.assertEqual(self.client.patch('/api/v1/receipts/supplies/'+draft['id'],json={'title':'x','items':[]}).status_code,422)
-        self.assertEqual(self.client.delete('/api/v1/receipts/supplies/'+draft['id']).status_code,422)
+        self.assertEqual(self.client.delete('/api/v1/receipts/supplies/'+draft['id']).status_code,200)
+        self.assertEqual(self.stock(),0)
         movements=self.client.get('/api/v1/products/{}/movements'.format(product['id'])).get_json()['data']
-        self.assertEqual({m['type'] for m in movements},{'receipt','sale','cancellation'})
+        self.assertEqual({m['type'] for m in movements},{'sale','cancellation'})
         rows=self.client.get('/api/v1/receipts/movements').get_json()['data']
-        self.assertEqual({m['source_type'] for m in rows},{'supply','sale_cancellation'})
+        self.assertEqual({m['source_type'] for m in rows},{'sale_cancellation'})
         self.moysklad_class.assert_not_called()
 
 
@@ -235,8 +236,8 @@ class UnifiedCatalogApiTest(unittest.TestCase):
         )
         self.client.delete("/api/v1/sales/{}".format(sale["id"]))
         self.assertEqual(brand_stock(), 10)
-        self.assertEqual(self.client.delete("/api/v1/receipts/supplies/{}".format(receipt["id"])).status_code,422)
-        self.assertEqual(brand_stock(), 10)
+        self.assertEqual(self.client.delete("/api/v1/receipts/supplies/{}".format(receipt["id"])).status_code,200)
+        self.assertEqual(brand_stock(), 0)
 
     def test_receipt_requires_positive_integer_quantity(self):
         from app.services.supplies import SupplyEngine

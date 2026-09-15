@@ -47,7 +47,7 @@ FIELD_WHITELISTS = {
         "archive_status", "archived_at",
     },
     "receipt": {
-        "status", "quantity", "document", "comment", "receipt_date",
+        "status", "quantity", "document", "name", "title", "comment", "receipt_date",
         "purchase_price",
     },
     "brand": {"name"},

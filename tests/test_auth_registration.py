@@ -339,6 +339,68 @@ class AuthHardeningTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_only_admin_can_preview_delete_or_edit_receipts(self):
+        self.insert_user("employee@example.com", role="employee")
+        self.login("employee@example.com")
+        csrf_token = self.csrf()
+        self.assertEqual(
+            self.client.get("/api/v1/receipts/supplies/supply-1/delete-preview").status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.delete(
+                "/api/v1/receipts/supplies/supply-1",
+                headers={"X-CSRF-Token": csrf_token},
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.patch(
+                "/api/v1/receipts/supplies/supply-1/details",
+                json={"title": "", "comment": ""},
+                headers={"X-CSRF-Token": csrf_token},
+            ).status_code,
+            403,
+        )
+
+        admin_client = web.app.test_client()
+        self.insert_user("admin@example.com", role="admin")
+        self.login("admin@example.com", client=admin_client)
+        admin_csrf = self.csrf(admin_client)
+        preview = {"receipt_id": "receipt-1", "items": [], "has_conflicts": False}
+        updated = {"title": "Поставка", "comment": "Комментарий"}
+        with mock.patch(
+            "app.supply_routes.SupplyEngine.preview_delete", return_value=preview
+        ), mock.patch(
+            "app.supply_routes.SupplyEngine.delete", return_value=preview
+        ), mock.patch(
+            "app.supply_routes.SupplyEngine.update_details", return_value=updated
+        ):
+            self.assertEqual(
+                admin_client.get(
+                    "/api/v1/receipts/supplies/supply-1/delete-preview"
+                ).status_code,
+                200,
+            )
+            self.assertEqual(
+                admin_client.delete(
+                    "/api/v1/receipts/supplies/supply-1",
+                    headers={"X-CSRF-Token": admin_csrf},
+                ).status_code,
+                200,
+            )
+            self.assertEqual(
+                admin_client.patch(
+                    "/api/v1/receipts/supplies/supply-1/details",
+                    json={
+                        "title": "Поставка",
+                        "comment": "Комментарий",
+                    },
+                    headers={"X-CSRF-Token": admin_csrf},
+                ).status_code,
+                200,
+            )
+
     def test_admin_can_see_create_and_revoke_invitations(self):
         self.insert_user(role="admin")
         self.login()

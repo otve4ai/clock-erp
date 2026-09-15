@@ -1044,6 +1044,275 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
             product["id"],
         )
 
+    def test_delete_draft_removes_document_without_changing_stock(self):
+        product = self.create_product(name="Draft Delete", stock=4)
+        self.receipts.create_draft(
+            {"id": "delete-draft", "number": "D-1", "receipt_date": "2026-09-10"},
+            [{"product_id": product["id"], "quantity": 3, "purchase_price": 1}],
+        )
+        preview = self.receipts.preview_delete("delete-draft")
+        self.assertEqual(preview["items"][0]["status"], "DRAFT_DELETE")
+        self.receipts.delete_receipt("delete-draft", user_name="Максим")
+        self.assertEqual(self.stock(product["id"]), 4)
+        self.assertFalse(self.receipts.exists("delete-draft"))
+
+    def test_delete_preview_is_completely_read_only(self):
+        product = self.create_product(name="Preview Read Only")
+        self.receipts.create_receipt(
+            {"id": "preview-read-only", "number": "P-RO", "receipt_date": "2026-09-10"},
+            [{"product_id": product["id"], "quantity": 5, "purchase_price": 1}],
+        )
+        with self.database.connect() as connection:
+            before = {
+                "receipts": connection.execute("SELECT COUNT(*) FROM erp_receipts").fetchone()[0],
+                "items": connection.execute("SELECT COUNT(*) FROM erp_receipt_items").fetchone()[0],
+                "movements": connection.execute("SELECT COUNT(*) FROM catalog_stock_movements").fetchone()[0],
+                "sales": connection.execute("SELECT COUNT(*) FROM erp_sales").fetchone()[0],
+                "audit": connection.execute("SELECT COUNT(*) FROM erp_audit_events").fetchone()[0],
+            }
+        stock_before = self.stock(product["id"])
+        self.receipts.preview_delete("preview-read-only")
+        with self.database.connect() as connection:
+            after = {
+                "receipts": connection.execute("SELECT COUNT(*) FROM erp_receipts").fetchone()[0],
+                "items": connection.execute("SELECT COUNT(*) FROM erp_receipt_items").fetchone()[0],
+                "movements": connection.execute("SELECT COUNT(*) FROM catalog_stock_movements").fetchone()[0],
+                "sales": connection.execute("SELECT COUNT(*) FROM erp_sales").fetchone()[0],
+                "audit": connection.execute("SELECT COUNT(*) FROM erp_audit_events").fetchone()[0],
+            }
+        self.assertEqual(after, before)
+        self.assertEqual(self.stock(product["id"]), stock_before)
+
+    def test_delete_posted_receipt_decreases_multiple_stocks_and_audits(self):
+        first = self.create_product(name="Delete A", stock=2)
+        second = self.create_product(name="Delete B", stock=5)
+        self.receipts.create_receipt(
+            {"id": "delete-posted", "number": "P-1", "receipt_date": "2026-09-10"},
+            [
+                {"product_id": first["id"], "quantity": 3, "purchase_price": 1},
+                {"product_id": second["id"], "quantity": 2, "purchase_price": 1},
+            ],
+        )
+        preview = self.receipts.preview_delete("delete-posted")
+        self.assertEqual(preview["decreased_positions"], 2)
+        self.assertEqual(preview["decreased_quantity"], 5)
+        self.assertEqual(self.stock(first["id"]), 5)
+        result = self.receipts.delete_receipt("delete-posted", user_name="Максим")
+        self.assertEqual(result["decreased_positions"], 2)
+        self.assertEqual(self.stock(first["id"]), 2)
+        self.assertEqual(self.stock(second["id"]), 5)
+        with self.database.connect() as connection:
+            audit = connection.execute(
+                "SELECT * FROM erp_audit_events WHERE entity_id = 'delete-posted' "
+                "AND action = 'deleted'"
+            ).fetchone()
+        self.assertEqual(audit["actor_display_name_snapshot"], "Максим")
+        details = json.loads(audit["metadata_json"])
+        self.assertEqual(details["items"][0]["current_stock"], 5)
+        self.assertEqual(details["items"][0]["stock_after"], 2)
+
+    def test_later_active_sale_skips_whole_position_and_sale_is_unchanged(self):
+        product = self.create_product(name="Later Sale")
+        self.receipts.create_receipt(
+            {"id": "sale-skip", "number": "P-SALE", "receipt_date": "2026-09-10"},
+            [{"product_id": product["id"], "quantity": 5, "purchase_price": 1}],
+        )
+        self.sales.create_sale(
+            {"id": "later-sale", "source": "ERP", "created_at": "2099-09-14T10:00:00+00:00", "order_number": "21147"},
+            product["id"], 3, 10,
+        )
+        before = self.sales.get_sale("later-sale")
+        preview = self.receipts.preview_delete("sale-skip")
+        self.assertEqual(preview["items"][0]["status"], "SKIPPED_DUE_TO_LATER_SALE")
+        self.assertEqual(preview["items"][0]["sales"][0]["number"], "21147")
+        self.assertIn("последующая продажа товара", preview["items"][0]["reason"])
+        self.receipts.delete_receipt("sale-skip")
+        self.assertEqual(self.stock(product["id"]), 2)
+        self.assertEqual(self.sales.get_sale("later-sale"), before)
+        with self.database.connect() as connection:
+            audit = connection.execute(
+                "SELECT metadata_json FROM erp_audit_events "
+                "WHERE entity_id = 'sale-skip' AND action = 'deleted'"
+            ).fetchone()
+        skipped = json.loads(audit["metadata_json"])["items"][0]
+        self.assertEqual(skipped["sale_ids"], ["later-sale"])
+        self.assertEqual(skipped["sale_numbers"], ["21147"])
+        self.assertTrue(skipped["sale_dates"][0])
+        self.assertEqual(
+            skipped["reason"],
+            "После проведения поставки зафиксирована последующая продажа товара; "
+            "остаток при удалении поставки не изменён.",
+        )
+
+    def test_earlier_and_fully_returned_sales_do_not_skip_receipt_rollback(self):
+        product = self.create_product(name="Inactive Sales", stock=2)
+        self.sales.create_sale(
+            {"id": "earlier-sale", "source": "ERP", "created_at": "2020-01-01T10:00:00+00:00"},
+            product["id"], 1, 10,
+        )
+        self.receipts.create_receipt(
+            {"id": "active-sale-filter", "number": "P-FILTER", "receipt_date": "2026-09-10"},
+            [{"product_id": product["id"], "quantity": 3, "purchase_price": 1}],
+        )
+        self.sales.create_sale(
+            {"id": "returned-sale", "source": "ERP", "created_at": "2099-01-01T10:00:00+00:00"},
+            product["id"], 1, 10,
+        )
+        self.sales.cancel_sale("returned-sale")
+        preview = self.receipts.preview_delete("active-sale-filter")
+        self.assertEqual(preview["items"][0]["status"], "WILL_DECREASE")
+        self.receipts.delete_receipt("active-sale-filter")
+        self.assertEqual(self.stock(product["id"]), 1)
+
+    def test_all_positions_with_later_sales_are_skipped_but_receipt_is_deleted(self):
+        first = self.create_product(name="All Skipped A")
+        second = self.create_product(name="All Skipped B")
+        self.receipts.create_receipt(
+            {"id": "all-skipped", "number": "P-ALL", "receipt_date": "2026-09-10"},
+            [
+                {"product_id": first["id"], "quantity": 2, "purchase_price": 1},
+                {"product_id": second["id"], "quantity": 3, "purchase_price": 1},
+            ],
+        )
+        self.sales.create_sale(
+            {"id": "all-sale-a", "source": "ERP", "created_at": "2026-09-11"},
+            first["id"], 1, 10,
+        )
+        self.sales.create_sale(
+            {"id": "all-sale-b", "source": "ERP", "created_at": "2026-09-11"},
+            second["id"], 1, 10,
+        )
+        stock_before = (self.stock(first["id"]), self.stock(second["id"]))
+        preview = self.receipts.preview_delete("all-skipped")
+        self.assertEqual(preview["decreased_positions"], 0)
+        self.assertEqual(preview["decreased_quantity"], 0)
+        self.assertEqual(preview["skipped_positions"], 2)
+        self.assertFalse(preview["has_conflicts"])
+        self.receipts.delete_receipt("all-skipped")
+        self.assertEqual((self.stock(first["id"]), self.stock(second["id"])), stock_before)
+        self.assertFalse(self.receipts.exists("all-skipped"))
+
+    def test_mixed_delete_and_new_sale_between_preview_and_delete(self):
+        first = self.create_product(name="No Sale")
+        second = self.create_product(name="Late Change")
+        self.receipts.create_receipt(
+            {"id": "mixed-delete", "number": "P-MIX", "receipt_date": "2026-09-10"},
+            [
+                {"product_id": first["id"], "quantity": 4, "purchase_price": 1},
+                {"product_id": second["id"], "quantity": 3, "purchase_price": 1},
+            ],
+        )
+        preview = self.receipts.preview_delete("mixed-delete")
+        self.assertEqual(preview["skipped_positions"], 0)
+        self.sales.create_sale(
+            {"id": "sale-after-preview", "source": "ERP", "created_at": "2099-09-15T10:00:00+00:00"},
+            second["id"], 1, 10,
+        )
+        result = self.receipts.delete_receipt("mixed-delete")
+        self.assertEqual(result["skipped_positions"], 1)
+        self.assertEqual(self.stock(first["id"]), 0)
+        self.assertEqual(self.stock(second["id"]), 2)
+
+    def test_delete_recalculates_changed_stock_after_preview(self):
+        product = self.create_product(name="Changed Stock", stock=3)
+        self.receipts.create_receipt(
+            {"id": "changed-stock", "number": "P-STOCK", "receipt_date": "2026-09-10"},
+            [{"product_id": product["id"], "quantity": 5, "purchase_price": 1}],
+        )
+        preview = self.receipts.preview_delete("changed-stock")
+        self.assertEqual(preview["items"][0]["stock_after"], 3)
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE catalog_excel_products SET stock = 10 WHERE id = ?", (product["id"],)
+            )
+        result = self.receipts.delete_receipt("changed-stock")
+        self.assertEqual(result["items"][0]["current_stock"], 10)
+        self.assertEqual(result["items"][0]["stock_after"], 5)
+        self.assertEqual(self.stock(product["id"]), 5)
+
+    def test_delete_conflict_and_failure_roll_back_everything(self):
+        product = self.create_product(name="Conflict Product")
+        self.receipts.create_receipt(
+            {"id": "conflict-delete", "number": "P-C", "receipt_date": "2026-09-10"},
+            [{"product_id": product["id"], "quantity": 5, "purchase_price": 1}],
+        )
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE catalog_excel_products SET stock = 2 WHERE id = ?", (product["id"],)
+            )
+        preview = self.receipts.preview_delete("conflict-delete")
+        self.assertTrue(preview["has_conflicts"])
+        with self.assertRaises(ValueError):
+            self.receipts.delete_receipt("conflict-delete")
+        self.assertTrue(self.receipts.exists("conflict-delete"))
+        self.assertEqual(self.stock(product["id"]), 2)
+
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE catalog_excel_products SET stock = 5 WHERE id = ?", (product["id"],)
+            )
+        with self.assertRaises(RuntimeError):
+            self.receipts.delete_receipt(
+                "conflict-delete", failure_hook=lambda _connection: (_ for _ in ()).throw(RuntimeError("fail"))
+            )
+        self.assertTrue(self.receipts.exists("conflict-delete"))
+        self.assertEqual(self.stock(product["id"]), 5)
+
+    def test_multi_position_delete_failure_rolls_back_stock_items_and_sales(self):
+        products = [self.create_product(name="Rollback {}".format(index)) for index in range(3)]
+        self.receipts.create_receipt(
+            {"id": "multi-rollback", "number": "P-RB", "receipt_date": "2026-09-10"},
+            [{"product_id": product["id"], "quantity": index + 1, "purchase_price": 1} for index, product in enumerate(products)],
+        )
+        self.sales.create_sale(
+            {"id": "preserved-sale", "source": "ERP", "created_at": "2020-01-01"},
+            products[0]["id"], 1, 10,
+        )
+        stocks = [self.stock(product["id"]) for product in products]
+        sale = self.sales.get_sale("preserved-sale")
+        with self.database.connect() as connection:
+            item_count = connection.execute(
+                "SELECT COUNT(*) FROM erp_receipt_items WHERE receipt_id = 'multi-rollback'"
+            ).fetchone()[0]
+        with self.assertRaises(RuntimeError):
+            self.receipts.delete_receipt(
+                "multi-rollback",
+                failure_hook=lambda _connection: (_ for _ in ()).throw(RuntimeError("forced")),
+            )
+        self.assertEqual([self.stock(product["id"]) for product in products], stocks)
+        self.assertEqual(self.sales.get_sale("preserved-sale"), sale)
+        self.assertTrue(self.receipts.exists("multi-rollback"))
+        with self.database.connect() as connection:
+            self.assertEqual(connection.execute(
+                "SELECT COUNT(*) FROM erp_receipt_items WHERE receipt_id = 'multi-rollback'"
+            ).fetchone()[0], item_count)
+
+    def test_edit_receipt_details_is_stock_neutral_and_audited(self):
+        product = self.create_product(name="Edit Details")
+        self.receipts.create_receipt(
+            {"id": "details-edit", "number": "P-E", "receipt_date": "2026-09-10"},
+            [{"product_id": product["id"], "quantity": 2, "purchase_price": 1}],
+        )
+        updated = self.receipts.update_details(
+            "details-edit", "Сентябрьская поставка", "Новый комментарий", user_name="Максим"
+        )
+        self.assertEqual(updated["metadata"]["name"], "Сентябрьская поставка")
+        self.assertEqual(updated["comment"], "Новый комментарий")
+        self.assertEqual(updated["number"], "P-E")
+        self.assertEqual(updated["status"], "posted")
+        self.assertEqual(updated["items"][0]["quantity"], 2)
+        self.assertEqual(self.stock(product["id"]), 2)
+        with self.database.connect() as connection:
+            audit = connection.execute(
+                "SELECT changes_json FROM erp_audit_events "
+                "WHERE entity_id = 'details-edit' AND action = 'updated' "
+                "ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        self.assertEqual(
+            json.loads(audit["changes_json"])["comment"]["after"],
+            "Новый комментарий",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
