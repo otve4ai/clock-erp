@@ -120,6 +120,14 @@ class DeployAvailabilityTest(unittest.TestCase):
             script,
         )
 
+    def test_recovery_runtime_keeps_system_tools_on_service_path(self):
+        dropin = (PROJECT_ROOT / "ops" / "clock-erp-recovery.conf").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("/opt/clock-erp/venv/bin", dropin)
+        self.assertIn("/usr/bin", dropin)
+        self.assertIn("/usr/sbin", dropin)
+
     def test_services_vault_preflight_is_fail_closed_before_code_update(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         backup = script.index('create-temporary "pre-services-vault-')
