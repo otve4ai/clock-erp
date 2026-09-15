@@ -1366,7 +1366,12 @@ def _apply_auth_preferences_migration(path, app_commit, observer):
                         "SELECT migration_id FROM " + LEDGER_TABLE
                     ).fetchall()
                 }
-                if AUTH_TEAM_MIGRATION_ID in ledger_ids:
+                if all(migration_id in ledger_ids for migration_id in (
+                    AUTH_MIGRATION_ID, AUTH_PREFERENCES_MIGRATION_ID,
+                    AUTH_NOTIFICATIONS_MIGRATION_ID,
+                    AUTH_NOTIFICATIONS_V2_MIGRATION_ID,
+                    AUTH_TEAM_MIGRATION_ID,
+                )):
                     _verify_auth_ledger(connection)
                     verify_auth_schema(connection)
                     _require_integrity(connection, "auth")
@@ -1394,7 +1399,8 @@ def _apply_auth_preferences_migration(path, app_commit, observer):
 
                 if AUTH_NOTIFICATIONS_MIGRATION_ID in ledger_ids:
                     _verify_auth_ledger(connection, require_latest=False)
-                    verify_auth_schema(connection, notification_v2=False)
+                    if AUTH_TEAM_MIGRATION_ID not in ledger_ids:
+                        verify_auth_schema(connection, notification_v2=False)
                     connection.execute("BEGIN IMMEDIATE")
                     try:
                         for statement in AUTH_NOTIFICATIONS_V2_STATEMENTS:
@@ -1405,12 +1411,13 @@ def _apply_auth_preferences_migration(path, app_commit, observer):
                             app_commit,
                             "user-notifications-v1",
                         )
-                        for statement in AUTH_TEAM_STATEMENTS:
-                            _execute(connection, statement, observer)
-                        _insert_applied_migration(
-                            connection, AUTH_TEAM_MIGRATION, app_commit,
-                            "user-notifications-v1",
-                        )
+                        if AUTH_TEAM_MIGRATION_ID not in ledger_ids:
+                            for statement in AUTH_TEAM_STATEMENTS:
+                                _execute(connection, statement, observer)
+                            _insert_applied_migration(
+                                connection, AUTH_TEAM_MIGRATION, app_commit,
+                                "user-notifications-v1",
+                            )
                         verify_auth_schema(connection)
                         _verify_auth_ledger(connection)
                         _require_integrity(connection, "auth-notifications-v2-migration")
@@ -1422,9 +1429,10 @@ def _apply_auth_preferences_migration(path, app_commit, observer):
 
                 if AUTH_PREFERENCES_MIGRATION_ID in ledger_ids:
                     _verify_auth_ledger(connection, require_latest=False)
-                    verify_auth_schema(
-                        connection, include_notifications=False
-                    )
+                    if AUTH_TEAM_MIGRATION_ID not in ledger_ids:
+                        verify_auth_schema(
+                            connection, include_notifications=False
+                        )
                     connection.execute("BEGIN IMMEDIATE")
                     try:
                         for statement in (
@@ -1444,11 +1452,12 @@ def _apply_auth_preferences_migration(path, app_commit, observer):
                             connection, AUTH_NOTIFICATIONS_V2_MIGRATION,
                             app_commit, "auth-v2",
                         )
-                        for statement in AUTH_TEAM_STATEMENTS:
-                            _execute(connection, statement, observer)
-                        _insert_applied_migration(
-                            connection, AUTH_TEAM_MIGRATION, app_commit, "auth-v2",
-                        )
+                        if AUTH_TEAM_MIGRATION_ID not in ledger_ids:
+                            for statement in AUTH_TEAM_STATEMENTS:
+                                _execute(connection, statement, observer)
+                            _insert_applied_migration(
+                                connection, AUTH_TEAM_MIGRATION, app_commit, "auth-v2",
+                            )
                         verify_auth_schema(connection)
                         _verify_auth_ledger(connection)
                         _require_integrity(connection, "auth-notifications-migration")
