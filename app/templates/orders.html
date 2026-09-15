@@ -267,7 +267,7 @@
                                     {% if not sale_state.sale_completed and not sale_state.readiness.ready %}<div class="warning readiness-warning" data-order-readiness-warning>Проведение недоступно: {{ sale_state.readiness.issues|join(' · ') }}.</div>{% endif %}
                                 </div>
                             </div>
-                            {% if not legacy_calc_ok and not selected_order.get('calculation_complete') %}<div class="warning">Bitrix не передал отдельную стоимость доставки. Итог не записан в доставку; проведение продажи заблокировано до получения полного расчёта.</div>{% elif not legacy_calc_ok and not selected_order.get('calculation_consistent') %}<div class="warning">Расчёт не сходится: товары − скидка + доставка ≠ итог. Проведение заблокировано.</div>{% endif %}
+                            {% if not legacy_calc_ok and not selected_order.get('calculation_complete') %}<div class="warning">Bitrix передал неполный расчёт. Продажу можно провести по позициям и суммам ERP.</div>{% elif not legacy_calc_ok and not selected_order.get('calculation_consistent') %}<div class="warning">Расчёт Bitrix не сходится: товары − скидка + доставка ≠ итог. Продажу можно провести по позициям и суммам ERP.</div>{% endif %}
                         </section>{% endif %}
                         </div>
                         {% if is_wb %}<details class="order-comments-disclosure"><summary>Комментарии сотрудников · {{ order_comments|length }} записей</summary>{% endif %}

@@ -721,6 +721,91 @@ class OrderTictactoySaleTest(unittest.TestCase):
         )
         self.assertEqual(web.calculate_sales_kpis(report)["sales_count"], 1)
 
+    def test_calculation_warning_does_not_claim_sale_is_blocked(self):
+        for complete in (False, True):
+            with self.subTest(calculation_complete=complete):
+                self.order.update(calculation_complete=complete, calculation_consistent=False)
+                html = self.render_order().get_data(as_text=True)
+                self.assertIn("Продажу можно провести по позициям и суммам ERP.", html)
+                self.assertNotIn("Проведение заблокировано", html)
+                self.assertNotIn("продажи заблокировано", html)
+                self.assertIn("data-open-sale-dialog>Провести продажу</button>", html)
+
+    def test_bitrix_calculations_do_not_block_erp_sale(self):
+        cases = [
+            ("one_kopeck", {"order_total": 17400.01, "calculation_consistent": False}),
+            ("two_kopecks", {"order_total": 17399.98, "calculation_consistent": False}),
+            ("large_difference", {"order_total": 99999, "calculation_consistent": False}),
+            ("missing_discount", {"discount": None, "calculation_complete": False}),
+            ("missing_delivery", {"delivery_price": None, "calculation_complete": False}),
+            ("incomplete", {"discount": None, "delivery_price": None,
+                            "calculation_complete": False, "calculation_consistent": False}),
+            ("missing_total", {"order_total": None, "total": None,
+                               "calculation_complete": False, "sync_state": "partial",
+                               "sync_missing": ["total"]}),
+        ]
+        for index, (name, fields) in enumerate(cases):
+            with self.subTest(name=name):
+                order_id = str(22000 + index)
+                order = {**self.order, "id": order_id, "number": order_id,
+                         "sync_state": "complete", "calculation_complete": True,
+                         "calculation_consistent": True, **fields}
+                # Each case starts with its own stock allocation in the temp DB.
+                with self.database.transaction() as connection:
+                    connection.execute("UPDATE catalog_excel_products SET stock=5")
+                context = web.build_order_product_mapping_context(
+                    order["products"], mappings=self.mappings, catalog=self.shared,
+                )
+                state = web.build_order_sale_state(order, context)
+                self.assertTrue(state["can_create_sale"])
+                self.assertEqual(state["readiness"], {"ready": True, "issues": []})
+                with mock.patch.object(web, "update_order_status", return_value={"success": True}):
+                    response = self.conduct(order=order, route_order_id=order_id)
+                self.assertEqual(urlsplit(response.location).path, "/sales")
+                sale = self.inventory.find_active_sale("tictactoy", order_id)
+                self.assertIsNotNone(sale)
+                with self.database.connect() as connection:
+                    items = connection.execute(
+                        "SELECT product_id,quantity,unit_price FROM erp_sale_items "
+                        "WHERE sale_id=? ORDER BY id", (sale["id"],),
+                    ).fetchall()
+                    self.assertEqual([tuple(row) for row in items], [
+                        (self.watch["id"], 2, 7500), (self.strap["id"], 1, 2400),
+                    ])
+                catalog = ExcelProductCatalog(self.database)
+                self.assertEqual(catalog.get_product(self.watch["id"])["stock"], 3)
+                self.assertEqual(catalog.get_product(self.strap["id"])["stock"], 4)
+                # Price exceptions must not weaken duplicate protection.
+                with mock.patch.object(web, "update_order_status") as update:
+                    repeat = self.conduct(order=order, route_order_id=order_id)
+                self.assertIn("уже проведена", parse_qs(urlsplit(repeat.location).query)["message"][0])
+                update.assert_not_called()
+                self.assertEqual(catalog.get_product(self.watch["id"])["stock"], 3)
+
+    def test_non_price_guards_survive_incomplete_bitrix_calculations(self):
+        cases = [
+            {"status": "N"},
+            {"products": []},
+            {"sync_state": "error", "sync_missing": ["total"]},
+            {"sync_state": "partial", "sync_missing": []},
+            {"sync_state": "partial", "sync_missing": ["total", "phone"]},
+            {"products": [{**self.order["products"][0], "quantity": 0}]},
+            {"products": [{**self.order["products"][0], "quantity": 6}]},
+            {"products": [{"id": "unmapped", "product_id": "unknown", "quantity": 1}]},
+        ]
+        for fields in cases:
+            with self.subTest(fields=fields):
+                order = {**self.order, "calculation_complete": False,
+                         "calculation_consistent": False, **fields}
+                with mock.patch.object(web, "update_order_status") as update:
+                    response = self.conduct(order=order)
+                self.assertEqual(parse_qs(urlsplit(response.location).query)["notice"], ["error"])
+                self.assertEqual(self.inventory.list_sales(), [])
+                update.assert_not_called()
+                catalog = ExcelProductCatalog(self.database)
+                self.assertEqual(catalog.get_product(self.watch["id"])["stock"], 5)
+                self.assertEqual(catalog.get_product(self.strap["id"])["stock"], 3)
+
     def test_order_sale_uses_performed_time_and_preserves_order_time(self):
         order = {
             **self.order,

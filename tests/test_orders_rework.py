@@ -126,7 +126,19 @@ class OrdersReworkTest(unittest.TestCase):
             html = self.client.get("/app/orders").get_data(as_text=True)
         self.assertIn('data-has-selected-order="0"', html)
 
-    def test_incomplete_calculation_blocks_sale_before_inventory_change(self):
+    def test_normalized_missing_total_is_not_a_blocking_sync_issue(self):
+        order = web.normalize_bitrix_order({
+            "id": "8", "status": "A", "customer": "Покупатель", "phone": "123",
+            "products": [{"id": "line", "product_id": "bx", "name": "Часы",
+                          "quantity": 1, "price": 1000}],
+        })
+        self.assertEqual(order["sync_state"], "partial")
+        self.assertEqual(order["sync_missing"], ["total"])
+        self.assertFalse(web.order_has_blocking_sync_issue(order))
+        order["sync_missing"].append("phone")
+        self.assertTrue(web.order_has_blocking_sync_issue(order))
+
+    def test_incomplete_calculation_allows_sale_and_stock_change(self):
         order = {
             "id": "8", "number": "8", "status": "A", "sync_state": "complete",
             "calculation_complete": False, "calculation_consistent": False,
@@ -146,15 +158,17 @@ class OrdersReworkTest(unittest.TestCase):
             inventory = SalesInventory(database)
             with (
                 mock.patch.object(web, "get_order", return_value=order),
+                mock.patch.object(web, "update_order_status", return_value={"success": True}),
+                mock.patch.object(web, "load_stock_operations", return_value=[]),
                 mock.patch.object(web, "load_order_product_mappings", return_value={"line:line": {"product_id": str(product["id"])}}),
                 mock.patch.object(web, "SharedCatalog", return_value=SharedCatalog(database)),
                 mock.patch.object(web, "SalesInventory", return_value=inventory),
             ):
                 response = self.client.post("/order/8/stock-writeoff", data={"csrf_token": "test-token"})
             message = parse_qs(urlsplit(response.location).query)["message"][0]
-            self.assertIn("полный расчёт доставки и скидки", message)
-            self.assertEqual(inventory.list_sales(), [])
-            self.assertEqual(ExcelProductCatalog(database).get_product(product["id"])["stock"], 2)
+            self.assertIn("проведён в продажу", message)
+            self.assertEqual(len(inventory.list_sales()), 1)
+            self.assertEqual(ExcelProductCatalog(database).get_product(product["id"])["stock"], 1)
 
 
 if __name__ == "__main__":
