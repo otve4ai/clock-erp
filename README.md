@@ -6,3 +6,5 @@
 [дизайн](docs/design/README.md) ·
 [UX](docs/ux/README.md) ·
 [Definition of Done](docs/quality/definition-of-done.md)
+
+Операции: [административная панель и восстановление](docs/operations/backup-admin.md).

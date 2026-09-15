@@ -164,6 +164,12 @@ from app.services.brand_images import (
     BrandImageStore,
     BrandImageValidationError,
 )
+from app.services.backup_admin import (
+    BackupAdminError,
+    BackupAdminService,
+    BackupBusyError,
+    BackupNotFoundError,
+)
 from app.services.product_images import (
     ProductImageStore,
     validate_product_image,
@@ -364,6 +370,30 @@ app.config.setdefault(
     os.getenv("ERP_SERVICES_DATABASE", "").strip()
     or str(PROJECT_ROOT / "instance" / "services.db"),
 )
+app.config.setdefault(
+    "ERP_BACKUP_ROOT",
+    os.getenv("ERP_BACKUP_ROOT", "").strip()
+    or str(
+        Path("/opt/clock-erp-backups")
+        if PROJECT_ROOT == Path("/opt/clock-erp")
+        else PROJECT_ROOT / "instance" / "backups"
+    ),
+)
+app.config.setdefault(
+    "ERP_BACKUP_SCRIPT",
+    os.getenv("ERP_BACKUP_SCRIPT", "").strip()
+    or str(
+        Path("/usr/local/sbin/clock-erp-backup-retention")
+        if Path("/usr/local/sbin/clock-erp-backup-retention").is_file()
+        else PROJECT_ROOT / "scripts" / "retain_erp_backups.py"
+    ),
+)
+app.config.setdefault(
+    "ERP_BACKUP_CRON",
+    os.getenv("ERP_BACKUP_CRON", "").strip()
+    or "/etc/cron.d/clock-erp-backup-retention",
+)
+app.config.setdefault("ERP_BACKUP_REMOTE_CHECK", True)
 
 # Gunicorn imports this module once per worker. Pay the one required schema
 # verification during worker startup so the first ERP screen never inherits it.
@@ -18112,6 +18142,21 @@ NAVIGATION_DEFINITIONS = [
         "active_prefixes": ["/app/settings", "/settings"],
         "required": True,
     },
+    {
+        "key": "backups",
+        "label": "Бэкапы",
+        "description": "Состояние хранилища и точки восстановления ERP.",
+        "icon": "backups",
+        "href": "/app/backups",
+        "mobile_href": "/app/backups",
+        "position": 11,
+        "group": "system",
+        "mobile_primary": False,
+        "active_exact": [],
+        "active_prefixes": ["/app/backups", "/api/v1/backups"],
+        "roles": ("admin",),
+        "required": True,
+    },
 ]
 
 
@@ -18380,7 +18425,7 @@ SECTION_LABELS = {
     "inventory": "Инвентаризация", "receipts": "Приход",
     "journal": "Журнал", "inbox": "Входящие", "repair": "Ремонты", "customers": "Клиенты",
     "sms": "SMS", "purchases": "Закупки", "team": "Команда",
-    "services": "Сервисы", "settings": "Настройки",
+    "services": "Сервисы", "settings": "Настройки", "backups": "Бэкапы",
 }
 
 
@@ -24940,6 +24985,193 @@ def api_mail_settings_save():
         })
     except MailError as error:
         return _mail_error_response(error)
+
+
+# -----------------------------
+# Backup administration
+# -----------------------------
+
+def _backup_owner_required():
+    if auth_is_enabled() and (current_auth_user() or {}).get("role") != "admin":
+        abort(403)
+
+
+def _backup_admin_service():
+    cache_key = (
+        str(app.config["ERP_BACKUP_ROOT"]),
+        str(app.config["ERP_BACKUP_SCRIPT"]),
+        str(app.config["ERP_BACKUP_CRON"]),
+        bool(app.config["ERP_BACKUP_REMOTE_CHECK"]),
+    )
+    cached = app.extensions.get("backup_admin_service")
+    if cached and cached[0] == cache_key:
+        return cached[1]
+    service = BackupAdminService(
+        PROJECT_ROOT,
+        app.config["ERP_BACKUP_ROOT"],
+        app.config["ERP_BACKUP_SCRIPT"],
+        service_name="clock-erp",
+        cron_path=app.config["ERP_BACKUP_CRON"],
+        remote_check=app.config["ERP_BACKUP_REMOTE_CHECK"],
+    )
+    app.extensions["backup_admin_service"] = (cache_key, service)
+    return service
+
+
+def _backup_actor():
+    user = current_auth_user() or {}
+    return {"id": user.get("id") or "system", "email": user.get("email") or "system"}
+
+
+@app.get("/app/backups")
+def backups_page():
+    _backup_owner_required()
+    try:
+        status = _backup_admin_service().status()
+    except Exception:
+        app.logger.exception("Backup administration status could not be loaded")
+        status = {
+            "checked_at": None, "overall": "critical", "backups": [],
+            "restore_points": [], "last_backup": None,
+            "backup_directory": {"available": False, "message": "Бэкапы недоступны"},
+            "storage": {"state": "unknown", "total": None, "used": None,
+                        "free": None, "percent": None, "categories": {}},
+            "service": {"available": False, "active": None, "state": "unavailable"},
+            "schedule": {"available": False, "label": "Расписание не определено"},
+            "git": {"available": False, "history": []},
+            "operation": {"active": False, "status": "idle"},
+            "capabilities": {
+                "manual_backup": False, "data_restore": False,
+                "code_rollback": False, "full_restore": False,
+                "blocked_reason": "Не удалось получить состояние backup-системы",
+            },
+        }
+    return render_template("backups.html", backup_status=status)
+
+
+@app.get("/api/v1/backups/status")
+def api_backups_status():
+    _backup_owner_required()
+    try:
+        return api_success(_backup_admin_service().status())
+    except Exception:
+        app.logger.exception("Backup administration API status failed")
+        return api_error("BACKUPS_UNAVAILABLE", "Не удалось получить состояние backup-системы.", 503)
+
+
+@app.post("/api/v1/backups")
+def api_backups_create():
+    _backup_owner_required()
+    require_csrf_when_authenticated()
+    try:
+        return api_success(
+            _backup_admin_service().start_manual_backup(_backup_actor()), status=202
+        )
+    except BackupBusyError as error:
+        return api_error("BACKUP_BUSY", str(error), 409)
+    except BackupAdminError as error:
+        return api_error("BACKUP_BLOCKED", str(error), 409)
+    except Exception:
+        app.logger.exception("Manual backup could not be started")
+        return api_error("BACKUP_FAILED", "Не удалось создать бэкап.", 503)
+
+
+@app.post("/api/v1/backups/<backup_id>/restore")
+def api_backup_restore(backup_id):
+    _backup_owner_required()
+    require_csrf_when_authenticated()
+    payload = request.get_json(silent=True) or {}
+    if payload.get("confirmation") != "ВОССТАНОВИТЬ":
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "data_restore", backup_id=backup_id,
+            reason="confirmation failed",
+        )
+        return api_error("RESTORE_CONFIRMATION_REQUIRED", "Для восстановления введите ВОССТАНОВИТЬ.", 422)
+    try:
+        _backup_admin_service().blocked_restore_attempt(
+            _backup_actor(), "data_restore", backup_id=backup_id
+        )
+    except BackupNotFoundError as error:
+        return api_error("BACKUP_NOT_FOUND", str(error), 404)
+    except BackupAdminError as error:
+        return api_error("RESTORE_BLOCKED", str(error), 409)
+
+
+@app.post("/api/v1/backups/code/<commit>/rollback")
+def api_backup_code_rollback(commit):
+    _backup_owner_required()
+    require_csrf_when_authenticated()
+    payload = request.get_json(silent=True) or {}
+    if payload.get("confirmation") != "ОТКАТИТЬ КОД":
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "code_rollback", target_commit=commit,
+            reason="confirmation failed",
+        )
+        return api_error("ROLLBACK_CONFIRMATION_REQUIRED", "Для отката введите ОТКАТИТЬ КОД.", 422)
+    git = _backup_admin_service().git_status(history_limit=15)
+    if git.get("dirty") is not False:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "code_rollback", target_commit=commit,
+            reason="dirty or unavailable working tree status",
+        )
+        return api_error(
+            "ROLLBACK_DIRTY_TREE",
+            (
+                "Откат кода заблокирован: production содержит незакоммиченные изменения."
+                if git.get("dirty") else
+                "Откат кода заблокирован: не удалось подтвердить чистоту production."
+            ),
+            409,
+        )
+    try:
+        _backup_admin_service().blocked_restore_attempt(
+            _backup_actor(), "code_rollback", target_commit=commit
+        )
+    except BackupNotFoundError as error:
+        return api_error("COMMIT_NOT_FOUND", str(error), 404)
+    except BackupAdminError as error:
+        return api_error("ROLLBACK_BLOCKED", str(error), 409)
+
+
+@app.post("/api/v1/backups/<backup_id>/restore-system")
+def api_backup_restore_system(backup_id):
+    _backup_owner_required()
+    require_csrf_when_authenticated()
+    payload = request.get_json(silent=True) or {}
+    if payload.get("confirmation") != "ВОССТАНОВИТЬ СИСТЕМУ":
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "full_restore", backup_id=backup_id,
+            reason="confirmation failed",
+        )
+        return api_error(
+            "FULL_RESTORE_CONFIRMATION_REQUIRED",
+            "Для полного восстановления введите ВОССТАНОВИТЬ СИСТЕМУ.",
+            422,
+        )
+    try:
+        backup = _backup_admin_service().resolve_backup(backup_id)
+        if not (
+            backup.get("metadata") and backup.get("integrity_status") == "verified"
+            and backup.get("git_commit") and backup.get("schema_versions")
+        ):
+            _backup_admin_service().audit_refused_attempt(
+                _backup_actor(), "full_restore", backup_id=backup_id,
+                target_commit=backup.get("git_commit"),
+                reason="unverified restore point",
+            )
+            return api_error(
+                "RESTORE_POINT_UNVERIFIED",
+                "Полное восстановление заблокировано: совместимость кода и данных не подтверждена.",
+                409,
+            )
+        _backup_admin_service().blocked_restore_attempt(
+            _backup_actor(), "full_restore", backup_id=backup_id,
+            target_commit=backup.get("git_commit"),
+        )
+    except BackupNotFoundError as error:
+        return api_error("RESTORE_POINT_NOT_FOUND", str(error), 404)
+    except BackupAdminError as error:
+        return api_error("FULL_RESTORE_BLOCKED", str(error), 409)
 
 
 @app.delete("/api/v1/mail/settings")
