@@ -491,7 +491,7 @@ const submit = eval('(async function(action) {' + handler + ')');
         self.assertEqual(len(engine.movements()), 2)
 
     def test_supply_failed_import_invalid_quantity_and_failed_add(self):
-        from app.services.supplies import SupplyEngine
+        from app.services.supplies import SupplyEngine, SupplyError
         engine = SupplyEngine(CatalogDatabase(self.database_path))
         supply = engine.create("Test supply")
         with mock.patch.object(web, "_bitrix_single_client", return_value=FakeBitrixClient(unavailable=True)):
@@ -506,7 +506,8 @@ const submit = eval('(async function(action) {' + handler + ')');
         engine.delete(supply["id"])
         response = self.client.post(path, json={"product_id": product["id"], "quantity": 3}, headers={"Idempotency-Key": "cancelled-supply"})
         self.assertEqual(response.status_code, 422)
-        self.assertEqual(engine.get(supply["id"])["items"], [])
+        with self.assertRaises(SupplyError):
+            engine.get(supply["id"])
         with CatalogDatabase(self.database_path).connect() as c:
             self.assertEqual(c.execute("SELECT stock FROM catalog_excel_products WHERE id=?", (product["id"],)).fetchone()[0], 0)
         with mock.patch.object(web, "_bitrix_single_client") as remote:

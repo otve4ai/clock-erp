@@ -185,11 +185,128 @@ dialog .table-scroll {
   margin-top: 14px;
 }
 #message,
-#dialog-message {
+#dialog-message,
+#delete-confirm-message,
+#delete-preview-message {
   padding: 12px;
   border-radius: 9px;
   background: #eff6ff;
   margin: 12px 0;
+}
+.delete-confirm-dialog {
+  width: min(520px, calc(100vw - 24px));
+}
+.delete-confirm-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.delete-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 21px;
+}
+.delete-preview-dialog {
+  width: min(1180px, calc(100vw - 24px));
+  padding-bottom: 0;
+}
+.delete-preview-dialog header p {
+  margin: 4px 0 0;
+}
+.delete-preview-table {
+  max-height: min(56vh, 560px);
+}
+.delete-preview-actions {
+  position: sticky;
+  bottom: 0;
+  margin: 16px -20px 0;
+  padding: 14px 20px;
+  border-top: 1px solid #e5e7eb;
+  background: white;
+}
+.delete-warning {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 9px;
+  background: #fff7ed;
+  color: #9a3412;
+}
+.delete-status {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #ecfdf5;
+  color: #166534;
+  font-weight: 700;
+}
+.delete-status.skipped {
+  background: #fff7ed;
+  color: #9a3412;
+}
+.delete-status.conflict {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.delete-sales {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+}
+.delete-product {
+  display: flex;
+  align-items: center;
+  min-width: 220px;
+  gap: 10px;
+}
+.delete-product img {
+  flex: 0 0 auto;
+}
+.delete-product small {
+  display: block;
+  margin-top: 3px;
+  color: #6b7280;
+}
+.delete-row-warning td {
+  padding-top: 0;
+  background: #fff7ed;
+  color: #9a3412;
+}
+.delete-totals {
+  display: grid;
+  grid-template-columns: auto repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 12px;
+  background: #f9fafb;
+}
+.delete-totals h3 {
+  margin: 0;
+}
+.delete-totals div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.delete-totals strong {
+  font-size: 22px;
+}
+.delete-totals span {
+  color: #6b7280;
+  font-size: 12px;
+}
+.delete-info {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 9px;
+  background: #eff6ff;
+  color: #1e40af;
 }
 #bitrix-results {
   display: grid;
@@ -252,6 +369,14 @@ details {
   }
   dialog {
     padding: 12px;
+  }
+  .delete-preview-actions {
+    margin-right: -12px;
+    margin-left: -12px;
+    padding: 12px;
+  }
+  .delete-totals {
+    grid-template-columns: 1fr;
   }
   dialog footer .button {
     flex: 1;
