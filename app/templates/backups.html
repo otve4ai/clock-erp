@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    {% include "_favicon.html" %}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Бэкапы</title>
+    <link rel="stylesheet" href="{{ static_asset_url('css/themes.css') }}">
+    <link rel="stylesheet" href="{{ static_asset_url('css/erp-components.css') }}">
+    <link rel="stylesheet" href="{{ static_asset_url('css/backups.css') }}">
+    <script>
+        window.ERP_BACKUPS_BOOTSTRAP = {
+            csrf: {{ csrf_token()|tojson }},
+            status: {{ backup_status|tojson }}
+        };
+    </script>
+    <script defer src="{{ static_asset_url('js/backups.js') }}"></script>
+</head>
+<body class="backups-page">
+<div class="app">
+    {% include "_sidebar.html" %}
+    <main class="main backup-main" id="main-content" tabindex="-1" data-backup-root>
+        <header class="backup-header erp-workspace-header">
+            <div class="erp-workspace-heading">
+                <h1>Бэкапы</h1>
+                <p>Управление резервным копированием кода и данных ERP</p>
+            </div>
+            <div class="backup-checked">Последняя проверка: <strong data-field="checked-at">—</strong></div>
+        </header>
+
+        <div class="backup-notice" data-message hidden role="status"></div>
+        <div class="backup-operation" data-operation hidden>
+            <span class="backup-operation-spinner" aria-hidden="true"></span>
+            <div><strong data-operation-title>Выполняется операция</strong><span data-operation-message></span></div>
+        </div>
+
+        <section class="backup-grid backup-grid-storage" aria-label="Состояние инфраструктуры">
+            <article class="backup-card storage-card">
+                <div class="backup-card-heading">
+                    <div><h2>Хранилище сервера</h2><p>Фактическое использование filesystem приложения</p></div>
+                    <span class="status-pill" data-storage-state>Не удалось определить</span>
+                </div>
+                <div class="storage-overview">
+                    <div class="storage-ring" data-storage-ring>
+                        <span data-field="storage-percent">—</span><small>занято</small>
+                    </div>
+                    <div class="storage-summary">
+                        <strong data-field="storage-used-total">Не удалось определить</strong>
+                        <div class="storage-progress"><span data-storage-progress></span></div>
+                        <p>Свободно: <b data-field="storage-free">Не удалось определить</b></p>
+                    </div>
+                </div>
+                <div class="storage-breakdown" data-storage-breakdown></div>
+            </article>
+
+            <article class="backup-card server-card" data-server-card>
+                <div class="backup-card-heading">
+                    <div><h2>Состояние сервера</h2><p data-field="server-verdict">Проверка…</p></div>
+                    <span class="server-dot" aria-hidden="true"></span>
+                </div>
+                <dl class="status-list">
+                    <div><dt>Использование диска</dt><dd data-field="server-disk">—</dd></div>
+                    <div><dt>Свободное место</dt><dd data-field="server-free">—</dd></div>
+                    <div><dt>Последний backup</dt><dd data-field="server-backup">Не найден</dd></div>
+                    <div><dt>Возраст backup</dt><dd data-field="server-backup-age">—</dd></div>
+                    <div><dt>Состояние backup</dt><dd data-field="server-backup-state">—</dd></div>
+                    <div><dt>Расписание</dt><dd data-field="server-schedule">Расписание не определено</dd></div>
+                    <div><dt>Сервис ERP</dt><dd data-field="server-service">Не удалось определить</dd></div>
+                </dl>
+            </article>
+        </section>
+
+        <section class="backup-grid backup-grid-primary" aria-label="Данные и код">
+            <article class="backup-card">
+                <div class="backup-card-heading backup-card-actions">
+                    <div><h2>Бэкапы данных</h2><p>Резервные копии данных ERP</p></div>
+                    <button class="backup-button primary" type="button" data-create-backup>+ Создать бэкап данных сейчас</button>
+                </div>
+                <div class="latest-strip" data-last-backup>
+                    <span>Последний бэкап данных</span><strong>Бэкапы не найдены</strong>
+                </div>
+                <div class="backup-table-wrap">
+                    <table class="backup-table">
+                        <thead><tr><th>Дата</th><th>Время</th><th>Размер</th><th>Тип</th><th>Статус</th><th>Действия</th></tr></thead>
+                        <tbody data-backup-rows></tbody>
+                    </table>
+                </div>
+            </article>
+
+            <article class="backup-card">
+                <div class="backup-card-heading">
+                    <div><h2>Версии кода (Git)</h2><p>История версий приложения ERP</p></div>
+                    <a class="backup-link" data-github-link hidden target="_blank" rel="noopener noreferrer">Перейти в GitHub</a>
+                </div>
+                <div class="current-version" data-current-version>
+                    <span>Текущая версия production</span><strong>Git недоступен</strong>
+                </div>
+                <div class="git-warning" data-git-warning hidden></div>
+                <div class="backup-table-wrap">
+                    <table class="backup-table">
+                        <thead><tr><th>Дата</th><th>Commit</th><th>Ref</th><th>Сообщение</th><th>Статус</th><th>Действия</th></tr></thead>
+                        <tbody data-git-rows></tbody>
+                    </table>
+                </div>
+            </article>
+        </section>
+
+        <section class="backup-card restore-card">
+            <div class="backup-card-heading">
+                <div><h2>Точки восстановления системы</h2><p>Полное восстановление согласованной версии кода и данных ERP</p></div>
+            </div>
+            <div class="restore-warning">
+                Эта функция восстанавливает данные и код приложения до выбранной точки. Используйте её только при необходимости полного отката системы.
+            </div>
+            <div class="capability-block" data-capability-block>
+                Безопасное автоматическое восстановление пока недоступно.
+            </div>
+            <div class="backup-table-wrap">
+                <table class="backup-table">
+                    <thead><tr><th>Дата</th><th>Время</th><th>Commit</th><th>Размер данных</th><th>Проверка</th><th>Действия</th></tr></thead>
+                    <tbody data-restore-rows></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+</div>
+</body>
+</html>
