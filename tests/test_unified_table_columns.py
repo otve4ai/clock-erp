@@ -60,7 +60,7 @@ def test_existing_sales_and_warehouse_tables_keep_independent_widths_and_preview
     sales = (TEMPLATES / "sales.html").read_text(encoding="utf-8")
     warehouse = (TEMPLATES / "warehouse.html").read_text(encoding="utf-8")
 
-    assert "total + actualWidths[key]" in sales
+    assert "view.widths[columnKey] = actualWidths[columnKey]" in sales
     assert 'table.style.minWidth = renderedTotal + "px"' in warehouse
     assert "flexibleColumns" not in warehouse
     assert 'preview.className = "erp-column-drag-preview"' in sales

@@ -5600,9 +5600,25 @@
                 return;
             }
             lastContainerWidth = containerWidth;
-            actualWidths = Object.fromEntries(
-                visibleKeys.map((key) => [key, view.widths[key]])
-            );
+            const layout = view.customWidths.length
+                ? {
+                    widths: Object.fromEntries(
+                        visibleKeys.map((key) => [key, view.widths[key]])
+                    ),
+                    tableWidth: visibleKeys.reduce(
+                        (total, key) => total + view.widths[key],
+                        actionColumnWidth(),
+                    ),
+                }
+                : window.ErpTableLayout.computeColumnWidths({
+                    keys: visibleKeys,
+                    preferredWidths: view.widths,
+                    minimumWidths,
+                    growWeights,
+                    containerWidth,
+                    actionWidth: actionColumnWidth(),
+                });
+            actualWidths = layout.widths;
 
             const actionColumn = salesTable.querySelector(
                 'col[data-system-column="actions"]'
@@ -5631,10 +5647,7 @@
 
             });
 
-            const tableWidth = visibleKeys.reduce(
-                (total, key) => total + actualWidths[key],
-                actionColumnWidth(),
-            );
+            const tableWidth = layout.tableWidth;
             salesTable.style.width = tableWidth + "px";
             salesTable.dataset.horizontalOverflow = String(
                 tableWidth > containerWidth + 0.5
@@ -5771,6 +5784,14 @@
                         const startX = event.clientX;
                         const startWidth =
                             header.getBoundingClientRect().width;
+                        view.order.forEach((columnKey) => {
+                            if (!view.hidden.includes(columnKey)) {
+                                view.widths[columnKey] = actualWidths[columnKey];
+                                if (!view.customWidths.includes(columnKey)) {
+                                    view.customWidths.push(columnKey);
+                                }
+                            }
+                        });
                         handle.classList.add("is-active");
                         document.body.classList.add(
                             "sales-table-interacting",
