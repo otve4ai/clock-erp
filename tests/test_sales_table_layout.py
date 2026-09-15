@@ -89,11 +89,12 @@ process.stdout.write(JSON.stringify(layout.computeColumnWidths(options)));
 
 
 class SalesTableLayoutContractTest(unittest.TestCase):
-    def test_sales_reacts_to_container_and_focus_mode_changes(self):
+    def test_sales_keeps_independent_widths_on_layout_changes(self):
         template = (PROJECT_ROOT / "app/templates/sales.html").read_text(
             encoding="utf-8"
         )
-        self.assertIn("window.ErpTableLayout.computeColumnWidths", template)
+        self.assertIn("visibleKeys.map((key) => [key, view.widths[key]])", template)
+        self.assertIn("total + actualWidths[key]", template)
         self.assertIn('"erp:focus-mode-change"', template)
         self.assertIn('"erp:sidebar-change"', template)
         self.assertIn("customWidths", template)

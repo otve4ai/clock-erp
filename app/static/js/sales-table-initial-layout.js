@@ -40,16 +40,6 @@
         recipient_name: 140, platform: 120, country: 100,
         invoice_number: 120,
     };
-    const growWeights = {
-        created_at: 0.25, order_number: 0.75, track_number: 3, barcode: 1.5,
-        source: 0.35, brand: 2, category: 2.5, product_name: 5,
-        article: 2, quantity_display: 0.2, unit_price_display: 0.25,
-        commission: 2, order_status_label: 0.5,
-        delivery_cost_display: 0.25, region: 1.5, city: 1.5,
-        payment_method: 1, note: 4, sticker_number: 1,
-        recipient_name: 2, platform: 1.5, country: 1,
-        invoice_number: 1,
-    };
     const settingsVersion = 6;
     const minimumWidth = 76;
     const maximumWidth = 520;
@@ -154,7 +144,7 @@
     }
 
     function applyInitialLayout(table, definitions) {
-        if (!table || !root.ErpTableLayout) return null;
+        if (!table) return null;
         const availableColumns = definitions.map((column) => column.key);
         const view = readView(table.dataset.salesSettingsKey, availableColumns);
         const tableWrap = table.closest(".table-wrap");
@@ -183,15 +173,17 @@
         }
 
         const visibleKeys = view.order.filter((key) => !view.hidden.includes(key));
-        const layout = root.ErpTableLayout.computeColumnWidths({
-            keys: visibleKeys,
-            preferredWidths: view.widths,
-            minimumWidths,
-            customWidths: view.customWidths,
-            growWeights,
-            containerWidth: tableWrap ? tableWrap.clientWidth : 0,
-            actionWidth,
-        });
+        const containerWidth = tableWrap ? tableWrap.clientWidth : 0;
+        const layout = {
+            widths: Object.fromEntries(
+                visibleKeys.map((key) => [key, view.widths[key]])
+            ),
+            tableWidth: visibleKeys.reduce(
+                (total, key) => total + view.widths[key],
+                actionWidth,
+            ),
+        };
+        layout.overflow = layout.tableWidth > containerWidth + 0.5;
 
         view.order.forEach((key) => {
             const hidden = view.hidden.includes(key);

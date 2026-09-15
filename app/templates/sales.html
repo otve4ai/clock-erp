@@ -5600,16 +5600,9 @@
                 return;
             }
             lastContainerWidth = containerWidth;
-            const layout = window.ErpTableLayout.computeColumnWidths({
-                keys: visibleKeys,
-                preferredWidths: view.widths,
-                minimumWidths,
-                customWidths: view.customWidths,
-                growWeights,
-                containerWidth,
-                actionWidth: actionColumnWidth(),
-            });
-            actualWidths = layout.widths;
+            actualWidths = Object.fromEntries(
+                visibleKeys.map((key) => [key, view.widths[key]])
+            );
 
             const actionColumn = salesTable.querySelector(
                 'col[data-system-column="actions"]'
@@ -5638,9 +5631,13 @@
 
             });
 
-            salesTable.style.width = layout.tableWidth + "px";
+            const tableWidth = visibleKeys.reduce(
+                (total, key) => total + actualWidths[key],
+                actionColumnWidth(),
+            );
+            salesTable.style.width = tableWidth + "px";
             salesTable.dataset.horizontalOverflow = String(
-                layout.overflow
+                tableWidth > containerWidth + 0.5
             );
             updateEmptyRows();
         }
@@ -5865,6 +5862,7 @@
                     dragging: false,
                     target: null,
                     after: false,
+                    preview: null,
                 };
             });
 
@@ -5880,10 +5878,19 @@
                 return;
             }
 
-            headerDrag.dragging = true;
-            document.body.classList.add(
-                "sales-table-interacting"
-            );
+            if (!headerDrag.dragging) {
+                headerDrag.dragging = true;
+                document.body.classList.add(
+                    "sales-table-interacting"
+                );
+                headerDrag.header.classList.add("erp-column-dragging");
+                headerDrag.preview = document.createElement("div");
+                headerDrag.preview.className = "erp-column-drag-preview";
+                headerDrag.preview.textContent = headerDrag.header.textContent.trim();
+                document.body.appendChild(headerDrag.preview);
+            }
+            headerDrag.preview.style.left = event.clientX + 14 + "px";
+            headerDrag.preview.style.top = event.clientY + 14 + "px";
             salesTable
                 .querySelectorAll(
                     ".sales-drop-before, .sales-drop-after"
@@ -5952,6 +5959,10 @@
                 document.body.classList.remove(
                     "sales-table-interacting"
                 );
+                headerDrag.header.classList.remove("erp-column-dragging");
+                if (headerDrag.preview) {
+                    headerDrag.preview.remove();
+                }
             }
 
             headerDrag = null;
