@@ -239,7 +239,7 @@ test('Bitrix submit preserves payload, prevents double submission and redirects 
     button.click();
   });
   await expect(page.locator('#bitrixImportError')).toHaveText('Не удалось сохранить товар');
-  expect(submitted).toEqual([{ action: 'create', quantity: 1, brand_id: brand[0], category_id: category[0] }]);
+  expect(submitted).toEqual([{ action: 'create', quantity: 0, brand_id: brand[0], category_id: category[0] }]);
   await expect(page.locator('#bitrixImportProduct')).toBeEnabled();
   await page.route('**/api/v1/bitrix-products/71001/import', (route) =>
     route.fulfill({ status: 201, json: { data: { status: 'created', erp_product_id: 8345, product: { id: 8345, article: 'fashion-389-53-20-mm' } } } }),

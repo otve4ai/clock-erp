@@ -461,6 +461,13 @@ html[data-theme] :where(
     color: var(--theme-text-strong) !important;
 }
 
+/* Search clear buttons sit inside the input, without a button surface. */
+html[data-theme] .erp-search-clear,
+html[data-theme] .erp-search-clear:hover:not(:disabled):not([aria-disabled="true"]) {
+    border-color: transparent !important;
+    background-color: transparent !important;
+}
+
 html[data-theme] .erp-filter-trigger.is-active {
     border-color: var(--theme-info) !important;
     background-color: var(--theme-info-soft) !important;
