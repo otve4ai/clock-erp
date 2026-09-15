@@ -181,8 +181,16 @@ class ProductCategoryBackfill:
 
     def preview(self):
         self.database.initialize()
-        with self.database.connect() as connection:
+        if str(self.database.path) == ":memory:":
+            with self.database.connect() as connection:
+                return self._build(connection)
+        uri = self.database.path.resolve().as_uri() + "?mode=ro"
+        connection = sqlite3.connect(uri, uri=True)
+        connection.row_factory = sqlite3.Row
+        try:
             return self._build(connection)
+        finally:
+            connection.close()
 
     def backup(self, backup_dir=None):
         source = Path(self.database.path)
