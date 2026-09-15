@@ -36,6 +36,7 @@ from app.services.shared_catalog import (
     catalog_search_key,
     get_or_create_brand,
     get_or_create_category,
+    normalized_name,
     register_catalog_search,
 )
 
@@ -806,7 +807,7 @@ class ExcelProductCatalog:
             "model": "COALESCE(p.model, '')",
             "article": "COALESCE(p.excel_article, '')",
             "brand": "COALESCE(p.excel_brand, '')",
-            "category": "COALESCE(p.excel_category, '')",
+            "category": "COALESCE(c.name, '')",
             "stock": "p.stock",
             "cell": "COALESCE(p.cell, '')",
             "created_at": "p.created_at",
@@ -830,12 +831,13 @@ class ExcelProductCatalog:
             )
             parameters.extend([prefix_pattern] * 4)
         if category:
+            category_key = normalized_name(category)
             where.append(
-                "(COALESCE(p.excel_category, '') = ? OR "
-                "substr(COALESCE(p.excel_category, ''), "
-                "1, length(?) + 1) = ? || '/')"
+                "p.category_id IN (SELECT id FROM erp_categories "
+                "WHERE active = 1 AND (normalized_name = ? OR "
+                "substr(normalized_name, 1, length(?) + 1) = ? || '/'))"
             )
-            parameters.extend([category, category, category])
+            parameters.extend([category_key, category_key, category_key])
         if model:
             where.append(
                 "(p.model_id IN (SELECT id FROM erp_models WHERE normalized_name = ?) "
@@ -1003,12 +1005,11 @@ class ExcelProductCatalog:
                 ).fetchone()[0]
                 brands = [group["name"] for group in brand_groups]
                 categories = [row[0] for row in connection.execute(
-                    "SELECT DISTINCT COALESCE(p.excel_category, '') AS value "
-                    "FROM catalog_excel_products p JOIN catalog_excel_batches b "
-                    "ON b.id = p.current_batch_id WHERE p.active = 1 AND "
-                    + visible_cards_sql + " "
-                    "AND trim(COALESCE(p.excel_category, '')) <> '' "
-                    "ORDER BY value"
+                    "SELECT DISTINCT c.name FROM catalog_excel_products p "
+                    "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
+                    "JOIN erp_categories c ON c.id = p.category_id "
+                    "WHERE p.active = 1 AND c.active = 1 AND "
+                    + visible_cards_sql + " ORDER BY c.name COLLATE NOCASE"
                 ).fetchall()]
                 models = [row[0] for row in connection.execute(
                     "SELECT MIN(trim(p.model)) AS value "
@@ -1021,12 +1022,13 @@ class ExcelProductCatalog:
                     "ORDER BY value COLLATE NOCASE"
                 ).fetchall()]
                 category_groups = [dict(row) for row in connection.execute(
-                    "SELECT COALESCE(p.excel_category, '') AS name, "
-                    "COUNT(*) AS count FROM catalog_excel_products p "
+                    "SELECT c.name AS name, COUNT(*) AS count "
+                    "FROM catalog_excel_products p "
                     "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
-                    "WHERE p.active = 1 AND " + visible_cards_sql + " "
-                    "AND trim(COALESCE(p.excel_category, '')) <> '' "
-                    "GROUP BY name ORDER BY name"
+                    "JOIN erp_categories c ON c.id = p.category_id "
+                    "WHERE p.active = 1 AND c.active = 1 AND "
+                    + visible_cards_sql + " GROUP BY c.id, c.name "
+                    "ORDER BY c.name COLLATE NOCASE"
                 ).fetchall()]
                 cell_item_names_sql = (
                     ", GROUP_CONCAT(p.excel_name_raw, char(31)) AS item_names "
@@ -1349,11 +1351,13 @@ class ExcelProductCatalog:
         self.database.initialize()
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT p.*, cp.barcode AS bitrix_barcode, "
+                "SELECT p.*, c.name AS category_name, "
+                "cp.barcode AS bitrix_barcode, "
                 "b.source_filename, b.applied_at FROM catalog_excel_products p "
                 "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
                 "LEFT JOIN catalog_products cp "
                 "ON cp.id = p.bitrix_catalog_product_id "
+                "LEFT JOIN erp_categories c ON c.id = p.category_id "
                 "WHERE p.id = ? AND p.active = 1 AND "
                 + VISIBLE_PRODUCT_SQL,
                 (int(product_id),),
@@ -2114,7 +2118,13 @@ class ExcelProductCatalog:
     def _prepare_product(item):
         item["display_name"] = item.get("bitrix_name") or item.get("excel_name_raw")
         item["display_brand"] = item.get("bitrix_brand") or item.get("excel_brand")
-        item["display_category"] = item.get("bitrix_category") or item.get("excel_category")
+        item["display_category"] = item.get("category_name") or ""
+        item["legacy_category"] = (
+            item.get("excel_category") or item.get("bitrix_category") or ""
+        )
+        item["category_is_legacy"] = bool(
+            not item.get("category_id") and item["legacy_category"]
+        )
         item["candidates"] = _load_json(item.get("candidates_json"), [])
         item["gallery"] = _load_json(item.get("bitrix_gallery_json"), [])
         item["properties"] = _load_json(item.get("bitrix_properties_json"), [])

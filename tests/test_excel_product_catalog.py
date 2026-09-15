@@ -171,7 +171,11 @@ class ExcelProductCatalogTest(unittest.TestCase):
         self.assertEqual(item["bitrix_barcode"], "BARCODE-10")
         self.assertEqual(item["bitrix_thumbnail_url"], "https://example.test/preview.jpg")
         self.assertEqual(item["bitrix_primary_image_url"], "https://example.test/large.jpg")
-        self.assertEqual((item["bitrix_price_amount"], item["display_category"]), ("100", "Watches"))
+        self.assertEqual(
+            (item["bitrix_price_amount"], item["display_category"]),
+            ("100", "Excel category"),
+        )
+        self.assertEqual(item["legacy_category"], "Excel category")
         self.assertEqual(item["properties"][0]["value"], "Black")
         with self.database.connect() as connection:
             registry_row = connection.execute(
