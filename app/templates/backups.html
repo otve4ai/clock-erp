@@ -31,7 +31,11 @@
         <div class="backup-notice" data-message hidden role="status"></div>
         <div class="backup-operation" data-operation hidden>
             <span class="backup-operation-spinner" aria-hidden="true"></span>
-            <div><strong data-operation-title>Выполняется операция</strong><span data-operation-message></span></div>
+            <div class="backup-operation-content">
+                <strong data-operation-title>Выполняется операция</strong>
+                <span data-operation-message></span>
+                <ol class="recovery-progress" data-operation-progress></ol>
+            </div>
         </div>
 
         <section class="backup-grid backup-grid-storage" aria-label="Состояние инфраструктуры">
@@ -122,6 +126,19 @@
                 </table>
             </div>
         </section>
+
+        <dialog class="recovery-dialog" data-recovery-dialog>
+            <form method="dialog" data-recovery-form>
+                <h2 data-dialog-title>Подтверждение</h2>
+                <div class="recovery-dialog-details" data-dialog-details></div>
+                <label for="recovery-confirmation" data-dialog-label>Введите подтверждение</label>
+                <input id="recovery-confirmation" autocomplete="off" data-dialog-confirmation>
+                <div class="recovery-dialog-actions">
+                    <button class="backup-button" value="cancel">Отмена</button>
+                    <button class="backup-button danger" type="button" data-dialog-submit disabled>Подтвердить</button>
+                </div>
+            </form>
+        </dialog>
     </main>
 </div>
 </body>

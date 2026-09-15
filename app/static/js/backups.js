@@ -13,6 +13,16 @@
     let watchedOperationId = bootstrap.status && bootstrap.status.operation && bootstrap.status.operation.active
         ? bootstrap.status.operation.id
         : null;
+    let refreshTimer = null;
+    let pendingRecovery = null;
+    const stageLabels = {
+        pending: "Ожидает", preflight: "Предварительная проверка",
+        safety_backup: "Safety backup", safety_check: "Проверка backup",
+        staging_restore: "Staging", staging_check: "Проверка staging",
+        maintenance: "Режим обслуживания", production_restore: "Восстановление",
+        service_restart: "Перезапуск", health_check: "Проверка ERP",
+        completed: "Готово", failed: "Ошибка", critical: "Критическая ошибка",
+    };
 
     function bytes(value) {
         if (!Number.isFinite(value)) return unknown;
@@ -125,9 +135,16 @@
             const restore = document.createElement("button");
             restore.type = "button";
             restore.className = "backup-button danger";
-            restore.textContent = "Восстановить";
-            restore.disabled = !status.capabilities.data_restore || backup.status === "error" || status.operation.active;
-            restore.title = restore.disabled ? status.capabilities.blocked_reason : "Восстановить только данные ERP";
+            restore.textContent = "Восстановить данные";
+            restore.disabled = !backup.can_restore_data || status.operation.active;
+            restore.title = restore.disabled ? (backup.restore_data_reason || status.capabilities.blocked_reason || "Операция недоступна") : "Восстановить только данные ERP";
+            restore.addEventListener("click", () => openRecovery({
+                kind: "data_restore", backupId: backup.backup_id,
+                title: "Восстановить данные",
+                confirmation: "ВОССТАНОВИТЬ",
+                details: `Backup: ${parts.full}\nРазмер: ${bytes(backup.size)}\nБудут заменены persistent-данные ERP. Код останется текущим.`,
+                url: `/api/v1/backups/${encodeURIComponent(backup.backup_id)}/restore`,
+            }));
             actions.appendChild(restore);
             row.appendChild(actions);
             body.appendChild(row);
@@ -170,8 +187,14 @@
             button.type = "button";
             button.className = "backup-button danger";
             button.textContent = "Откатить код";
-            button.disabled = item.current || git.dirty !== false || !status.capabilities.code_rollback || status.operation.active;
-            button.title = button.disabled ? status.capabilities.blocked_reason : "Данные ERP не изменятся";
+            button.disabled = !item.can_rollback || status.operation.active;
+            button.title = button.disabled ? (item.rollback_reason || status.capabilities.blocked_reason || "Операция недоступна") : "Данные ERP не изменятся";
+            button.addEventListener("click", () => openRecovery({
+                kind: "code_rollback", title: "Откатить код",
+                confirmation: "ОТКАТИТЬ КОД",
+                details: `${git.short || git.commit} → ${item.short}\n${item.message}\nДанные ERP не изменяются.`,
+                url: `/api/v1/backups/code/${encodeURIComponent(item.commit)}/rollback`,
+            }));
             action.appendChild(button);
             row.appendChild(action);
             body.appendChild(row);
@@ -195,12 +218,22 @@
             button.type = "button";
             button.className = "backup-button danger";
             button.textContent = "Восстановить систему";
-            button.disabled = !status.capabilities.full_restore || status.operation.active;
+            button.disabled = !point.can_restore_system || status.operation.active;
+            button.title = button.disabled ? (point.restore_system_reason || status.capabilities.blocked_reason || "Операция недоступна") : "Восстановить код и данные";
+            button.addEventListener("click", () => openRecovery({
+                kind: "full_restore", backupId: point.backup_id,
+                title: "Восстановить систему",
+                confirmation: "ВОССТАНОВИТЬ СИСТЕМУ",
+                details: `Точка: ${parts.full}\nBackup: ${point.backup_id}\nCommit: ${(point.git_commit || "").slice(0, 12)}\nSchema: ${Object.entries(point.schema_versions || {}).map(([name, version]) => `${name}=${version}`).join(", ") || "Recovery V2 подтверждена"}\nБудут заменены и код, и данные ERP.`,
+                url: `/api/v1/backups/${encodeURIComponent(point.backup_id)}/restore-system`,
+            }));
             action.appendChild(button);
             row.appendChild(action);
             body.appendChild(row);
         });
-        q("[data-capability-block]").textContent = status.capabilities.blocked_reason;
+        q("[data-capability-block]").textContent = status.capabilities.blocked_reason
+            || (points.find((point) => !point.can_restore_system) || {}).restore_system_reason
+            || "Backend проверяет backup, commit и совместимость перед каждой операцией.";
     }
 
     function render(status) {
@@ -219,22 +252,35 @@
         renderRestorePoints(status);
         const operation = status.operation || {};
         const panel = q("[data-operation]");
-        panel.hidden = !operation.active;
+        const persistentFailure = ["failed", "critical"].includes(operation.status) && operation.kind !== "manual_backup";
+        panel.hidden = !operation.active && !persistentFailure;
+        panel.classList.toggle("error", persistentFailure);
         if (operation.active) {
             watchedOperationId = operation.id || watchedOperationId;
         } else if (
             watchedOperationId
             && operation.id === watchedOperationId
-            && (operation.status === "complete" || operation.status === "error")
+            && ["complete", "error", "completed", "failed", "critical"].includes(operation.status)
         ) {
             showMessage(
-                operation.message || (operation.status === "complete" ? "Бэкап создан" : "Не удалось создать бэкап"),
-                operation.status === "error"
+                operation.message || (["complete", "completed"].includes(operation.status) ? "Операция завершена" : "Операция завершилась с ошибкой"),
+                ["error", "failed", "critical"].includes(operation.status)
             );
             watchedOperationId = null;
         }
-        text("[data-operation-title]", operation.kind === "manual_backup" ? "Создание бэкапа" : "Выполняется операция");
-        text("[data-operation-message]", operation.message || operation.status || "");
+        const operationTitles = { manual_backup: "Создание бэкапа", data_restore: "Восстановление данных", code_rollback: "Откат кода", full_restore: "Полное восстановление" };
+        text("[data-operation-title]", operationTitles[operation.kind] || "Выполняется операция");
+        const rollback = operation.automatic_rollback && operation.automatic_rollback.result;
+        const rollbackText = rollback === "completed" ? " Предыдущее состояние автоматически восстановлено." : rollback === "failed" ? " Automatic rollback не завершён." : "";
+        text("[data-operation-message]", `${operation.message || operation.status || ""}${rollbackText}`);
+        const progress = q("[data-operation-progress]");
+        progress.replaceChildren();
+        (operation.progress || []).forEach((item, index, items) => {
+            const node = document.createElement("li");
+            node.textContent = item.label || stageLabels[item.stage] || item.stage;
+            node.className = index < items.length - 1 ? "done" : (operation.status === "failed" || operation.status === "critical" ? "failed" : "current");
+            progress.appendChild(node);
+        });
         const create = q("[data-create-backup]");
         create.disabled = operation.active || !status.capabilities.manual_backup;
         create.title = status.capabilities.manual_backup ? "" : "Штатный backup-скрипт недоступен";
@@ -247,13 +293,75 @@
         node.textContent = message;
     }
 
+    function operationKey() {
+        if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+        return `recovery-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+
+    function openRecovery(configuration) {
+        pendingRecovery = configuration;
+        const dialog = q("[data-recovery-dialog]");
+        text("[data-dialog-title]", configuration.title);
+        text("[data-dialog-details]", configuration.details);
+        text("[data-dialog-label]", `Введите ${configuration.confirmation}`);
+        const input = q("[data-dialog-confirmation]");
+        input.value = "";
+        input.dataset.expected = configuration.confirmation;
+        q("[data-dialog-submit]").disabled = true;
+        dialog.showModal();
+        input.focus();
+    }
+
+    q("[data-dialog-confirmation]").addEventListener("input", (event) => {
+        q("[data-dialog-submit]").disabled = event.target.value !== event.target.dataset.expected;
+    });
+
+    q("[data-dialog-submit]").addEventListener("click", async () => {
+        if (!pendingRecovery) return;
+        const configuration = pendingRecovery;
+        const confirmation = q("[data-dialog-confirmation]").value;
+        q("[data-dialog-submit]").disabled = true;
+        try {
+            const response = await fetch(configuration.url, {
+                method: "POST",
+                headers: {
+                    Accept: "application/json", "Content-Type": "application/json",
+                    "X-CSRF-Token": bootstrap.csrf, "X-Idempotency-Key": operationKey(),
+                },
+                body: JSON.stringify({ confirmation }),
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.message || "Не удалось запустить recovery");
+            watchedOperationId = payload.data.id;
+            q("[data-recovery-dialog]").close();
+            pendingRecovery = null;
+            await refresh();
+        } catch (error) {
+            q("[data-recovery-dialog]").close();
+            pendingRecovery = null;
+            showMessage(error.message || "Не удалось запустить recovery", true);
+        }
+    });
+
     async function refresh() {
         const response = await fetch("/api/v1/backups/status", { headers: { Accept: "application/json" } });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.message || "Не удалось обновить состояние");
         bootstrap.status = payload.data;
         render(payload.data);
-        if (payload.data.operation && payload.data.operation.active) window.setTimeout(refresh, 2500);
+        if (payload.data.operation && payload.data.operation.active) scheduleRefresh(2500);
+    }
+
+    function scheduleRefresh(delay) {
+        if (refreshTimer) window.clearTimeout(refreshTimer);
+        refreshTimer = window.setTimeout(async () => {
+            refreshTimer = null;
+            try {
+                await refresh();
+            } catch (error) {
+                if (watchedOperationId) scheduleRefresh(2500);
+            }
+        }, delay);
     }
 
     q("[data-create-backup]").addEventListener("click", async () => {
@@ -276,5 +384,9 @@
     });
 
     render(bootstrap.status || {});
-    window.setTimeout(() => refresh().catch(() => showMessage("Не удалось обновить актуальное состояние", true)), 30000);
+    if (watchedOperationId) {
+        scheduleRefresh(2500);
+    } else {
+        refreshTimer = window.setTimeout(() => refresh().catch(() => showMessage("Не удалось обновить актуальное состояние", true)), 30000);
+    }
 }());

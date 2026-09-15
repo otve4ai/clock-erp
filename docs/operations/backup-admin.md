@@ -19,10 +19,67 @@ systemd/nginx/cron/TLS/SSH, venv, Git-код и внешняя БД Bitrix. Ко
 пишет закрытую metadata с backup ID, timestamp, типом, размером, commit/branch и
 schema state. Старые архивы без metadata не считаются точками `код + данные`.
 
-Restore и rollback через UI заблокированы до установки ограниченного privileged
-helper и успешной репетиции на изолированной копии. Аварийное восстановление не
-зависит от Flask: оператор проверяет архив, извлекает его в новый закрытый staging,
-проверяет все SQLite read-only, останавливает все writers, создаёт safety backup,
-атомарно заменяет `instance`, восстанавливает согласованный Git commit и только
-после schema/service/HTTP/read-only бизнес-проверок возвращает фоновые процессы.
-Текущие `.env` и системные настройки нельзя заменять автоматически.
+## Recovery V2
+
+Recovery выполняет только установленный root-owned helper
+`/usr/local/sbin/clock-erp-recovery`. Flask передаёт ему только созданный на
+сервере `operation_id`; backup ID и commit повторно проверяются helper. Helper не
+принимает shell-команды или filesystem paths. Состояния и безопасные журналы
+лежат в `/opt/clock-erp-backups/recovery/{operations,logs}` с mode `0600`.
+
+Совместимость определяется на backend по точному Git commit, версии Recovery
+metadata, хешу `ops/recovery-schema-contract.json`, полному file manifest,
+SQLite schema digest и обязательным таблицам. Поэтому legacy-копии остаются
+видимыми бэкапами данных, но автоматическое восстановление для них запрещено.
+Откат кода и полный restore также блокируются, если `requirements.txt` выбранной
+версии отличается от декларации зависимостей текущего immutable release.
+
+Перед заменой данных helper создаёт отдельный проверенный архив типа «Перед
+восстановлением» в `/opt/clock-erp-backups/safety`; обычная retention-ротация
+его не удаляет. Выбранный архив безопасно распаковывается в закрытый staging с
+запретом traversal, ссылок и special files. После сверки manifests включается
+maintenance marker, останавливаются web service и фоновые writer timers, затем
+`instance` меняется атомарным directory swap. `.env` из архива игнорируется.
+
+Код запускается из immutable release `/opt/clock-erp-releases/<commit>` через
+атомарный `/opt/clock-erp-current`. Source checkout `/opt/clock-erp` остаётся на
+чистой `main`, поэтому rollback не использует detached HEAD, `reset --hard` или
+удаление local changes. Full restore объединяет тот же data swap и точный release
+commit из metadata. При ошибке после swap выполняется одна попытка возврата к
+safety state; повторная ошибка переводит операцию в `critical` и сохраняет
+диагностику.
+
+## ERP работает
+
+Владелец открывает «Бэкапы», выбирает разрешённое backend действие и вводит
+различающийся текст подтверждения. Во время операции страница показывает
+реальные этапы; обновление страницы не теряет `operation_id`. Недоступная кнопка
+содержит конкретную причину блокировки.
+
+## ERP не запускается
+
+Используется тот же helper, без Flask и без путей от оператора:
+
+```bash
+/usr/local/sbin/clock-erp-recovery restore-data --backup-id <backup_id> --idempotency-key <unique-key>
+/usr/local/sbin/clock-erp-recovery rollback-code --commit <40-char-commit> --idempotency-key <unique-key>
+/usr/local/sbin/clock-erp-recovery restore-system --backup-id <backup_id> --idempotency-key <unique-key>
+```
+
+Helper сам блокирует неизвестные ID, неподтверждённые metadata/commit, dirty Git,
+несовместимую schema, недостаток места и параллельную операцию.
+
+## Recovery failed
+
+Текущее безопасное состояние выводится командой:
+
+```bash
+/usr/local/sbin/clock-erp-recovery status <operation_id>
+```
+
+Технический журнал находится в
+`/opt/clock-erp-backups/recovery/logs/<operation_id>.jsonl`. В нём нет содержимого
+`.env`, токенов, паролей или stack traces. Статус `critical` означает, что
+единственная automatic rollback попытка не завершилась; maintenance остаётся
+включённым, повторные destructive команды не запускают и проводят ручную
+диагностику по operation state и recovery log.

@@ -9,6 +9,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
@@ -29,6 +30,9 @@ LEGACY_PRE_PRODUCT_RE = re.compile(
 )
 LEGACY_P0_RE = re.compile(
     r"^clock-erp-p0-(\d{8})-(\d{6})-[0-9a-f]+\.tar\.gz$"
+)
+SAFETY_RE = re.compile(
+    r"^clock-erp-safety-(\d{8})-(\d{6})-([0-9a-f]{32})\.tar\.gz$"
 )
 PRESERVED_ORDERS_DIR_RE = re.compile(r"^preserved-orders-\d+$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
@@ -93,6 +97,9 @@ class BackupAdminService:
         cron_path="/etc/cron.d/clock-erp-backup-retention",
         subprocess_timeout=8,
         remote_check=True,
+        recovery_helper=None,
+        recovery_contract=None,
+        current_release=None,
     ):
         self.project_root = Path(project_root).resolve()
         self.backup_root = Path(backup_root).resolve()
@@ -101,6 +108,13 @@ class BackupAdminService:
         self.cron_path = Path(cron_path)
         self.subprocess_timeout = int(subprocess_timeout)
         self.remote_check = bool(remote_check)
+        self.recovery_helper = Path(
+            recovery_helper or self.project_root / "scripts" / "clock_erp_recovery.py"
+        ).resolve()
+        self.recovery_contract = Path(
+            recovery_contract or self.project_root / "ops" / "recovery-schema-contract.json"
+        ).resolve()
+        self.current_release = Path(current_release or "/opt/clock-erp-current")
         self.metadata_root = self.backup_root / "metadata"
         self.operation_path = self.backup_root / ".backup-admin-operation.json"
         self.operation_guard_path = self.backup_root / ".backup-admin-operation.lock"
@@ -158,6 +172,7 @@ class BackupAdminService:
                  LEGACY_PRE_PRODUCT_RE),
             ),
             (self.backup_root / "temporary", "temporary", (TEMP_RE, LEGACY_P0_RE)),
+            (self.backup_root / "safety", "pre_restore", (SAFETY_RE,)),
         )
         try:
             preserved_directories = [
@@ -244,6 +259,10 @@ class BackupAdminService:
                     "git_branch": metadata.get("git_branch"),
                     "schema_versions": metadata.get("schema_versions"),
                     "metadata": bool(metadata),
+                    "metadata_version": metadata.get("metadata_version"),
+                    "database_manifest": metadata.get("database_manifest"),
+                    "file_manifest": metadata.get("file_manifest"),
+                    "recovery_contract": metadata.get("recovery_contract"),
                     "_path": path,
                     "_relative": relative,
                 })
@@ -255,6 +274,9 @@ class BackupAdminService:
             for backup in backups:
                 backup.pop("_path", None)
                 backup.pop("_relative", None)
+                backup.pop("database_manifest", None)
+                backup.pop("file_manifest", None)
+                backup.pop("recovery_contract", None)
         return backups
 
     def backup_directory_status(self):
@@ -413,6 +435,18 @@ class BackupAdminService:
                     "date": fields[2], "message": fields[3],
                     "current": fields[0] == head,
                 })
+        try:
+            release = _safe_json_read(self.current_release.resolve() / ".erp-release.json")
+        except OSError:
+            release = None
+        if release and re.fullmatch(r"[0-9a-f]{40}", str(release.get("commit") or "")):
+            deployed = str(release["commit"])
+            deployed_short = deployed[:8]
+            deployed_message = self._git_output(["show", "-s", "--format=%s", deployed])
+            deployed_date = self._git_output(["show", "-s", "--format=%cI", deployed])
+            head, short, message, commit_date = deployed, deployed_short, deployed_message, deployed_date
+            for item in history:
+                item["current"] = item["commit"] == deployed
         github_url = None
         if remote_url:
             match = re.match(r"(?:git@|https://)(github\.com)[:/]([^/]+)/([^/]+?)(?:\.git)?$", remote_url)
@@ -428,6 +462,133 @@ class BackupAdminService:
             "remote_commit": remote_head, "remote_url": github_url,
             "history": history,
         }
+
+    def _recovery_capabilities(self, backups, git, operation):
+        from app.services.recovery_v2 import _json_hash, inspect_instance
+
+        helper_available = self.recovery_helper.is_file() and os.access(str(self.recovery_helper), os.X_OK)
+        release_available = self.current_release.is_symlink()
+        contract_hash = None
+        manifest = None
+        environment_reason = None
+        try:
+            contract_hash, contract = _json_hash(self.recovery_contract)
+            manifest = inspect_instance(self.project_root / "instance", contract)
+        except Exception:
+            environment_reason = "Не удалось подтвердить текущую схему данных"
+        if not helper_available:
+            environment_reason = "Ограниченный Recovery V2 helper не установлен"
+        if git.get("dirty") is not False:
+            environment_reason = "Production содержит незакоммиченные изменения"
+        if operation.get("active"):
+            environment_reason = "Другая backup/recovery операция уже выполняется"
+
+        for backup in backups:
+            common_reason = environment_reason
+            if not common_reason and backup.get("status") != "verified":
+                common_reason = "Бэкап повреждён или не проверен"
+            if not common_reason and backup.get("metadata_version") != 2:
+                common_reason = "У backup нет metadata Recovery V2"
+            if not common_reason and not backup.get("file_manifest"):
+                common_reason = "Metadata не подтверждает состав persistent data"
+
+            data_reason = common_reason
+            if not data_reason and backup.get("recovery_contract") != contract_hash:
+                data_reason = "Версия данных несовместима с текущим кодом"
+            if not data_reason and not self._manifests_match(
+                backup.get("database_manifest"), manifest
+            ):
+                data_reason = "Схема backup несовместима с текущей схемой"
+            backup["can_restore_data"] = data_reason is None
+            backup["restore_data_reason"] = data_reason
+
+            full_reason = common_reason
+            if not full_reason and not backup.get("git_commit"):
+                full_reason = "Metadata не содержит точный Git commit"
+            if not full_reason and not release_available:
+                full_reason = "Атомарный release runtime не настроен"
+            if not full_reason:
+                target_contract = self._git_output([
+                    "show", str(backup["git_commit"]) + ":ops/recovery-schema-contract.json"
+                ])
+                if not target_contract:
+                    full_reason = "Для выбранного commit нет Recovery V2 контракта"
+                else:
+                    try:
+                        value = json.loads(target_contract)
+                        normalized = json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                                separators=(",", ":"))
+                        target_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+                        if target_hash != backup.get("recovery_contract"):
+                            full_reason = "Код и данные точки восстановления несовместимы"
+                        elif set(backup.get("database_manifest") or {}) != set(
+                            value.get("databases") or {}
+                        ):
+                            full_reason = "Metadata не подтверждает все базы выбранного кода"
+                    except ValueError:
+                        full_reason = "Контракт выбранного commit некорректен"
+            if not full_reason and not self._requirements_match_release(backup["git_commit"]):
+                full_reason = "Зависимости выбранного кода отличаются от production runtime"
+            backup["can_restore_system"] = full_reason is None
+            backup["restore_system_reason"] = full_reason
+
+        for item in git.get("history", []):
+            reason = environment_reason
+            if item.get("current"):
+                reason = "Это текущая версия production"
+            elif git.get("dirty") is not False:
+                reason = "Production содержит незакоммиченные изменения"
+            elif not release_available:
+                reason = "Атомарный release runtime не настроен"
+            if not reason:
+                target_contract = self._git_output([
+                    "show", item["commit"] + ":ops/recovery-schema-contract.json"
+                ])
+                if not target_contract:
+                    reason = "Для версии кода нет Recovery V2 контракта"
+                else:
+                    try:
+                        value = json.loads(target_contract)
+                        normalized = json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                                separators=(",", ":"))
+                        if hashlib.sha256(normalized.encode("utf-8")).hexdigest() != contract_hash:
+                            reason = "Версия кода несовместима с текущей схемой данных"
+                    except ValueError:
+                        reason = "Контракт версии кода некорректен"
+            if not reason and not self._requirements_match_release(item["commit"]):
+                reason = "Зависимости версии отличаются от production runtime"
+            item["can_rollback"] = reason is None
+            item["rollback_reason"] = reason
+
+        return {
+            "manual_backup": None,
+            "data_restore": any(item.get("can_restore_data") for item in backups),
+            "code_rollback": any(item.get("can_rollback") for item in git.get("history", [])),
+            "full_restore": any(item.get("can_restore_system") for item in backups),
+            "blocked_reason": environment_reason,
+            "helper_available": helper_available,
+            "release_runtime": release_available,
+        }
+
+    @staticmethod
+    def _manifests_match(left, right):
+        if not isinstance(left, dict) or not isinstance(right, dict) or set(left) != set(right):
+            return False
+        return all(
+            left[name].get("user_version") == right[name].get("user_version")
+            and left[name].get("schema_digest") == right[name].get("schema_digest")
+            for name in left
+        )
+
+    def _requirements_match_release(self, commit):
+        try:
+            current = (self.current_release.resolve() / "requirements.txt").read_text(
+                encoding="utf-8"
+            )
+            target = self._git_output(["show", str(commit) + ":requirements.txt"])
+        except OSError:
+            return False
+        return target is not None and target == current.strip()
 
     def schedule_status(self):
         try:
@@ -462,20 +623,37 @@ class BackupAdminService:
         if not operation:
             return {"active": False, "status": "idle"}
         if operation.get("active") and time.time() - float(operation.get("updated_epoch", 0)) > 7200:
+            stale_status = "error" if operation.get("kind") == "manual_backup" else "failed"
             operation.update({
-                "active": False, "status": "error",
+                "active": False, "status": stale_status, "stage": stale_status,
                 "message": "Операция прервана или её статус устарел",
+                "error_code": "OPERATION_STALE",
                 "updated_at": _utc_now(), "updated_epoch": time.time(),
             })
+            if stale_status == "failed":
+                operation.setdefault("progress", []).append({
+                    "stage": "failed", "label": "Ошибка", "at": _utc_now(),
+                })
             try:
                 _atomic_json_write(self.operation_path, operation)
+                operation_id = str(operation.get("id") or "")
+                if re.fullmatch(r"[0-9a-f]{32}", operation_id):
+                    _atomic_json_write(
+                        self.backup_root / "recovery" / "operations" / (operation_id + ".json"),
+                        operation,
+                    )
             except OSError:
                 pass
+        for internal_key in (
+            "safety_backup_path", "staging_path", "previous_instance",
+            "previous_release", "target_release", "current_manifest",
+        ):
+            operation.pop(internal_key, None)
         return operation
 
     def status(self):
         backup_directory = self.backup_directory_status()
-        backups = self.list_backups(public=True)
+        backups = self.list_backups(public=False)
         storage = self.storage_status()
         service = self.service_status()
         last_backup = backups[0] if backups else None
@@ -500,38 +678,46 @@ class BackupAdminService:
             or (backup_age is not None and backup_age > 30 * 60 * 60)
         ):
             overall = "warning"
+        operation = self.operation_status()
+        git = self.git_status()
+        capabilities = self._recovery_capabilities(backups, git, operation)
+        capabilities["manual_backup"] = (
+            self.backup_script.is_file()
+            and os.access(str(self.backup_script), os.X_OK)
+            and backup_directory["available"]
+            and os.access(str(self.backup_root), os.W_OK)
+            and not operation.get("active")
+        )
+        restore_points = [backup for backup in backups if (
+            backup.get("metadata_version") == 2
+            and backup.get("status") == "verified"
+            and backup.get("git_commit")
+            and backup.get("database_manifest")
+            and backup.get("file_manifest")
+            and backup.get("recovery_contract")
+        )]
+        for backup in backups:
+            backup.pop("_path", None)
+            backup.pop("_relative", None)
+            backup.pop("database_manifest", None)
+            backup.pop("file_manifest", None)
+            backup.pop("recovery_contract", None)
         return {
             "checked_at": _local_now(), "storage": storage, "service": service,
             "backup_directory": backup_directory,
             "schedule": self.schedule_status(), "backups": backups,
-            "last_backup": last_backup, "git": self.git_status(),
-            "operation": self.operation_status(), "overall": overall,
-            "capabilities": {
-                "manual_backup": (
-                    self.backup_script.is_file()
-                    and os.access(str(self.backup_script), os.X_OK)
-                    and backup_directory["available"]
-                    and os.access(str(self.backup_root), os.W_OK)
-                ),
-                "data_restore": False, "code_rollback": False, "full_restore": False,
-                "blocked_reason": (
-                    "Восстановление доступно только после установки ограниченного "
-                    "privileged helper и успешной изолированной проверки restore"
-                ),
-            },
-            "restore_points": [backup for backup in backups if (
-                backup.get("metadata") and backup.get("status") == "verified"
-                and backup.get("integrity_status") == "verified"
-                and backup.get("git_commit") and backup.get("schema_versions")
-            )],
+            "last_backup": last_backup, "git": git,
+            "operation": operation, "overall": overall,
+            "capabilities": capabilities,
+            "restore_points": restore_points,
         }
 
     def _audit(self, actor, action, result, backup_id=None, source_commit=None,
-               target_commit=None, error=None):
+               target_commit=None, error=None, operation_id=None):
         event = {
             "timestamp": _utc_now(), "actor_id": str(actor.get("id") or "unknown"),
             "actor": str(actor.get("email") or actor.get("name") or "unknown")[:160],
-            "action": action, "backup_id": backup_id,
+            "action": action, "operation_id": operation_id, "backup_id": backup_id,
             "source_commit": source_commit, "target_commit": target_commit,
             "result": result, "error": str(error or "")[:300] or None,
         }
@@ -571,6 +757,28 @@ class BackupAdminService:
             except (OSError, sqlite3.Error):
                 versions[database.name] = None
         return versions
+
+    def _capture_recovery_metadata(self, archive_path=None):
+        from app.services.recovery_v2 import (
+            RecoveryEngine, _json_hash, inspect_file_manifest, inspect_instance,
+        )
+        contract_hash, contract = _json_hash(self.recovery_contract)
+        temporary = None
+        instance = self.project_root / "instance"
+        try:
+            if archive_path is not None:
+                temporary = Path(tempfile.mkdtemp(prefix="erp-backup-metadata-"))
+                extraction = temporary / "extracted"
+                engine = RecoveryEngine(
+                    self.project_root, self.backup_root, self.backup_script,
+                    self.recovery_contract, system_actions=False,
+                )
+                instance = engine._safe_extract(Path(archive_path), extraction)
+            manifest = inspect_instance(instance, contract, require_all=False)
+            return contract_hash, manifest, inspect_file_manifest(instance)
+        finally:
+            if temporary is not None:
+                shutil.rmtree(str(temporary), ignore_errors=True)
 
     def _verify_archive(self, path, expected_databases):
         found_databases = set()
@@ -633,14 +841,25 @@ class BackupAdminService:
             operation.update(status="verifying", message="Проверяется целостность бэкапа")
             self._set_operation(operation)
             databases = self._verify_archive(backup["_path"], expected_databases)
+            try:
+                contract_hash, database_manifest, file_manifest = self._capture_recovery_metadata(
+                    backup["_path"]
+                )
+            except Exception:
+                contract_hash, database_manifest, file_manifest = None, None, None
             metadata = {
-                "metadata_version": 1, "backup_id": backup["backup_id"],
+                "metadata_version": 2 if contract_hash and database_manifest else 1,
+                "backup_id": backup["backup_id"],
                 "timestamp": backup["timestamp"], "type": "manual",
                 "size": backup["size"], "git_commit": git.get("commit"),
                 "git_branch": git.get("branch"), "app_version": git.get("short"),
                 "schema_versions": self._capture_schema_versions(),
                 "integrity_status": "verified", "databases": databases,
             }
+            if contract_hash and database_manifest:
+                metadata["database_manifest"] = database_manifest
+                metadata["recovery_contract"] = contract_hash
+                metadata["file_manifest"] = file_manifest
             _atomic_json_write(self._metadata_path(backup["backup_id"]), metadata)
             operation.update(
                 active=False, status="complete", message="Бэкап создан и проверен",
@@ -649,7 +868,7 @@ class BackupAdminService:
             self._set_operation(operation)
             self._size_cache.clear()
             self._audit(actor, "manual_backup", "success", backup_id=backup["backup_id"],
-                        source_commit=git.get("commit"))
+                        source_commit=git.get("commit"), operation_id=operation["id"])
         except Exception as error:
             if backup is not None:
                 try:
@@ -673,7 +892,10 @@ class BackupAdminService:
                 self._set_operation(operation)
             except OSError:
                 pass
-            self._audit(actor, "manual_backup", "error", error=type(error).__name__)
+            self._audit(
+                actor, "manual_backup", "error", error=type(error).__name__,
+                operation_id=operation["id"],
+            )
 
     def start_manual_backup(self, actor):
         self.backup_root.mkdir(parents=True, exist_ok=True)
@@ -710,7 +932,7 @@ class BackupAdminService:
         )
         thread.daemon = True
         thread.start()
-        self._audit(actor, "manual_backup", "started")
+        self._audit(actor, "manual_backup", "started", operation_id=operation["id"])
         return operation
 
     def blocked_restore_attempt(self, actor, action, backup_id=None, target_commit=None):
@@ -731,6 +953,90 @@ class BackupAdminService:
         raise BackupAdminError(
             "Операция заблокирована: безопасный privileged helper и restore drill не настроены"
         )
+
+    def _launch_recovery(self, operation_id):
+        log_root = self.backup_root / "recovery" / "logs"
+        log_root.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(
+            str(log_root / (operation_id + "-launcher.log")),
+            os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600,
+        )
+        stream = os.fdopen(descriptor, "ab", 0)
+        try:
+            subprocess.Popen(
+                [sys.executable, str(self.recovery_helper), "run", operation_id],
+                cwd=str(self.project_root), stdout=stream, stderr=stream,
+                close_fds=True, start_new_session=True,
+            )
+        finally:
+            stream.close()
+
+    def start_recovery(self, actor, kind, backup_id=None, target_commit=None,
+                       idempotency_key=None):
+        from app.services.recovery_v2 import create_operation_record
+        status = self.status()
+        selected = None
+        if backup_id is not None:
+            self.resolve_backup(backup_id)
+            selected = next((item for item in status["backups"] if item["backup_id"] == backup_id), None)
+        if kind == "data_restore" and (not selected or not selected.get("can_restore_data")):
+            raise BackupAdminError((selected or {}).get("restore_data_reason") or "Восстановление данных заблокировано")
+        if kind == "full_restore" and (not selected or not selected.get("can_restore_system")):
+            raise BackupAdminError((selected or {}).get("restore_system_reason") or "Полное восстановление заблокировано")
+        if kind == "code_rollback":
+            matches = [item for item in status["git"].get("history", []) if item["commit"] == target_commit]
+            if len(matches) != 1:
+                raise BackupNotFoundError("Неизвестная версия кода")
+            if not matches[0].get("can_rollback"):
+                raise BackupAdminError(matches[0].get("rollback_reason") or "Откат кода заблокирован")
+        if not idempotency_key:
+            raise BackupAdminError("Для recovery требуется ключ идемпотентности")
+        self.backup_root.mkdir(parents=True, exist_ok=True)
+        guard = self.operation_guard_path.open("a+")
+        try:
+            fcntl.flock(guard.fileno(), fcntl.LOCK_EX)
+            current = self.operation_status()
+            if current.get("active"):
+                if idempotency_key:
+                    request_name = "request-" + hashlib.sha256(
+                        str(idempotency_key).encode("utf-8")
+                    ).hexdigest() + ".json"
+                    request_record = _safe_json_read(
+                        self.backup_root / "recovery" / "operations" / request_name
+                    ) or {}
+                    if request_record.get("operation_id") == current.get("id"):
+                        return current
+                raise BackupBusyError("Другая backup/recovery операция уже выполняется")
+            operation, created = create_operation_record(
+                self.backup_root, kind, actor, backup_id=backup_id,
+                target_commit=target_commit, idempotency_key=idempotency_key,
+            )
+        finally:
+            guard.close()
+        if created:
+            try:
+                self._launch_recovery(operation["id"])
+            except Exception as error:
+                operation.update({
+                    "active": False, "status": "failed", "stage": "failed",
+                    "message": "Не удалось запустить Recovery V2 helper",
+                    "error_code": "HELPER_LAUNCH_FAILED",
+                    "updated_at": _utc_now(), "updated_epoch": time.time(),
+                })
+                operations_root = self.backup_root / "recovery" / "operations"
+                _atomic_json_write(operations_root / (operation["id"] + ".json"), operation)
+                _atomic_json_write(self.operation_path, operation)
+                self._audit(
+                    actor, kind, "failed", backup_id=backup_id,
+                    source_commit=status["git"].get("commit"),
+                    target_commit=target_commit, error=type(error).__name__,
+                    operation_id=operation["id"],
+                )
+                raise BackupAdminError("Не удалось запустить Recovery V2 helper")
+            self._audit(actor, kind, "started", backup_id=backup_id,
+                        source_commit=status["git"].get("commit"), target_commit=target_commit,
+                        operation_id=operation["id"])
+        return operation
 
     def audit_refused_attempt(self, actor, action, backup_id=None, target_commit=None,
                               reason="validation failed"):
