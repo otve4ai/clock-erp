@@ -183,15 +183,26 @@
         }
 
         const visibleKeys = view.order.filter((key) => !view.hidden.includes(key));
-        const layout = root.ErpTableLayout.computeColumnWidths({
-            keys: visibleKeys,
-            preferredWidths: view.widths,
-            minimumWidths,
-            customWidths: view.customWidths,
-            growWeights,
-            containerWidth: tableWrap ? tableWrap.clientWidth : 0,
-            actionWidth,
-        });
+        const containerWidth = tableWrap ? tableWrap.clientWidth : 0;
+        const layout = view.customWidths.length
+            ? {
+                widths: Object.fromEntries(
+                    visibleKeys.map((key) => [key, view.widths[key]])
+                ),
+                tableWidth: visibleKeys.reduce(
+                    (total, key) => total + view.widths[key],
+                    actionWidth,
+                ),
+            }
+            : root.ErpTableLayout.computeColumnWidths({
+                keys: visibleKeys,
+                preferredWidths: view.widths,
+                minimumWidths,
+                growWeights,
+                containerWidth,
+                actionWidth,
+            });
+        layout.overflow = layout.tableWidth > containerWidth + 0.5;
 
         view.order.forEach((key) => {
             const hidden = view.hidden.includes(key);
