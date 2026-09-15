@@ -41,11 +41,91 @@
   const hidden = new Set();
   let sortDirection = "desc";
   const storageKey = () => "erp-supply-columns-" + tab;
+  const movementColumns = [
+    { key: "date", label: "Дата" },
+    { key: "comment", label: "Комментарий" },
+    { key: "author", label: "Автор" },
+    { key: "time", label: "Время" },
+    { key: "type", label: "Тип прихода" },
+    { key: "document", label: "Документ" },
+    { key: "brand", label: "Бренд" },
+    { key: "category", label: "Категория" },
+    { key: "photo", label: "Фото" },
+    { key: "product", label: "Товар" },
+    { key: "article", label: "Артикул" },
+    { key: "before", label: "Было", numeric: true },
+    { key: "change", label: "Изменение", numeric: true },
+    { key: "after", label: "Стало", numeric: true },
+    { key: "source", label: "Источник" },
+  ];
+  const supplyColumns = [
+    { key: "date", label: "Дата" },
+    { key: "comment", label: "Комментарий" },
+    { key: "author", label: "Автор" },
+    { key: "number", label: "Номер" },
+    { key: "title", label: "Название" },
+    { key: "positions", label: "Позиций", numeric: true },
+    { key: "quantity", label: "Единиц", numeric: true },
+    { key: "status", label: "Статус" },
+    { key: "actions", label: "Действия" },
+  ];
+  const legacyColumnKeys = {
+    all: [
+      "date",
+      "time",
+      "type",
+      "document",
+      "comment",
+      "brand",
+      "category",
+      "photo",
+      "product",
+      "article",
+      "before",
+      "change",
+      "after",
+      "author",
+      "source",
+    ],
+    cancellations: [
+      "date",
+      "time",
+      "type",
+      "document",
+      "comment",
+      "brand",
+      "category",
+      "photo",
+      "product",
+      "article",
+      "before",
+      "change",
+      "after",
+      "author",
+      "source",
+    ],
+    supplies: [
+      "date",
+      "number",
+      "title",
+      "comment",
+      "positions",
+      "quantity",
+      "status",
+      "author",
+      "actions",
+    ],
+  };
   function restoreColumns() {
     hidden.clear();
     try {
-      for (const n of JSON.parse(localStorage.getItem(storageKey()) || "[]"))
-        hidden.add(n);
+      for (const value of JSON.parse(
+        localStorage.getItem(storageKey()) || "[]",
+      )) {
+        const key =
+          typeof value === "number" ? legacyColumnKeys[tab]?.[value] : value;
+        if (key) hidden.add(key);
+      }
     } catch {
       /* Fresh defaults when browser storage is unavailable. */
     }
@@ -210,54 +290,39 @@
         0,
       ),
     );
-    const columns = supplies
-      ? [
-          "Дата",
-          "Номер",
-          "Название поставки",
-          "Комментарий",
-          "Позиций",
-          "Единиц",
-          "Статус",
-          "Автор",
-          "Действия",
-        ]
-      : [
-          "Дата",
-          "Время",
-          "Тип прихода",
-          "Документ",
-          "Комментарий",
-          "Бренд",
-          "Категория",
-          "Фото",
-          "Товар",
-          "Артикул",
-          "Было",
-          "Изменение",
-          "Стало",
-          "Автор",
-          "Источник",
-        ];
+    const columns = supplies ? supplyColumns : movementColumns;
+    $("records").dataset.layout = supplies ? "supplies" : "movements";
     $("columns").innerHTML = columns
       .map(
-        (c, i) =>
-          `<label><input type="checkbox" data-col="${i}" ${hidden.has(i) ? "" : "checked"}>${c}</label>`,
+        (column) =>
+          `<label><input type="checkbox" data-col="${column.key}" ${hidden.has(column.key) ? "" : "checked"}>${column.label}</label>`,
       )
       .join("");
-    const cell = (v, i, tag = "td") =>
-      `<${tag}${tag === "th" ? ' scope="col"' + (i === 0 ? ' aria-sort="' + (sortDirection === "desc" ? "descending" : "ascending") + '"' : "") : ""}${hidden.has(i) ? " hidden" : ""}>${v}</${tag}>`;
+    $("records").querySelector("colgroup").innerHTML = columns
+      .map(
+        (column) =>
+          `<col data-column="${column.key}"${hidden.has(column.key) ? " hidden" : ""}>`,
+      )
+      .join("");
+    const cell = (value, column, tag = "td") => {
+      const numeric = column.numeric ? " is-numeric" : "";
+      const content =
+        tag === "td" && !["photo", "actions", "source"].includes(column.key)
+          ? `<div class="record-cell-content">${value}</div>`
+          : value;
+      return `<${tag} data-column="${column.key}" class="record-column-${column.key}${numeric}"${tag === "th" ? ' scope="col"' + (column.key === "date" ? ' aria-sort="' + (sortDirection === "desc" ? "descending" : "ascending") + '"' : "") : ""}${hidden.has(column.key) ? " hidden" : ""}>${content}</${tag}>`;
+    };
     $("records").querySelector("thead").innerHTML =
       "<tr>" +
       columns
-        .map((v, i) =>
+        .map((column) =>
           cell(
-            i === 0
+            column.key === "date"
               ? '<button class="button" data-sort-date>Дата ' +
                   (sortDirection === "desc" ? "↓" : "↑") +
                   "</button>"
-              : v,
-            i,
+              : column.label,
+            column,
             "th",
           ),
         )
@@ -277,38 +342,42 @@
             : esc(r.created_at || "—");
           const button = `<button class="button" data-open="${esc(r.id)}">Открыть</button>`;
           const values = supplies
-            ? [
-                dateText,
-                esc(r.number),
-                esc(r.title),
-                esc(r.comment),
-                number(r.position_count),
-                number(r.total_quantity),
-                labels[r.status],
-                esc(r.created_by),
-                button,
-              ]
-            : [
-                dateText,
-                valid ? date.toLocaleTimeString("ru-RU") : "—",
-                labels[r.source_type] || "Архивная запись",
-                esc(r.title),
-                esc(r.comment),
-                esc(r.brand),
-                esc(r.category),
-                image(r.image_url),
-                `<div class="name">${esc(r.name)}</div>`,
-                esc(r.article),
-                number(r.stock_before),
-                `<span class="positive">+${number(r.quantity)}</span>`,
-                number(r.stock_after),
-                esc(r.user_name),
-                button,
-              ];
-          return "<tr>" + values.map((v, i) => cell(v, i)).join("") + "</tr>";
+            ? {
+                date: dateText,
+                comment: esc(r.comment || "—"),
+                author: esc(r.created_by || "—"),
+                number: esc(r.number || "—"),
+                title: esc(r.title || "—"),
+                positions: number(r.position_count),
+                quantity: number(r.total_quantity),
+                status: labels[r.status] || esc(r.status || "—"),
+                actions: button,
+              }
+            : {
+                date: dateText,
+                comment: esc(r.comment || "—"),
+                author: esc(r.user_name || "—"),
+                time: valid ? date.toLocaleTimeString("ru-RU") : "—",
+                type: labels[r.source_type] || "Архивная запись",
+                document: esc(r.title || "—"),
+                brand: esc(r.brand || "—"),
+                category: esc(r.category || "—"),
+                photo: image(r.image_url),
+                product: `<div class="name">${esc(r.name || "—")}</div>`,
+                article: esc(r.article || "—"),
+                before: number(r.stock_before),
+                change: `<span class="positive">+${number(r.quantity)}</span>`,
+                after: number(r.stock_after),
+                source: button,
+              };
+          return (
+            "<tr>" +
+            columns.map((column) => cell(values[column.key], column)).join("") +
+            "</tr>"
+          );
         })
         .join("") ||
-      `<tr><td colspan="${columns.length}">Записей пока нет</td></tr>`;
+      `<tr><td class="records-empty" colspan="${columns.length}">Записей пока нет</td></tr>`;
     $("page-info").textContent =
       `Страница ${page} из ${pages} · ${filtered.length} записей`;
     $("previous").disabled = page <= 1;
@@ -401,8 +470,8 @@
     }, 0);
   $("columns").onchange = (e) => {
     if (e.target.dataset.col !== undefined) {
-      const n = Number(e.target.dataset.col);
-      e.target.checked ? hidden.delete(n) : hidden.add(n);
+      const key = e.target.dataset.col;
+      e.target.checked ? hidden.delete(key) : hidden.add(key);
       try {
         localStorage.setItem(storageKey(), JSON.stringify([...hidden]));
       } catch {
