@@ -1,48 +1,19 @@
 <!doctype html>
 <html lang="ru">
 <head>
-    {% include "_favicon.html" %}
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ТТТ ERP — Команда</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/themes.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/erp-components.css') }}">
+    {% include "_favicon.html" %}<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}"><title>ТТТ ERP — Команда</title>
+    <link rel="stylesheet" href="{{ url_for('static',filename='css/themes.css') }}"><link rel="stylesheet" href="{{ url_for('static',filename='css/erp-components.css') }}">
     <style>
-        .team-main{min-width:0;flex:1;padding:28px;background:var(--erp-page-bg,#f8fafc)}
-        .team-shell{max-width:1180px;margin:0 auto}.team-head{display:flex;justify-content:space-between;gap:20px;align-items:end;margin-bottom:24px}
-        .team-head h1{margin:0 0 6px;font-size:28px}.team-head p{margin:0;color:var(--erp-text-muted,#64748b)}
-        .team-summary{font-size:14px;color:var(--erp-text-muted,#64748b)}.team-card{overflow:hidden;border:1px solid var(--erp-border,#e2e8f0);border-radius:14px;background:var(--erp-surface,#fff)}
-        .team-row{display:grid;grid-template-columns:minmax(230px,2fr) minmax(130px,1fr) minmax(120px,1fr) minmax(160px,1.2fr) minmax(150px,1fr);gap:18px;align-items:center;padding:15px 18px;border-top:1px solid var(--erp-border,#e2e8f0)}
-        .team-row:first-child{border-top:0}.team-row.team-labels{padding-top:11px;padding-bottom:11px;background:var(--erp-surface-muted,#f8fafc);color:var(--erp-text-muted,#64748b);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
-        .team-person{display:flex;align-items:center;gap:12px;min-width:0}.team-avatar{display:grid;place-items:center;width:38px;height:38px;flex:0 0 38px;border-radius:50%;background:#e0e7ff;color:#3730a3;font-weight:750;font-size:13px}.team-name{font-weight:700}.team-login{display:block;color:var(--erp-text-muted,#64748b);font-size:12px;overflow:hidden;text-overflow:ellipsis}
-        .team-status{display:inline-flex;align-items:center;gap:8px}.team-dot{width:8px;height:8px;border-radius:50%;background:#94a3b8}.team-status.online .team-dot{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.12)}
-        .team-section{font-weight:650}.team-muted{color:var(--erp-text-muted,#64748b)}
-        @media(max-width:800px){.team-main{padding:18px 14px 90px}.team-head{display:block}.team-summary{margin-top:10px}.team-row{grid-template-columns:1fr 1fr;gap:10px}.team-row.team-labels{display:none}.team-person{grid-column:1/-1}.team-row>span:nth-child(3){justify-self:end}.team-row>span:nth-child(4),.team-row>span:nth-child(5){font-size:13px}}
+    .tm-main{min-width:0;flex:1;padding:28px;background:var(--erp-page-bg,#f8fafc)}.tm-shell{max-width:1180px;margin:auto}.tm-head{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:20px}.tm-head h1{margin:0 0 5px;font-size:28px}.tm-head p,.tm-muted{color:var(--erp-text-muted,#64748b)}.tm-button{min-height:40px;border:0;border-radius:10px;padding:0 15px;background:var(--erp-primary,#2563eb);color:#fff;font-weight:750;cursor:pointer}.tm-button.secondary{border:1px solid var(--erp-border,#dbe1ea);background:#fff;color:var(--erp-text,#172033)}.tm-toolbar{display:flex;align-items:center;gap:12px;margin-bottom:14px}.tm-search{width:min(440px,100%);height:42px;border:1px solid var(--erp-border,#dbe1ea);border-radius:10px;padding:0 13px;background:#fff}.tm-summary{margin-left:auto;font-size:13px}.tm-card{overflow:hidden;border:1px solid var(--erp-border,#dbe1ea);border-radius:14px;background:#fff}.tm-row{display:grid;grid-template-columns:minmax(210px,1.35fr) minmax(170px,1fr) minmax(120px,.7fr) minmax(100px,.6fr) 90px;gap:14px;align-items:center;padding:14px 17px;border-top:1px solid var(--erp-border,#e5eaf0);color:inherit;text-decoration:none}.tm-row:not(.labels):hover{background:#f8fafc}.tm-row.labels{border:0;background:#f8fafc;color:#64748b;font-size:12px;font-weight:800;text-transform:uppercase}.tm-person{display:flex;min-width:0;align-items:center;gap:11px}.tm-avatar{display:grid;width:38px;height:38px;flex:0 0 38px;place-items:center;border-radius:50%;background:#e0e7ff;color:#3730a3;font-weight:800}.tm-person strong,.tm-person small,.tm-cell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tm-person small{display:block;color:#64748b}.tm-status{display:inline-flex;align-items:center;gap:7px}.tm-status:before{width:8px;height:8px;border-radius:50%;background:#94a3b8;content:""}.tm-status.active:before{background:#22c55e}.tm-empty{padding:48px;text-align:center;color:#64748b}dialog.tm-dialog{width:min(620px,calc(100vw - 28px));padding:0;border:0;border-radius:16px;box-shadow:0 24px 80px #0f172a4d}dialog::backdrop{background:#0f172a80}.tm-dialog form{padding:22px}.tm-dialog h2{margin:0 0 5px}.tm-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:18px}.tm-field{display:grid;gap:6px;font-size:13px;font-weight:700}.tm-field.wide{grid-column:1/-1}.tm-field input,.tm-field select{height:42px;border:1px solid #cbd5e1;border-radius:9px;padding:0 10px}.tm-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}.tm-error{min-height:18px;margin:10px 0 0;color:#b91c1c;font-size:13px}.tm-toast{position:fixed;z-index:2000;right:20px;bottom:20px;max-width:380px;padding:13px 16px;border-radius:11px;background:#172033;color:#fff;box-shadow:0 12px 34px #0f172a40}
+    @media(max-width:760px){.tm-main{padding:18px 14px 90px}.tm-head{align-items:stretch;flex-direction:column}.tm-toolbar{align-items:stretch;flex-direction:column}.tm-summary{margin:0}.tm-row{grid-template-columns:1fr auto}.tm-row.labels{display:none}.tm-row>:nth-child(2){grid-column:1/-1}.tm-row>:nth-child(3){grid-column:1}.tm-row>:nth-child(4){grid-column:2}.tm-row>:nth-child(5){display:none}.tm-grid{grid-template-columns:1fr}.tm-field.wide{grid-column:auto}}
     </style>
-</head>
-<body>
-<div class="app">
-    {% include "_sidebar.html" %}
-    <main class="team-main" id="main-content" tabindex="-1">
-        <div class="team-shell">
-            <header class="team-head erp-workspace-header">
-                <div><h1>Команда</h1><p>Сотрудники и их присутствие в ERP.</p></div>
-                <div class="team-summary">{{ team_users|length }} сотрудника · {{ active_count }} активных · {{ online_count }} сейчас в системе</div>
-            </header>
-            <section class="team-card" aria-label="Сотрудники">
-                <div class="team-row team-labels"><span>Сотрудник</span><span>Роль</span><span>Статус</span><span>Сейчас</span><span>Последняя активность</span></div>
-                {% for user in team_users %}
-                    <article class="team-row">
-                        <div class="team-person"><span class="team-avatar" aria-hidden="true">{{ user.initials }}</span><span><span class="team-name">{{ user.display_name }}</span><small class="team-login">{{ user.login }}</small></span></div>
-                        <span>{{ user.role_label }}</span>
-                        <span class="team-status{% if user.online %} online{% endif %}"><span class="team-dot" aria-hidden="true"></span>{{ "В сети" if user.online else "Не в сети" }}</span>
-                        <span class="team-section">{{ user.current_section if user.online and user.current_section else "—" }}</span>
-                        <span class="team-muted">{{ user.last_activity_display }}</span>
-                    </article>
-                {% endfor %}
-            </section>
-        </div>
-    </main>
-</div>
-</body>
-</html>
+</head><body><div class="app">{% include "_sidebar.html" %}<main class="tm-main" id="main-content"><div class="tm-shell">
+<header class="tm-head"><div><h1>Команда</h1><p>Управление сотрудниками и доступом к ERP</p></div><button class="tm-button" type="button" data-open>+ Добавить пользователя</button></header>
+<form class="tm-toolbar" method="get"><input class="tm-search" type="search" name="q" value="{{ query }}" placeholder="Поиск по имени, логину или email" aria-label="Поиск"><button class="tm-button secondary">Найти</button><span class="tm-summary tm-muted">{{ team_users|length }} · активных {{ active_count }} · онлайн {{ online_count }}</span></form>
+<section class="tm-card"><div class="tm-row labels"><span>Сотрудник</span><span>Email</span><span>Роль</span><span>Статус</span><span></span></div>{% for user in team_users %}<a class="tm-row" href="/app/team/{{ user.id }}"><span class="tm-person"><span class="tm-avatar">{{ user.initials }}</span><span><strong>{{ user.display_name }}</strong><small>@{{ user.login }}</small></span></span><span class="tm-cell">{{ user.email or "Email для восстановления не указан" }}</span><span>{{ roles.get(user.system_role,user.system_role) }}</span><span class="tm-status {{ 'active' if user.active else '' }}">{{ 'Активен' if user.active else 'Удалён' }}</span><span>Открыть →</span></a>{% else %}<div class="tm-empty">Сотрудники не найдены</div>{% endfor %}</section>
+</div></main></div>
+<dialog class="tm-dialog" id="createDialog"><form id="createForm"><h2>Добавить пользователя</h2><div class="tm-muted">Создайте рабочую учётную запись сотрудника.</div><div class="tm-grid"><label class="tm-field wide">Имя<input name="name" maxlength="160" required></label><label class="tm-field">Логин<input name="login" minlength="3" maxlength="64" autocomplete="off" required></label><label class="tm-field">Email<input name="email" type="email" maxlength="254" autocomplete="email" required></label><label class="tm-field">Пароль<input name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required></label><label class="tm-field">Повторите пароль<input name="password_confirmation" type="password" minlength="8" maxlength="128" autocomplete="new-password" required></label><label class="tm-field wide">Роль<select name="role">{% for value,label in roles.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label></div><p class="tm-error" role="alert"></p><div class="tm-actions"><button class="tm-button secondary" type="button" data-close>Отмена</button><button class="tm-button" type="submit">Создать пользователя</button></div></form></dialog>
+<div class="tm-toast" role="status" hidden></div>
+<script>(()=>{const d=document.querySelector('#createDialog'),f=document.querySelector('#createForm'),toast=document.querySelector('.tm-toast'),csrf=document.querySelector('meta[name=csrf-token]').content;document.querySelector('[data-open]').onclick=()=>d.showModal();document.querySelector('[data-close]').onclick=()=>d.close();f.onsubmit=async e=>{e.preventDefault();const error=f.querySelector('.tm-error');error.textContent='';const body=Object.fromEntries(new FormData(f));const r=await fetch('/api/v1/team/users',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(body)});const p=await r.json();if(!r.ok){error.textContent=p.message+(p.fields?' '+Object.values(p.fields).join(' '):'');return}toast.textContent='Пользователь создан';toast.hidden=false;setTimeout(()=>location.assign(p.data.redirect),500)}})();</script>
+</body></html>

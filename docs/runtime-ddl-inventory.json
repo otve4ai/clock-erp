@@ -43,7 +43,7 @@
     },
     {
       "file": "app/domain_schema_migrations.py",
-      "sha256": "ea576c352e928b5d0e7c57066f932130c4f9b6bba16ac0d21d4ab7014ae9ed8d",
+      "sha256": "e465b87356d620ddccab1e7bafd28d0c584009cf3cb8f27acf6ca5c8ff0c614d",
       "owner": "auth-orders-tasks-migrations"
     },
     {
