@@ -130,6 +130,142 @@ test('period filter uses the displayed local calendar day', async ({ page }) => 
   await expect(page.locator('#records')).toContainText('08.09.2026');
 });
 
+test('receipt tabs share one table grid on desktop and mobile', async ({
+  page,
+  request,
+}, testInfo) => {
+  const tabs = [
+    { key: 'all', headers: ['Дата', 'Комментарий', 'Автор', 'Время', 'Тип прихода'] },
+    { key: 'supplies', headers: ['Дата', 'Комментарий', 'Автор', 'Номер', 'Название'] },
+    { key: 'cancellations', headers: ['Дата', 'Комментарий', 'Автор', 'Время', 'Тип прихода'] },
+  ];
+
+  await request.post('/api/v1/receipts/supplies', {
+    data: {
+      title: 'Table alignment fixture',
+      comment: 'Длинный комментарий для проверки безопасного ограничения текста в ячейке',
+    },
+  });
+  await page.setViewportSize({ width: 1536, height: 960 });
+  await page.goto('/app/receipts');
+  const tableFrame = page.locator('.main > .table-scroll');
+  const initialFrame = await tableFrame.boundingBox();
+  expect(initialFrame).not.toBeNull();
+
+  for (const currentTab of tabs) {
+    await page.locator(`[data-tab="${currentTab.key}"]`).click();
+    await expect(page.locator('#records thead th')).toHaveCount(
+      currentTab.key === 'supplies' ? 9 : 15,
+    );
+    await expect(page.locator('#records thead th')).toContainText(currentTab.headers);
+    const frame = await tableFrame.boundingBox();
+    expect(frame?.x).toBe(initialFrame?.x);
+    expect(frame?.width).toBe(initialFrame?.width);
+    const aligned = await page.locator('#records').evaluate((table) => {
+      const headers = Array.from(table.querySelectorAll('thead th'));
+      const cells = Array.from(table.querySelectorAll('tbody tr:first-child td'));
+      return headers.every((header, index) => {
+        const headerBox = header.getBoundingClientRect();
+        const cellBox = cells[index]?.getBoundingClientRect();
+        return (
+          cellBox &&
+          Math.abs(headerBox.x - cellBox.x) < 0.5 &&
+          Math.abs(headerBox.width - cellBox.width) < 0.5
+        );
+      });
+    });
+    expect(aligned).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath(`receipt-${currentTab.key}-desktop.png`),
+      fullPage: true,
+    });
+  }
+
+  await page.locator('[data-tab="supplies"]').click();
+  await expect(page.locator('#records')).toContainText('Table alignment fixture');
+  const authorNumberGap = await page.locator('#records').evaluate((table) => {
+    const author = table.querySelector('tbody tr:first-child td[data-column="author"]');
+    const numberCell = table.querySelector('tbody tr:first-child td[data-column="number"]');
+    if (!author || !numberCell) return null;
+    const authorBox = author.getBoundingClientRect();
+    const numberBox = numberCell.getBoundingClientRect();
+    return numberBox.x - (authorBox.x + authorBox.width);
+  });
+  expect(authorNumberGap).not.toBeNull();
+  expect(authorNumberGap as number).toBeGreaterThanOrEqual(0);
+
+  const authorHeader = page.locator('#records th[data-column="author"]');
+  const authorWidth = await authorHeader.evaluate(
+    (element) => element.getBoundingClientRect().width,
+  );
+  const resizeHandle = authorHeader.locator('.erp-column-resize-handle');
+  const resizeBox = await resizeHandle.boundingBox();
+  expect(resizeBox).not.toBeNull();
+  await page.mouse.move(resizeBox!.x + resizeBox!.width / 2, resizeBox!.y + resizeBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    resizeBox!.x + resizeBox!.width / 2 + 28,
+    resizeBox!.y + resizeBox!.height / 2,
+  );
+  await page.mouse.up();
+  await expect
+    .poll(() => authorHeader.evaluate((element) => element.getBoundingClientRect().width))
+    .toBeGreaterThan(authorWidth + 20);
+
+  const authorDragBox = await authorHeader.boundingBox();
+  const numberHeader = page.locator('#records th[data-column="number"]');
+  const numberDragBox = await numberHeader.boundingBox();
+  expect(authorDragBox && numberDragBox).toBeTruthy();
+  await page.mouse.move(
+    authorDragBox!.x + authorDragBox!.width / 2,
+    authorDragBox!.y + authorDragBox!.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(numberDragBox!.x + numberDragBox!.width - 8, numberDragBox!.y + 10, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  await expect
+    .poll(() =>
+      page
+        .locator('#records thead th')
+        .evaluateAll((headers) => headers.map((header) => header.getAttribute('data-column'))),
+    )
+    .toEqual([
+      'date',
+      'comment',
+      'number',
+      'author',
+      'title',
+      'positions',
+      'quantity',
+      'status',
+      'actions',
+    ]);
+
+  await page.locator('#filters details summary').click();
+  await page.locator('#columns input[data-col="comment"]').uncheck();
+  await expect(page.locator('#records th[data-column="comment"]')).toBeHidden();
+  await page.reload();
+  await expect(page.locator('#records th[data-column="comment"]')).toBeHidden();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const currentTab of tabs) {
+    await page.locator(`[data-tab="${currentTab.key}"]`).click();
+    await expect(page.locator('#records')).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(
+      false,
+    );
+    expect(await tableFrame.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
+      true,
+    );
+    await page.screenshot({
+      path: testInfo.outputPath(`receipt-${currentTab.key}-mobile.png`),
+      fullPage: true,
+    });
+  }
+});
+
 test('admin edits and deletes a posted supply through the two-stage preview', async ({
   page,
   request,
