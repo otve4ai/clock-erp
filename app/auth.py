@@ -91,7 +91,19 @@ class RegistrationError(Exception):
         self.message = message
 
 
+class TeamAccountError(Exception):
+    def __init__(self, code, message, field=""):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.field = field
+
+
 def normalize_email(value):
+    return str(value or "").strip().casefold()
+
+
+def normalize_login(value):
     return str(value or "").strip().casefold()
 
 
@@ -177,7 +189,7 @@ class AuthStore:
         with self.connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, first_name, last_name, email, role, active,
+                SELECT id, first_name, last_name, login, email, role, active,
                        created_at, email_verified_at, updated_at,
                        session_version, last_login_at
                 FROM users
@@ -274,7 +286,7 @@ class AuthStore:
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT users.id, users.first_name, users.last_name, users.email,
+                SELECT users.id, users.first_name, users.last_name, users.login, users.email,
                        users.role, users.active, users.created_at,
                        users.last_login_at, auth_sessions.updated_at AS activity_at,
                        auth_sessions.data AS session_data
@@ -300,7 +312,9 @@ class AuthStore:
                 )
                 item = {
                     "id": user_id,
-                    "login": str(row["email"] or ""),
+                    "login": str(row["login"] or row["email"] or ""),
+                    "email": str(row["email"] or ""),
+                    "system_role": str(row["role"] or "employee"),
                     "display_name": display_name,
                     "role": canonical_role,
                     "role_label": TEAM_ROLES.get(canonical_role, canonical_role),
@@ -328,15 +342,164 @@ class AuthStore:
             )[:80]
         return users
 
+    def get_team_user(self, user_id):
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT id,first_name,last_name,login,email,role,active,created_at,"
+                "email_verified_at,updated_at,session_version,last_login_at "
+                "FROM users WHERE id=?", (int(user_id),)
+            ).fetchone()
+        return self._row_dict(row)
+
+    def list_team_users(self, query=""):
+        query = str(query or "").strip().casefold()
+        users = self.list_team_presence()
+        if not query:
+            return users
+        return [item for item in users if query in " ".join((
+            item["display_name"], item["login"], item["email"]
+        )).casefold()]
+
+    def create_team_user(self, name, login, email, password, role):
+        now = int(time.time())
+        name = str(name or "").strip()
+        login = str(login or "").strip()
+        email = str(email or "").strip()
+        if role not in ALLOWED_ROLES:
+            raise TeamAccountError("INVALID_ROLE", "Недопустимая роль.", "role")
+        try:
+            with self.connect() as connection:
+                cursor = connection.execute(
+                    "INSERT INTO users (first_name,last_name,login,login_normalized,"
+                    "email,email_normalized,password_hash,role,active,created_at,"
+                    "email_verified_at,updated_at,session_version) "
+                    "VALUES (?,'',?,?,?,?,?,?,1,?,?,?,1)",
+                    (name, login, normalize_login(login), email,
+                     normalize_email(email), generate_password_hash(
+                         password, method=PASSWORD_HASH_METHOD), role, now, now, now),
+                )
+        except sqlite3.IntegrityError as error:
+            field = "login" if self.login_exists(login) else "email"
+            raise TeamAccountError(
+                "DUPLICATE_{}".format(field.upper()),
+                "Такой {} уже используется.".format("логин" if field == "login" else "email"),
+                field,
+            ) from error
+        return self.get_team_user(cursor.lastrowid)
+
+    def login_exists(self, login, excluding_user_id=None):
+        sql = "SELECT 1 FROM users WHERE login_normalized=?"
+        parameters = [normalize_login(login)]
+        if excluding_user_id is not None:
+            sql += " AND id<>?"
+            parameters.append(int(excluding_user_id))
+        with self.connect() as connection:
+            return connection.execute(sql, parameters).fetchone() is not None
+
+    def email_exists(self, email, excluding_user_id=None):
+        sql = "SELECT 1 FROM users WHERE email_normalized=?"
+        parameters = [normalize_email(email)]
+        if excluding_user_id is not None:
+            sql += " AND id<>?"
+            parameters.append(int(excluding_user_id))
+        with self.connect() as connection:
+            return connection.execute(sql, parameters).fetchone() is not None
+
+    def update_team_user(self, user_id, name, login, email, role, password=""):
+        user_id = int(user_id)
+        now = int(time.time())
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            before = connection.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            if before is None:
+                connection.rollback()
+                raise TeamAccountError("NOT_FOUND", "Пользователь не найден.")
+            if role not in ALLOWED_ROLES:
+                connection.rollback()
+                raise TeamAccountError("INVALID_ROLE", "Недопустимая роль.", "role")
+            if before["role"] == "admin" and role != "admin":
+                admins = connection.execute(
+                    "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1"
+                ).fetchone()[0]
+                if admins <= 1:
+                    connection.rollback()
+                    raise TeamAccountError("LAST_ADMIN", "Нельзя изменить роль последнего администратора.", "role")
+            credentials_changed = bool(
+                password
+                or role != before["role"]
+                or normalize_login(login) != before["login_normalized"]
+                or normalize_email(email) != before["email_normalized"]
+            )
+            try:
+                connection.execute(
+                    "UPDATE users SET first_name=?,last_name='',login=?,login_normalized=?,"
+                    "email=?,email_normalized=?,role=?,email_verified_at=?,updated_at=?,"
+                    "session_version=session_version+? WHERE id=?",
+                    (str(name or "").strip(), str(login or "").strip(), normalize_login(login),
+                     str(email or "").strip(), normalize_email(email), role, now, now,
+                     1 if credentials_changed else 0,
+                     user_id),
+                )
+                if password:
+                    connection.execute(
+                        "UPDATE users SET password_hash=? WHERE id=?",
+                        (generate_password_hash(password, method=PASSWORD_HASH_METHOD), user_id),
+                    )
+                    connection.execute(
+                        "UPDATE auth_tokens SET used_at=? WHERE user_id=? AND token_type=? AND used_at IS NULL",
+                        (now, user_id, TOKEN_PASSWORD_RESET),
+                    )
+                if credentials_changed:
+                    connection.execute("DELETE FROM auth_sessions WHERE user_id=?", (user_id,))
+                connection.commit()
+            except sqlite3.IntegrityError as error:
+                connection.rollback()
+                field = "login" if self.login_exists(login, user_id) else "email"
+                raise TeamAccountError(
+                    "DUPLICATE_{}".format(field.upper()),
+                    "Такой {} уже используется.".format("логин" if field == "login" else "email"),
+                    field,
+                ) from error
+        return self._row_dict(before), self.get_team_user(user_id)
+
+    def deactivate_team_user(self, user_id, actor_id):
+        user_id, actor_id = int(user_id), int(actor_id)
+        if user_id == actor_id:
+            raise TeamAccountError("SELF_DELETE", "Нельзя удалить собственную учётную запись.")
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            before = connection.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            if before is None:
+                connection.rollback()
+                raise TeamAccountError("NOT_FOUND", "Пользователь не найден.")
+            if before["role"] == "admin" and before["active"]:
+                admins = connection.execute(
+                    "SELECT COUNT(*) FROM users WHERE role='admin' AND active=1"
+                ).fetchone()[0]
+                if admins <= 1:
+                    connection.rollback()
+                    raise TeamAccountError("LAST_ADMIN", "Нельзя удалить последнего администратора.")
+            connection.execute(
+                "UPDATE users SET active=0,session_version=session_version+1,updated_at=? WHERE id=?",
+                (int(time.time()), user_id),
+            )
+            connection.execute(
+                "UPDATE auth_tokens SET used_at=? WHERE user_id=? AND used_at IS NULL",
+                (int(time.time()), user_id),
+            )
+            connection.execute("DELETE FROM auth_sessions WHERE user_id=?", (user_id,))
+            connection.commit()
+        return self._row_dict(before)
+
     def authenticate(self, email, password):
         with self.connect() as connection:
             row = connection.execute(
                 """
                 SELECT *
                 FROM users
-                WHERE email_normalized = ? AND active = 1
+                WHERE (login_normalized = ? OR email_normalized = ?) AND active = 1
                 """,
-                (normalize_email(email),),
+                (normalize_login(email), normalize_email(email)),
             ).fetchone()
 
         if (
@@ -390,9 +553,10 @@ class AuthStore:
                     INSERT INTO users (
                         first_name, last_name, email, email_normalized,
                         password_hash, role, created_at, email_verified_at,
+                        login, login_normalized,
                         updated_at, session_version
                     )
-                    VALUES (?, ?, ?, ?, ?, 'admin', ?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?, ?, 'admin', ?, ?, ?, ?, ?, 1)
                     """,
                     (
                         first_name.strip(),
@@ -405,6 +569,8 @@ class AuthStore:
                         ),
                         now,
                         now,
+                        email.strip(),
+                        normalized,
                         now,
                     ),
                 )
@@ -625,9 +791,10 @@ class AuthStore:
                     INSERT INTO users (
                         first_name, last_name, email, email_normalized,
                         password_hash, role, created_at, email_verified_at,
+                        login, login_normalized,
                         updated_at, session_version
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     """,
                     (
                         first_name,
@@ -641,6 +808,8 @@ class AuthStore:
                         invitation["role"],
                         now,
                         now,
+                        email.strip(),
+                        normalized,
                         now,
                     ),
                 )

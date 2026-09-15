@@ -270,7 +270,11 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.exceptions import HTTPException
 from app.auth import (
+    ALLOWED_ROLES,
+    EMAIL_PATTERN,
     PRESENCE_TIMEOUT_SECONDS,
+    TeamAccountError,
+    _validate_password,
     auth_is_enabled,
     configure_auth,
     csrf_token,
@@ -18659,16 +18663,176 @@ def serialize_team_user(user, now=None):
     return item
 
 
+def _require_team_admin():
+    user = current_auth_user() or {}
+    if user.get("role") != "admin":
+        abort(403)
+    return user
+
+
+def _team_payload_validation(payload, password_required=False):
+    values = {
+        "name": str(payload.get("name") or "").strip(),
+        "login": str(payload.get("login") or "").strip(),
+        "email": str(payload.get("email") or "").strip(),
+        "role": str(payload.get("role") or "").strip(),
+    }
+    errors = {}
+    if not values["name"] or len(values["name"]) > 160:
+        errors["name"] = "Укажите имя длиной до 160 символов."
+    if not re.fullmatch(r"[^\s@]{3,64}", values["login"]):
+        errors["login"] = "Логин: от 3 до 64 символов, без пробелов и @."
+    if len(values["email"]) > 254 or not EMAIL_PATTERN.fullmatch(values["email"]):
+        errors["email"] = "Введите корректный email."
+    if values["role"] not in ALLOWED_ROLES:
+        errors["role"] = "Недопустимая роль."
+    password = str(payload.get("password") or "")
+    confirmation = str(payload.get("password_confirmation") or "")
+    if password_required or password or confirmation:
+        password, password_errors = _validate_password({
+            "password": password,
+            "password_confirmation": confirmation,
+        })
+        errors.update(password_errors)
+    return values, password, errors
+
+
+def _record_team_audit(target, action, before=None, after=None, text=""):
+    actor = current_audit_actor()
+    label = " ".join((
+        str(target.get("first_name") or "").strip(),
+        str(target.get("last_name") or "").strip(),
+    )).strip() or str(target.get("login") or target.get("email") or "Пользователь")
+    AuditJournal().record(
+        "user", str(target["id"]), action, label,
+        before=before, after=after, actor_id=actor["actor_id"],
+        actor_name=actor["actor_name"], actor_type=actor["actor_type"],
+        metadata={"text_snapshot": text}, source="ERP",
+    )
+
+
 @app.get("/app/team")
 def team_page():
+    _require_team_admin()
     now = int(time.time())
-    users = [serialize_team_user(user, now) for user in _team_presence_now(now)]
+    query = str(request.args.get("q") or "").strip()
+    users = [serialize_team_user(user, now) for user in get_auth_store().list_team_users(query)]
     return render_template(
         "team.html",
         team_users=users,
+        query=query,
+        roles=ALLOWED_ROLES,
         active_count=sum(1 for user in users if user["active"]),
         online_count=sum(1 for user in users if user["online"]),
     )
+
+
+@app.get("/app/team/<int:user_id>")
+def team_user_page(user_id):
+    _require_team_admin()
+    target = get_auth_store().get_team_user(user_id)
+    if target is None:
+        abort(404)
+    display_name = " ".join((target["first_name"] or "", target["last_name"] or "")).strip()
+    target["display_name"] = display_name or target["login"] or target["email"]
+    target["role_label"] = ALLOWED_ROLES.get(target["role"], target["role"])
+    category = str(request.args.get("category") or "").strip()
+    category_map = {
+        "sales": "sale", "orders": "order", "receipts": "receipt",
+        "inventory": "inventory", "products": "product", "auth": "user",
+        "admin": "user",
+    }
+    entity_type = category_map.get(category, "")
+    action = "logged_in" if category == "auth" else ""
+    period = str(request.args.get("period") or "30").strip()
+    date_from = str(request.args.get("date_from") or "").strip()
+    date_to = str(request.args.get("date_to") or "").strip()
+    if not date_from and period in {"1", "7", "30"}:
+        date_from = (datetime.now().date() - timedelta(days=int(period) - 1)).isoformat()
+    journal = AuditJournal()
+    listing = journal.list_events(
+        subject_user=str(user_id), entity_type=entity_type, action=action, date_from=date_from,
+        date_to=date_to, cursor=str(request.args.get("cursor") or ""), limit=25,
+    )
+    events = serialize_journal_events(listing["events"])
+    object_paths = {
+        "product": "/app/products?product_id={}",
+        "sale": "/app/sales?q={}",
+        "receipt": "/app/receipts?receipt_id={}",
+        "order": "/order/{}",
+        "repair": "/app/repairs?repair_id={}",
+        "customer": "/app/customers/{}",
+        "purchase": "/app/purchases?purchase_id={}",
+        "task": "/app/tasks?task_id={}",
+        "inventory": "/app/inventory/{}",
+    }
+    for event in events:
+        pattern = object_paths.get(event.get("entity_type"))
+        event["object_url"] = (
+            pattern.format(event.get("entity_id"))
+            if pattern and event.get("action") != "deleted" else ""
+        )
+    return render_template(
+        "team_user.html", team_user=target, roles=ALLOWED_ROLES,
+        events=events, next_cursor=listing["next_cursor"], category=category,
+        period=period, date_from=date_from, date_to=date_to,
+        journal_active=any(key in request.args for key in (
+            "category", "period", "date_from", "date_to", "cursor"
+        )),
+    )
+
+
+@app.post("/api/v1/team/users")
+def api_team_create_user():
+    _require_team_admin()
+    require_csrf_when_authenticated()
+    values, password, errors = _team_payload_validation(request.get_json(silent=True) or {}, True)
+    if errors:
+        return api_error("VALIDATION_ERROR", "Проверьте заполнение формы.", 422, fields=errors)
+    try:
+        target = get_auth_store().create_team_user(password=password, **values)
+    except TeamAccountError as error:
+        return api_error(error.code, error.message, 409, fields={error.field: error.message} if error.field else {})
+    _record_team_audit(target, "created", after={
+        "name": values["name"], "login": values["login"], "email": values["email"],
+        "role": values["role"], "active": True,
+    }, text="Пользователь создан")
+    return api_success({"user_id": target["id"], "redirect": "/app/team/{}".format(target["id"])}, 201)
+
+
+@app.put("/api/v1/team/users/<int:user_id>")
+def api_team_update_user(user_id):
+    _require_team_admin()
+    require_csrf_when_authenticated()
+    values, password, errors = _team_payload_validation(request.get_json(silent=True) or {}, False)
+    if errors:
+        return api_error("VALIDATION_ERROR", "Проверьте заполнение формы.", 422, fields=errors)
+    try:
+        before, target = get_auth_store().update_team_user(user_id, password=password, **values)
+    except TeamAccountError as error:
+        return api_error(error.code, error.message, 409, fields={error.field: error.message} if error.field else {})
+    safe_before = {"name": " ".join((before["first_name"], before["last_name"])).strip(),
+                   "login": before["login"], "email": before["email"], "role": before["role"], "active": bool(before["active"])}
+    safe_after = {"name": values["name"], "login": values["login"], "email": values["email"],
+                  "role": values["role"], "active": bool(target["active"])}
+    _record_team_audit(target, "updated", before=safe_before, after=safe_after,
+                       text="Данные и доступ пользователя изменены")
+    if password:
+        _record_team_audit(target, "updated", text="Пароль пользователя изменён")
+    return api_success({"user_id": target["id"]})
+
+
+@app.delete("/api/v1/team/users/<int:user_id>")
+def api_team_delete_user(user_id):
+    actor = _require_team_admin()
+    require_csrf_when_authenticated()
+    try:
+        target = get_auth_store().deactivate_team_user(user_id, actor["id"])
+    except TeamAccountError as error:
+        return api_error(error.code, error.message, 409)
+    _record_team_audit(target, "deleted", before={"active": True}, after={"active": False},
+                       text="Учётная запись деактивирована; история сохранена")
+    return api_success({"redirect": "/app/team"})
 
 
 @app.post("/api/v1/presence/heartbeat")
