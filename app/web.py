@@ -3945,9 +3945,83 @@ def order_status_update(order_id):
         if active_sale and not (
             active_sale.get("cancelled_at") or active_sale.get("deleted_at")
         ):
+            actor = current_audit_actor()
+            sale_id = str(active_sale.get("id") or "")
+            try:
+                inventory.cancel_sale(
+                    sale_id,
+                    reason="Клиент отказался",
+                    comment="Отказ заказа №{}".format(order_id),
+                    user_name=current_sales_user_name(),
+                    idempotency_key="order-refusal:{}:{}".format(
+                        order_id, sale_id
+                    ),
+                    audit_actor=actor,
+                    order_id=str(order_id),
+                    failure_hook=lambda connection: service.change(
+                        order_id,
+                        ERP_REFUSED,
+                        actor,
+                        sale_id=sale_id,
+                        connection=connection,
+                        order_number=order_id,
+                        event_message=(
+                            "Статус автоматически изменён на “Отказ” "
+                            "после отмены позиции продажи №{}"
+                        ).format(
+                            active_sale.get("order_number") or sale_id
+                        ),
+                    ),
+                )
+            except CancellationConflictError as error:
+                return order_status_reply(order_id, False, str(error), 409)
+            except Exception:
+                app.logger.exception(
+                    "Transactional order refusal failed: %s", order_id
+                )
+                return order_status_reply(
+                    order_id,
+                    False,
+                    "Отказ не выполнен. Продажа, остатки и статус заказа "
+                    "не изменены.",
+                    500,
+                )
+            _cached_api_sales_records.cache_clear()
+            _cached_api_receipt_records.cache_clear()
+            synced = service.sync_one(order_id, update_order_status)
+            cache_order_status(order_id, "C", synced=synced)
             return order_status_reply(
-                order_id, False, "Сначала отмените связанную продажу", 409
+                order_id,
+                True,
+                (
+                    "Товар возвращён, продажа и заказ переведены в статус "
+                    "«Отказ»"
+                    if synced else
+                    "Товар возвращён, продажа и заказ переведены в статус "
+                    "«Отказ»; Bitrix ожидает синхронизации"
+                ),
             )
+        try:
+            service.change(
+                order_id,
+                ERP_REFUSED,
+                current_audit_actor(),
+                sale_id=(active_sale or {}).get("id"),
+                order_number=(current_order or {}).get("number") or order_id,
+            )
+        except (OrderStatusError, sqlite3.Error) as error:
+            return order_status_reply(order_id, False, str(error), 409)
+        synced = service.sync_one(order_id, update_order_status)
+        cache_order_status(order_id, "C", synced=synced)
+        return order_status_reply(
+            order_id,
+            True,
+            (
+                "Статус заказа обновлён в ERP и Bitrix"
+                if synced else
+                "Статус заказа обновлён в ERP; Bitrix ожидает синхронизации"
+            ),
+        )
     if (
         current.get("erp_status") == target
         and current.get("bitrix_status") == new_status
