@@ -59,7 +59,7 @@ FIELD_WHITELISTS = {
     "task": {"title", "status", "assignee_id", "responsible_user_id", "due_date", "priority"},
     "purchase": {"status", "quantity", "price", "comment", "responsible_user_id"},
     "settings": {"value"},
-    "user": {"last_login_at"},
+    "user": {"name", "login", "email", "role", "active", "last_login_at"},
     "sms": {"status"},
     "service": {"name", "url", "category", "description", "archived_at"},
 }
@@ -211,6 +211,7 @@ class AuditJournal:
         entity_id="",
         action="",
         actor="",
+        subject_user="",
         status="",
         source="",
         query="",
@@ -246,7 +247,12 @@ class AuditJournal:
         if action in ACTION_TYPES:
             conditions.append("action = ?")
             parameters.append(action)
-        if actor:
+        if subject_user:
+            conditions.append(
+                "(actor_id = ? OR (entity_type = 'user' AND entity_id = ?))"
+            )
+            parameters.extend([str(subject_user), str(subject_user)])
+        elif actor:
             conditions.append(
                 "(actor_id = ? OR actor_display_name_snapshot = ? OR (entity_type = 'inventory' AND EXISTS ("
                 "SELECT 1 FROM erp_inventory_sessions ais WHERE ais.id = entity_id AND "

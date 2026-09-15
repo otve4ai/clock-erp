@@ -32,6 +32,7 @@ AUTH_MIGRATION_ID = "2026-08-26-auth-baseline-v1"
 AUTH_PREFERENCES_MIGRATION_ID = "2026-08-28-user-navigation-preferences-v1"
 AUTH_NOTIFICATIONS_MIGRATION_ID = "2026-09-01-user-notifications-v1"
 AUTH_NOTIFICATIONS_V2_MIGRATION_ID = "2026-09-01-server-notification-events-v2"
+AUTH_TEAM_MIGRATION_ID = "2026-09-15-team-accounts-v1"
 ORDERS_MIGRATION_ID = "2026-08-26-orders-customers-baseline-v1"
 TASKS_MIGRATION_ID = "2026-08-27-internal-tasks-v1"
 TASKS_V2_MIGRATION_ID = "2026-08-27-tasks-center-v2"
@@ -198,6 +199,13 @@ AUTH_NOTIFICATIONS_V2_STATEMENTS = (
     "ALTER TABLE user_notification_preferences ADD COLUMN system_errors INTEGER NOT NULL DEFAULT 1 CHECK(system_errors IN (0,1))",
     "ALTER TABLE user_notification_preferences ADD COLUMN operation_completions INTEGER NOT NULL DEFAULT 1 CHECK(operation_completions IN (0,1))",
 ) + AUTH_NOTIFICATIONS_INDEX_STATEMENTS
+
+AUTH_TEAM_STATEMENTS = (
+    "ALTER TABLE users ADD COLUMN login TEXT",
+    "ALTER TABLE users ADD COLUMN login_normalized TEXT",
+    "UPDATE users SET login = email, login_normalized = email_normalized WHERE login IS NULL",
+    "CREATE UNIQUE INDEX idx_users_login_normalized ON users(login_normalized)",
+)
 
 AUTH_LEGACY_USER_COLUMNS = (
     ("id", "INTEGER", 0, None, 1),
@@ -512,6 +520,13 @@ AUTH_NOTIFICATIONS_V2_MIGRATION = {
         + AUTH_NOTIFICATIONS_V2_STATEMENTS
     ),
 }
+AUTH_TEAM_MIGRATION = {
+    "id": AUTH_TEAM_MIGRATION_ID,
+    "name": "Separate employee login and recovery email",
+    "checksum": _digest(
+        (AUTH_TEAM_MIGRATION_ID, "team-accounts-v1") + AUTH_TEAM_STATEMENTS
+    ),
+}
 ORDERS_MIGRATION = {
     "id": ORDERS_MIGRATION_ID,
     "name": "Verified orders and customers schema baseline",
@@ -568,7 +583,7 @@ TASKS_V4_MIGRATION = {
     ),
 }
 DOMAIN_MIGRATIONS = {
-    "auth": AUTH_NOTIFICATIONS_V2_MIGRATION,
+    "auth": AUTH_TEAM_MIGRATION,
     "orders": ORDERS_MIGRATION,
     "tasks": TASKS_V4_MIGRATION,
 }
@@ -642,6 +657,11 @@ AUTH_EXPECTED_COLUMNS["user_notifications"] = AUTH_EXPECTED_COLUMNS["user_notifi
 AUTH_EXPECTED_COLUMNS["user_notification_preferences"] = AUTH_EXPECTED_COLUMNS["user_notification_preferences"] + (
     ("system_errors", "INTEGER", 1, "1", 0),
     ("operation_completions", "INTEGER", 1, "1", 0),
+)
+AUTH_PRE_TEAM_EXPECTED_COLUMNS = dict(AUTH_EXPECTED_COLUMNS)
+AUTH_EXPECTED_COLUMNS["users"] = AUTH_EXPECTED_COLUMNS["users"] + (
+    ("login", "TEXT", 0, None, 0),
+    ("login_normalized", "TEXT", 0, None, 0),
 )
 
 ORDERS_EXPECTED_COLUMNS = {
@@ -752,6 +772,8 @@ AUTH_INDEXES.update({
     "idx_user_notifications_feed": (0, ("user_id", "id")),
     "idx_user_notifications_unread": (0, ("user_id", "read_at", "id")),
 })
+AUTH_PRE_TEAM_INDEXES = dict(AUTH_INDEXES)
+AUTH_INDEXES["idx_users_login_normalized"] = (1, ("login_normalized",))
 ORDERS_INDEXES = {
     "idx_customers_normalized_phone": (0, ("normalized_phone",)),
     "idx_customers_normalized_email": (0, ("normalized_email",)),
@@ -893,6 +915,7 @@ def _verify_auth_ledger(connection, require_latest=True):
         for migration in (
             AUTH_MIGRATION, AUTH_PREFERENCES_MIGRATION,
             AUTH_NOTIFICATIONS_MIGRATION, AUTH_NOTIFICATIONS_V2_MIGRATION,
+            AUTH_TEAM_MIGRATION,
         )
     }
     for row in rows:
@@ -916,11 +939,11 @@ def _verify_auth_ledger(connection, require_latest=True):
     ids = {str(row[0]) for row in rows}
     if AUTH_MIGRATION_ID not in ids:
         raise MigrationRequiredError("migration required: auth baseline is missing")
-    if require_latest and AUTH_NOTIFICATIONS_V2_MIGRATION_ID not in ids:
+    if require_latest and AUTH_TEAM_MIGRATION_ID not in ids:
         raise MigrationRequiredError(
-            "migration required: server notification events"
+            "migration required: team accounts"
         )
-    expected_lengths = {4} if require_latest else {1, 2, 3}
+    expected_lengths = {5} if require_latest else {1, 2, 3, 4}
     if len(rows) not in expected_lengths:
         raise DomainMigrationError("unexpected auth migration ledger length")
 
@@ -954,10 +977,11 @@ def _verify_indexes(connection, expected, table_by_prefix):
 
 
 def verify_auth_schema(connection, require_ledger=True, include_preferences=True,
-                       include_notifications=True, notification_v2=True):
+                       include_notifications=True, notification_v2=True,
+                       include_team=True):
     if include_notifications:
         expected_columns = (
-            AUTH_EXPECTED_COLUMNS if notification_v2
+            (AUTH_EXPECTED_COLUMNS if include_team else AUTH_PRE_TEAM_EXPECTED_COLUMNS) if notification_v2
             else AUTH_NOTIFICATIONS_V1_EXPECTED_COLUMNS
         )
     elif include_preferences:
@@ -974,7 +998,8 @@ def verify_auth_schema(connection, require_ledger=True, include_preferences=True
     _verify_columns(connection, expected_columns)
     _verify_indexes(
         connection,
-        AUTH_INDEXES if include_notifications else AUTH_V1_INDEXES,
+        (AUTH_INDEXES if include_team else AUTH_PRE_TEAM_INDEXES)
+        if include_notifications else AUTH_V1_INDEXES,
         expected_columns,
     )
     foreign_keys = {
@@ -1017,6 +1042,8 @@ def verify_auth_schema(connection, require_ledger=True, include_preferences=True
         "auth_tokens": {("token_hash",)},
         "auth_sessions": {("session_hash",)},
     }
+    if include_team and include_notifications:
+        expected_unique["users"].add(("login_normalized",))
     for table, required in expected_unique.items():
         if not required.issubset(_unique_columns(connection, table)):
             raise DomainMigrationError(
@@ -1339,15 +1366,41 @@ def _apply_auth_preferences_migration(path, app_commit, observer):
                         "SELECT migration_id FROM " + LEDGER_TABLE
                     ).fetchall()
                 }
-                if AUTH_NOTIFICATIONS_V2_MIGRATION_ID in ledger_ids:
+                if all(migration_id in ledger_ids for migration_id in (
+                    AUTH_MIGRATION_ID, AUTH_PREFERENCES_MIGRATION_ID,
+                    AUTH_NOTIFICATIONS_MIGRATION_ID,
+                    AUTH_NOTIFICATIONS_V2_MIGRATION_ID,
+                    AUTH_TEAM_MIGRATION_ID,
+                )):
                     _verify_auth_ledger(connection)
                     verify_auth_schema(connection)
                     _require_integrity(connection, "auth")
                     return migration_report(connection, "auth")
 
+                if AUTH_NOTIFICATIONS_V2_MIGRATION_ID in ledger_ids:
+                    _verify_auth_ledger(connection, require_latest=False)
+                    verify_auth_schema(connection, include_team=False)
+                    connection.execute("BEGIN IMMEDIATE")
+                    try:
+                        for statement in AUTH_TEAM_STATEMENTS:
+                            _execute(connection, statement, observer)
+                        _insert_applied_migration(
+                            connection, AUTH_TEAM_MIGRATION, app_commit,
+                            "server-notification-events-v2",
+                        )
+                        verify_auth_schema(connection)
+                        _verify_auth_ledger(connection)
+                        _require_integrity(connection, "auth-team-migration")
+                        connection.commit()
+                    except Exception:
+                        connection.rollback()
+                        raise
+                    return migration_report(connection, "auth")
+
                 if AUTH_NOTIFICATIONS_MIGRATION_ID in ledger_ids:
                     _verify_auth_ledger(connection, require_latest=False)
-                    verify_auth_schema(connection, notification_v2=False)
+                    if AUTH_TEAM_MIGRATION_ID not in ledger_ids:
+                        verify_auth_schema(connection, notification_v2=False)
                     connection.execute("BEGIN IMMEDIATE")
                     try:
                         for statement in AUTH_NOTIFICATIONS_V2_STATEMENTS:
@@ -1358,6 +1411,13 @@ def _apply_auth_preferences_migration(path, app_commit, observer):
                             app_commit,
                             "user-notifications-v1",
                         )
+                        if AUTH_TEAM_MIGRATION_ID not in ledger_ids:
+                            for statement in AUTH_TEAM_STATEMENTS:
+                                _execute(connection, statement, observer)
+                            _insert_applied_migration(
+                                connection, AUTH_TEAM_MIGRATION, app_commit,
+                                "user-notifications-v1",
+                            )
                         verify_auth_schema(connection)
                         _verify_auth_ledger(connection)
                         _require_integrity(connection, "auth-notifications-v2-migration")
@@ -1369,9 +1429,10 @@ def _apply_auth_preferences_migration(path, app_commit, observer):
 
                 if AUTH_PREFERENCES_MIGRATION_ID in ledger_ids:
                     _verify_auth_ledger(connection, require_latest=False)
-                    verify_auth_schema(
-                        connection, include_notifications=False
-                    )
+                    if AUTH_TEAM_MIGRATION_ID not in ledger_ids:
+                        verify_auth_schema(
+                            connection, include_notifications=False
+                        )
                     connection.execute("BEGIN IMMEDIATE")
                     try:
                         for statement in (
@@ -1391,6 +1452,12 @@ def _apply_auth_preferences_migration(path, app_commit, observer):
                             connection, AUTH_NOTIFICATIONS_V2_MIGRATION,
                             app_commit, "auth-v2",
                         )
+                        if AUTH_TEAM_MIGRATION_ID not in ledger_ids:
+                            for statement in AUTH_TEAM_STATEMENTS:
+                                _execute(connection, statement, observer)
+                            _insert_applied_migration(
+                                connection, AUTH_TEAM_MIGRATION, app_commit, "auth-v2",
+                            )
                         verify_auth_schema(connection)
                         _verify_auth_ledger(connection)
                         _require_integrity(connection, "auth-notifications-migration")
@@ -1431,6 +1498,11 @@ def _apply_auth_preferences_migration(path, app_commit, observer):
                     _insert_applied_migration(
                         connection, AUTH_NOTIFICATIONS_V2_MIGRATION,
                         app_commit, "auth-v1",
+                    )
+                    for statement in AUTH_TEAM_STATEMENTS:
+                        _execute(connection, statement, observer)
+                    _insert_applied_migration(
+                        connection, AUTH_TEAM_MIGRATION, app_commit, "auth-v1",
                     )
                     verify_auth_schema(connection)
                     _verify_auth_ledger(connection)
@@ -1480,6 +1552,11 @@ def _apply_auth_preferences_migration(path, app_commit, observer):
                 _insert_applied_migration(
                     connection, AUTH_NOTIFICATIONS_V2_MIGRATION,
                     app_commit, state,
+                )
+                for statement in AUTH_TEAM_STATEMENTS:
+                    _execute(connection, statement, observer)
+                _insert_applied_migration(
+                    connection, AUTH_TEAM_MIGRATION, app_commit, state,
                 )
                 verify_auth_schema(connection)
                 _verify_auth_ledger(connection)
@@ -1842,6 +1919,25 @@ def domain_snapshot(database_path, kind):
                     "kind": "auth",
                     "latest_migration": AUTH_NOTIFICATIONS_MIGRATION["id"],
                     "checksum": AUTH_NOTIFICATIONS_MIGRATION["checksum"],
+                    "schema_fingerprint": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+                    "business_counts": {
+                        table: int(connection.execute(
+                            "SELECT COUNT(*) FROM {}".format(table)
+                        ).fetchone()[0])
+                        for table in sorted(AUTH_V1_EXPECTED_COLUMNS)
+                    },
+                }
+            if AUTH_TEAM_MIGRATION_ID not in ledger_ids:
+                _verify_auth_ledger(connection, require_latest=False)
+                verify_auth_schema(connection, include_team=False)
+                payload = json.dumps(
+                    _semantic_schema(connection, AUTH_PRE_TEAM_EXPECTED_COLUMNS),
+                    sort_keys=True, separators=(",", ":"),
+                )
+                return {
+                    "kind": "auth",
+                    "latest_migration": AUTH_NOTIFICATIONS_V2_MIGRATION["id"],
+                    "checksum": AUTH_NOTIFICATIONS_V2_MIGRATION["checksum"],
                     "schema_fingerprint": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
                     "business_counts": {
                         table: int(connection.execute(
