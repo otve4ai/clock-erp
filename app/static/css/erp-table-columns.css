@@ -1,0 +1,118 @@
+.erp-column-table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+}
+
+table[data-erp-column-controls="managed"] {
+    table-layout: fixed !important;
+    max-width: none !important;
+}
+
+table.orders-split-table[data-erp-column-controls="managed"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: auto !important;
+}
+
+table[data-erp-column-controls="managed"] > thead > tr > th[data-erp-column-key] {
+    position: relative;
+    cursor: grab;
+    touch-action: pan-y;
+}
+
+.erp-column-dragging {
+    opacity: 0.55;
+    cursor: grabbing;
+}
+
+table[data-erp-column-controls="managed"] > thead > tr > th.erp-column-drop-before::before,
+table[data-erp-column-controls="managed"] > thead > tr > th.erp-column-drop-after::after {
+    position: absolute;
+    z-index: 8;
+    top: 3px;
+    bottom: 3px;
+    width: 3px;
+    border-radius: 3px;
+    background: var(--erp-primary, #315efb);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--erp-primary, #315efb) 22%, transparent);
+    content: "";
+    pointer-events: none;
+}
+
+table[data-erp-column-controls="managed"] > thead > tr > th.erp-column-drop-before::before {
+    left: -2px;
+}
+
+table[data-erp-column-controls="managed"] > thead > tr > th.erp-column-drop-after::after {
+    right: -2px;
+}
+
+.erp-column-resize-handle {
+    position: absolute;
+    z-index: 9;
+    top: 0;
+    right: -5px;
+    bottom: 0;
+    width: 10px;
+    cursor: col-resize;
+    touch-action: none;
+}
+
+.erp-column-resize-handle::after {
+    position: absolute;
+    top: 18%;
+    right: 4px;
+    bottom: 18%;
+    width: 1px;
+    background: var(--erp-border-strong, #94a3b8);
+    content: "";
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+
+th:hover > .erp-column-resize-handle::after,
+.erp-column-resize-handle.is-active::after {
+    opacity: 1;
+}
+
+.erp-column-drag-preview {
+    position: fixed;
+    z-index: 10000;
+    max-width: 280px;
+    padding: 7px 10px;
+    overflow: hidden;
+    border: 1px solid var(--erp-primary, #315efb);
+    border-radius: 7px;
+    background: var(--erp-surface, #fff);
+    box-shadow: 0 8px 24px rgb(15 23 42 / 20%);
+    color: var(--erp-text, #172033);
+    font: 600 12px/1.3 Inter, system-ui, sans-serif;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+body.erp-column-table-interacting,
+body.erp-column-table-interacting * {
+    cursor: grabbing !important;
+    user-select: none !important;
+}
+
+body.erp-column-table-resizing,
+body.erp-column-table-resizing * {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
+@media (max-width: 767px) {
+    table[data-erp-column-controls="managed"] {
+        width: 100% !important;
+        min-width: 0 !important;
+        table-layout: auto !important;
+    }
+
+    .erp-column-resize-handle {
+        display: none;
+    }
+}
