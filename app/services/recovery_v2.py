@@ -253,6 +253,11 @@ class RecoveryEngine:
         record = {
             "timestamp": _utc_now(), "operation_id": operation["id"],
             "kind": operation["kind"], "stage": operation.get("stage"),
+            "owner_id": operation.get("owner_id"),
+            "owner": operation.get("owner"),
+            "backup_id": operation.get("backup_id"),
+            "source_commit": operation.get("source_commit"),
+            "target_commit": operation.get("target_commit"),
             "event": str(event)[:80], "details": str(details or "")[:500] or None,
         }
         self.logs_root.mkdir(parents=True, exist_ok=True)
@@ -847,6 +852,7 @@ class RecoveryEngine:
                 operation["kind"], "success", backup_id=operation.get("backup_id"),
                 source_commit=operation.get("source_commit"),
                 target_commit=operation.get("target_commit"),
+                operation_id=operation["id"],
             )
             previous_instance = operation.get("previous_instance")
             if previous_instance:
@@ -912,12 +918,17 @@ class RecoveryEngine:
                 "at": _utc_now(),
             })
             self._write_operation(operation)
+            self._log(
+                operation, "automatic_rollback",
+                operation["automatic_rollback"]["result"],
+            )
             self._log(operation, "failed", recovery_error.code)
             self.backups._audit(
                 {"id": operation.get("owner_id"), "email": operation.get("owner")},
                 operation["kind"], operation["status"], backup_id=operation.get("backup_id"),
                 source_commit=operation.get("source_commit"),
                 target_commit=operation.get("target_commit"), error=recovery_error.code,
+                operation_id=operation["id"],
             )
             return operation
         finally:

@@ -713,11 +713,11 @@ class BackupAdminService:
         }
 
     def _audit(self, actor, action, result, backup_id=None, source_commit=None,
-               target_commit=None, error=None):
+               target_commit=None, error=None, operation_id=None):
         event = {
             "timestamp": _utc_now(), "actor_id": str(actor.get("id") or "unknown"),
             "actor": str(actor.get("email") or actor.get("name") or "unknown")[:160],
-            "action": action, "backup_id": backup_id,
+            "action": action, "operation_id": operation_id, "backup_id": backup_id,
             "source_commit": source_commit, "target_commit": target_commit,
             "result": result, "error": str(error or "")[:300] or None,
         }
@@ -868,7 +868,7 @@ class BackupAdminService:
             self._set_operation(operation)
             self._size_cache.clear()
             self._audit(actor, "manual_backup", "success", backup_id=backup["backup_id"],
-                        source_commit=git.get("commit"))
+                        source_commit=git.get("commit"), operation_id=operation["id"])
         except Exception as error:
             if backup is not None:
                 try:
@@ -892,7 +892,10 @@ class BackupAdminService:
                 self._set_operation(operation)
             except OSError:
                 pass
-            self._audit(actor, "manual_backup", "error", error=type(error).__name__)
+            self._audit(
+                actor, "manual_backup", "error", error=type(error).__name__,
+                operation_id=operation["id"],
+            )
 
     def start_manual_backup(self, actor):
         self.backup_root.mkdir(parents=True, exist_ok=True)
@@ -929,7 +932,7 @@ class BackupAdminService:
         )
         thread.daemon = True
         thread.start()
-        self._audit(actor, "manual_backup", "started")
+        self._audit(actor, "manual_backup", "started", operation_id=operation["id"])
         return operation
 
     def blocked_restore_attempt(self, actor, action, backup_id=None, target_commit=None):
@@ -1027,10 +1030,12 @@ class BackupAdminService:
                     actor, kind, "failed", backup_id=backup_id,
                     source_commit=status["git"].get("commit"),
                     target_commit=target_commit, error=type(error).__name__,
+                    operation_id=operation["id"],
                 )
                 raise BackupAdminError("Не удалось запустить Recovery V2 helper")
             self._audit(actor, kind, "started", backup_id=backup_id,
-                        source_commit=status["git"].get("commit"), target_commit=target_commit)
+                        source_commit=status["git"].get("commit"), target_commit=target_commit,
+                        operation_id=operation["id"])
         return operation
 
     def audit_refused_attempt(self, actor, action, backup_id=None, target_commit=None,

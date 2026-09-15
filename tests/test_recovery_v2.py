@@ -176,6 +176,8 @@ class RecoveryV2Test(unittest.TestCase):
              "staging_check", "maintenance", "production_restore", "service_restart",
              "health_check", "completed"],
         )
+        audit = json.loads(self.service.audit_path.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(audit["operation_id"], result["id"])
 
     def test_corrupt_backup_is_blocked_before_production_change(self):
         backup = self._make_backup()
@@ -268,6 +270,11 @@ class RecoveryV2Test(unittest.TestCase):
         result = self._engine(cls=Engine).run(self._operation(backup=backup)["id"])
         self.assertEqual(result["automatic_rollback"]["result"], "completed")
         self.assertEqual(self._payload(), "current")
+        recovery_log = (
+            self.backups / "recovery" / "logs" / (result["id"] + ".jsonl")
+        ).read_text(encoding="utf-8")
+        self.assertIn('"event": "automatic_rollback"', recovery_log)
+        self.assertIn('"details": "completed"', recovery_log)
 
     def test_health_failure_triggers_automatic_rollback(self):
         backup = self._make_backup()
