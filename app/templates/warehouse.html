@@ -8033,7 +8033,6 @@
         }
 
         function applyWarehouseTableWidths(table, widths) {
-            let totalWidth = 0;
             const renderedWidths = {};
             warehouseTableDefaults.order.forEach(function(key) {
                 const width = Math.max(
@@ -8045,40 +8044,15 @@
                 );
                 widths[key] = width;
                 renderedWidths[key] = width;
-                const column = table.querySelector('col[data-column-key="' + key + '"]');
-                if (!column || !column.hidden) totalWidth += width;
             });
-            const scrollBody = document.getElementById("warehouseTableScrollBody");
-            let extra = Math.max(0, (scrollBody?.clientWidth || 0) - totalWidth);
-            const flexibleColumns = ["name", "category", "model"].filter(function(key) {
-                const column = table.querySelector('col[data-column-key="' + key + '"]');
-                return column && !column.hidden;
-            });
-            while (extra > 0.5 && flexibleColumns.length) {
-                const share = extra / flexibleColumns.length;
-                let applied = 0;
-                flexibleColumns.slice().forEach(function(key) {
-                    const capacity = warehouseTableMaximumWidths[key] - renderedWidths[key];
-                    const growth = Math.max(0, Math.min(share, capacity));
-                    renderedWidths[key] += growth;
-                    applied += growth;
-                    if (capacity <= share + 0.5) {
-                        flexibleColumns.splice(flexibleColumns.indexOf(key), 1);
-                    }
-                });
-                if (applied <= 0.5) break;
-                extra -= applied;
-            }
             let renderedTotal = 0;
             warehouseTableDefaults.order.forEach(function(key) {
                 const column = table.querySelector('col[data-column-key="' + key + '"]');
                 if (column) column.style.width = renderedWidths[key] + "px";
                 if (!column || !column.hidden) renderedTotal += renderedWidths[key];
             });
-            table.style.width = Math.max(
-                renderedTotal,
-                scrollBody?.clientWidth || 0
-            ) + "px";
+            table.style.width = renderedTotal + "px";
+            table.style.minWidth = renderedTotal + "px";
             syncWarehouseTableScrollbars(table);
         }
 
@@ -8304,14 +8278,23 @@
                 if (event.button !== 0 || event.target.closest("input, button, form, label, .warehouse-column-resize-handle")) return;
                 const header = event.target.closest("th[data-column-key]");
                 if (header) {
-                    dragState = { header: header, startX: event.clientX, dragging: false, target: null, after: false };
+                    dragState = { header: header, startX: event.clientX, dragging: false, target: null, after: false, preview: null };
                 }
             });
             window.addEventListener("pointermove", function(event) {
                 if (!dragState) return;
                 if (!dragState.dragging && Math.abs(event.clientX - dragState.startX) < 6) return;
-                dragState.dragging = true;
-                document.body.classList.add("warehouse-table-interacting");
+                if (!dragState.dragging) {
+                    dragState.dragging = true;
+                    document.body.classList.add("warehouse-table-interacting");
+                    dragState.header.classList.add("erp-column-dragging");
+                    dragState.preview = document.createElement("div");
+                    dragState.preview.className = "erp-column-drag-preview";
+                    dragState.preview.textContent = dragState.header.textContent.trim();
+                    document.body.appendChild(dragState.preview);
+                }
+                dragState.preview.style.left = event.clientX + 14 + "px";
+                dragState.preview.style.top = event.clientY + 14 + "px";
                 table.querySelectorAll(".warehouse-drop-before, .warehouse-drop-after").forEach(function(header) {
                     header.classList.remove("warehouse-drop-before", "warehouse-drop-after");
                 });
@@ -8344,6 +8327,8 @@
                         header.classList.remove("warehouse-drop-before", "warehouse-drop-after");
                     });
                     document.body.classList.remove("warehouse-table-interacting");
+                    dragState.header.classList.remove("erp-column-dragging");
+                    if (dragState.preview) dragState.preview.remove();
                 }
                 dragState = null;
             }, { signal: viewSignal });
