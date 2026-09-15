@@ -260,7 +260,10 @@ class OrdersSnapshotStore:
             ):
                 continue
             value = incoming[field]
-            if field in {"external_customer_id", "customer", "phone", "email"} and not _text(value):
+            if field in {
+                "external_customer_id", "customer", "phone", "email",
+                "country", "region", "city", "location_id",
+            } and not _text(value):
                 continue
             if field in {"items", "products"} and not value and merged.get(field):
                 continue

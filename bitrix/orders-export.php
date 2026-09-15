@@ -114,26 +114,52 @@ function firstProperty(array $properties, array $keys): string
     return '';
 }
 
-function resolvedCity(array $properties): string
+function resolvedGeography(array $properties): array
 {
     static $cache = array();
-    $value = firstProperty($properties, array('CITY', 'LOCATION_NAME', 'NAME:ГОРОД'));
-    if ($value === '' || !ctype_digit($value)) {
-        return $value;
+    $locationId = firstProperty($properties, array(
+        'LOCATION', 'LOCATION_ID', 'NAME:МЕСТОПОЛОЖЕНИЕ'
+    ));
+    $city = firstProperty($properties, array(
+        'CITY', 'CITY_NAME', 'LOCATION_NAME', 'NAME:ГОРОД'
+    ));
+    if ($locationId === '' && ctype_digit($city)) {
+        $locationId = $city;
     }
-    if (array_key_exists($value, $cache)) {
-        return $cache[$value];
+    $result = array(
+        'location_id' => $locationId,
+        'country' => firstProperty($properties, array(
+            'COUNTRY', 'COUNTRY_NAME', 'NAME:СТРАНА'
+        )),
+        'region' => firstProperty($properties, array(
+            'REGION', 'REGION_NAME', 'STATE', 'PROVINCE', 'NAME:РЕГИОН'
+        )),
+        'city' => ctype_digit($city) ? '' : $city,
+    );
+    if ($locationId === '' || !ctype_digit($locationId)) {
+        return $result;
     }
-    $location = CSaleLocation::GetByID((int) $value, LANGUAGE_ID);
-    $name = is_array($location) ? trim((string) ($location['CITY_NAME'] ?? '')) : '';
-    $cache[$value] = $name;
-    return $name;
+    if (!array_key_exists($locationId, $cache)) {
+        $location = CSaleLocation::GetByID((int) $locationId, LANGUAGE_ID);
+        $cache[$locationId] = is_array($location) ? array(
+            'country' => trim((string) ($location['COUNTRY_NAME'] ?? '')),
+            'region' => trim((string) ($location['REGION_NAME'] ?? '')),
+            'city' => trim((string) ($location['CITY_NAME'] ?? '')),
+        ) : array();
+    }
+    foreach (array('country', 'region', 'city') as $field) {
+        if ($result[$field] === '' && !empty($cache[$locationId][$field])) {
+            $result[$field] = $cache[$locationId][$field];
+        }
+    }
+    return $result;
 }
 
 $orders = array();
 foreach ($rawOrders as $order) {
     $id = (string) $order['ID'];
     $props = $properties[$id] ?? array();
+    $geography = resolvedGeography($props);
     $orders[] = array(
         'id' => $id,
         'number' => (string) $order['ACCOUNT_NUMBER'],
@@ -154,7 +180,10 @@ foreach ($rawOrders as $order) {
         'customer' => firstProperty($props, array('FIO', 'NAME', 'CONTACT_PERSON', 'NAME:Ф.И.О.', 'NAME:ИМЯ')),
         'phone' => firstProperty($props, array('PHONE', 'MOBILE', 'NAME:ТЕЛЕФОН')),
         'email' => firstProperty($props, array('EMAIL', 'NAME:E-MAIL', 'NAME:EMAIL')),
-        'city' => resolvedCity($props),
+        'location_id' => $geography['location_id'],
+        'country' => $geography['country'],
+        'region' => $geography['region'],
+        'city' => $geography['city'],
         'products' => $basketItems[$id] ?? array(),
     );
 }
