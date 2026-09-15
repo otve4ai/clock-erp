@@ -1,11 +1,17 @@
+import json
 import time
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
 
 
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+BITRIX_LOCATIONS_PATH = (
+    Path(__file__).resolve().parents[1] / "data" / "tictactoy_locations.json"
+)
 
 STATUS_NAMES = {
     "N": "Новый",
@@ -273,6 +279,32 @@ def property_values(order):
     return result
 
 
+@lru_cache(maxsize=1)
+def bitrix_location_index():
+    """Load the exported Bitrix sale-location hierarchy by numeric ID."""
+    try:
+        payload = json.loads(BITRIX_LOCATIONS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    raw_index = payload.get("locations_by_id")
+    if not isinstance(raw_index, dict):
+        return {}
+    result = {}
+    for location_id, value in raw_index.items():
+        parts = value.split("\t") if isinstance(value, str) else []
+        if len(parts) != 3:
+            continue
+        result[str(location_id).strip()] = dict(zip(
+            ("country", "region", "city"),
+            (part.strip() for part in parts),
+        ))
+    return result
+
+
+def resolve_bitrix_location(location_id):
+    return bitrix_location_index().get(str(location_id or "").strip(), {})
+
+
 def status_presentation(value):
     code = str(value if value not in (None, "") else "").strip()
     normalized = code.upper()
@@ -415,6 +447,14 @@ def normalize_order(order):
         or properties.get("LOCATION")
         or properties.get("LOCATION_ID")
     )
+    if not location_id and str(city or "").strip().isdigit():
+        location_id = city
+    resolved_location = resolve_bitrix_location(location_id)
+    country = country or resolved_location.get("country")
+    region = region or resolved_location.get("region")
+    if resolved_location and str(city or "").strip().isdigit():
+        city = None
+    city = city or resolved_location.get("city")
     required = {
         "customer": customer,
         "phone": first_value(order, "phone", "PHONE") or user.get("phone") or properties.get("PHONE"),

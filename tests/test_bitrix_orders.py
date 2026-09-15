@@ -302,7 +302,7 @@ class BitrixOrderNormalizationTest(unittest.TestCase):
         self.assertEqual(order["delivery_price"], 250.0)
         self.assertTrue(order["calculation_consistent"])
 
-    def test_bitrix_location_property_is_preserved_as_id_not_region_name(self):
+    def test_bitrix_location_property_populates_country_region_and_city(self):
         order = normalize_order({
             "id": "21110",
             "status": "A",
@@ -313,8 +313,35 @@ class BitrixOrderNormalizationTest(unittest.TestCase):
         })
 
         self.assertEqual(order["location_id"], "107")
-        self.assertIsNone(order["region"])
-        self.assertIsNone(order["city"])
+        self.assertEqual(order["country"], "Россия")
+        self.assertEqual(order["region"], "Москва")
+        self.assertEqual(order["city"], "Москва")
+
+    def test_explicit_geography_has_priority_over_location_catalog(self):
+        order = normalize_order({
+            "id": "21110",
+            "country": "Казахстан",
+            "region": "Алматинская область",
+            "city": "Конаев",
+            "properties": [{"code": "LOCATION", "value": "107"}],
+        })
+
+        self.assertEqual(
+            (order["country"], order["region"], order["city"]),
+            ("Казахстан", "Алматинская область", "Конаев"),
+        )
+
+    def test_legacy_numeric_city_property_is_resolved_as_location_id(self):
+        order = normalize_order({
+            "id": "legacy",
+            "properties": [{"code": "CITY", "value": "468"}],
+        })
+
+        self.assertEqual(order["location_id"], "468")
+        self.assertEqual(
+            (order["country"], order["region"], order["city"]),
+            ("Россия", "Московская область", "Красногорск"),
+        )
 
     def test_delivery_is_derived_only_from_fully_priced_reconciled_order(self):
         order = normalize_order({
