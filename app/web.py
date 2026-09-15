@@ -2746,6 +2746,22 @@ def get_order_product_mapping(mapping_context, product):
     return mapping_context.get(order_product_mapping_key(product)) or {}
 
 
+def order_has_blocking_sync_issue(order):
+    """Keep incomplete-card guards, except a missing Bitrix monetary total."""
+    state = (order or {}).get("sync_state")
+    if state == "error":
+        return True
+    if state != "partial":
+        return False
+    missing = (order or {}).get("sync_missing")
+    # Unknown partial loads remain blocked; only an explicitly price-only
+    # omission is irrelevant to selling the ERP order lines.
+    return not (
+        isinstance(missing, list) and missing
+        and all(field == "total" for field in missing)
+    )
+
+
 def build_order_sale_readiness(order, mapping_context, already_conducted=False):
     issues = []
     required = {}
@@ -2758,16 +2774,8 @@ def build_order_sale_readiness(order, mapping_context, already_conducted=False):
         issues.append("Заказ не подтверждён")
     if not products:
         issues.append("Состав заказа не загружен")
-    if (order or {}).get("sync_state") in {"partial", "error"}:
+    if order_has_blocking_sync_issue(order):
         issues.append("Карточка загружена не полностью")
-    if "calculation_complete" in (order or {}) and not order.get(
-        "calculation_complete"
-    ):
-        issues.append("Расчёт заказа неполный")
-    elif "calculation_consistent" in (order or {}) and not order.get(
-        "calculation_consistent"
-    ):
-        issues.append("Расчёт заказа не сходится")
     for product in products:
         mapping = get_order_product_mapping(mapping_context, product)
         selected = mapping.get("product")
@@ -3184,16 +3192,10 @@ def _conduct_order_sale(order_id):
         issues.append("Чтобы провести продажу, сначала подтвердите заказ")
     if not products:
         issues.append("Заказ без товаров нельзя провести в продажу")
-    if full_order.get("sync_state") in {"partial", "error"}:
+    if order_has_blocking_sync_issue(full_order):
         issues.append("Карточка заказа загружена не полностью")
-    if "calculation_complete" in full_order and not full_order.get(
-        "calculation_complete"
-    ):
-        issues.append("Bitrix не передал полный расчёт доставки и скидки")
-    elif "calculation_consistent" in full_order and not full_order.get(
-        "calculation_consistent"
-    ):
-        issues.append("Сумма заказа не сходится с товарами, скидкой и доставкой")
+    # Bitrix reconciliation flags are diagnostic only. Sale amounts come from
+    # the ERP order lines; missing discount/delivery/total must not block them.
 
     for line_index, product in enumerate(products):
         identity = bitrix_order_product_identity(product)
