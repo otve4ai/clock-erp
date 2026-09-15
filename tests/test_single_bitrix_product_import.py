@@ -200,6 +200,21 @@ class SingleBitrixProductImportTest(unittest.TestCase):
                     ).fetchone()
                     self.assertEqual(tuple(movement), (0, 2, 2))
 
+    def test_zero_quantity_creates_card_without_stock_or_receipt(self):
+        source = source_product("859", article="ZERO-859")
+        response = self.post_import(source, quantity=0)
+        self.assertEqual(response.status_code, 201)
+        data = response.get_json()["data"]
+        self.assertEqual(data["product"]["stock"], 0)
+        self.assertIsNone(data["receipt_id"])
+        repeated = self.post_import(source, quantity=0)
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.get_json()["data"]["product"]["id"], data["product"]["id"])
+        self.assertEqual(self.post_import(source, action="update", quantity=0).status_code, 422)
+        with CatalogDatabase(self.database_path).connect() as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM erp_receipts").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM catalog_stock_movements").fetchone()[0], 0)
+
     def test_existing_card_unchanged_with_different_unknown_taxonomy(self):
         source = source_product("850", article="EXISTING-850")
         saved = self.post_import(source, quantity=3).get_json()["data"]["product"]
@@ -220,7 +235,7 @@ class SingleBitrixProductImportTest(unittest.TestCase):
             self.assertEqual(after[key], before[key], key)
 
     def test_invalid_quantity_does_not_create_or_add_stock(self):
-        for quantity in (None, 0, -1, 1.5, True, "bad"):
+        for quantity in (None, -1, 1.5, True, "bad"):
             with self.subTest(quantity=quantity):
                 response = self.post_import(source_product("860", article="BAD-860"), quantity=quantity)
                 self.assertEqual(response.status_code, 422)

@@ -4094,6 +4094,7 @@
         .bitrix-result small,.bitrix-muted { color:#64748b; }
         .bitrix-preview { display:grid;grid-template-columns:96px 1fr;gap:16px;padding:14px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc; }
         .bitrix-preview-photo { width:96px;height:96px; }
+        #bitrixPreviewPhoto { background:#fff; }
         .bitrix-preview-fields { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px; }
         .bitrix-taxonomy { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
         .bitrix-taxonomy select, .bitrix-taxonomy input { width:100%;min-height:40px;border:1px solid #cbd5e1;border-radius:9px;background:#fff; }
@@ -4756,8 +4757,8 @@
                                         </div>
                                     </div>
                                 </section>
-                                <div class="bitrix-taxonomy picker-taxonomy">
-                                    <label>Количество к приходу в ERP<input id="bitrixImportQuantity" type="number" min="1" step="1" value="1" required></label>
+                                <div id="bitrixImportQuantityField" class="bitrix-taxonomy picker-taxonomy" hidden>
+                                    <label>Количество к приходу в ERP<input id="bitrixImportQuantity" type="number" min="0" step="1" value="0" required></label>
                                 </div>
                                 <div id="bitrixDuplicateNotice" hidden>
                                     <strong>Товар уже есть в ERP.</strong> <span id="bitrixDuplicateText"></span>
@@ -5540,7 +5541,6 @@
             <div class="product-detail-card">
                 <div class="product-detail-label">Остаток</div>
                 <div id="detailStock" class="product-detail-value">—</div>
-                <a id="bundleSettings" href="#">Настроить состав</a>
                 <div id="bundleAvailability" role="status"></div>
                 <input id="editStock" class="product-detail-input" type="number" min="0" step="1" name="stock" aria-label="Остаток товара" required>
             </div>
@@ -6430,7 +6430,6 @@
             const publicProductUrl = button.dataset.publicProductUrl || "";
             const thumbnailUrl = button.dataset.thumbnailUrl || "";
             const productId = button.dataset.id || button.dataset.productId || "";
-            document.getElementById("bundleSettings").href = "/app/products/" + encodeURIComponent(productId) + "/bundle";
             const bundleStatus = document.getElementById("bundleAvailability");
             bundleStatus.dataset.productId = productId;
             bundleStatus.textContent = "";
@@ -7683,7 +7682,8 @@
 
     function resetBitrixSelection() {
         bitrixSelectedProduct = null;
-        document.getElementById("bitrixImportQuantity").value = "1";
+        document.getElementById("bitrixImportQuantityField").hidden = true;
+        document.getElementById("bitrixImportQuantity").value = "0";
         document.getElementById("bitrixSelectionEmpty").hidden = false;
         window.ERPProductPicker.highlight(document.getElementById("bitrixProductResults"), "");
         document.getElementById("bitrixProductPreview").hidden = true;
@@ -7742,6 +7742,7 @@
 
     function showBitrixPreview(product) {
         bitrixSelectedProduct = product;
+        document.getElementById("bitrixImportQuantityField").hidden = false;
         document.getElementById("bitrixSelectionEmpty").hidden = true;
         window.ERPProductPicker.highlight(document.getElementById("bitrixProductResults"), product.bitrix_id);
         document.getElementById("bitrixProductPreview").hidden = false;
@@ -7766,6 +7767,8 @@
         category.value = product.category_id || "";
         document.getElementById("bitrixTaxonomy").hidden = Boolean(product.duplicate) || (product.brand_recognized && product.category_recognized);
         const duplicate = Boolean(product.duplicate);
+        document.getElementById("bitrixImportQuantity").min = duplicate ? "1" : "0";
+        document.getElementById("bitrixImportQuantity").value = duplicate ? "1" : "0";
         document.getElementById("bitrixDuplicateNotice").hidden = !duplicate;
         document.getElementById("bitrixImportProduct").hidden = duplicate;
         document.getElementById("bitrixUpdateProduct").hidden = !duplicate || !product.existing || product.ambiguous;
@@ -7802,9 +7805,10 @@
     let bitrixSubmitting = false;
     async function submitBitrixImport(action) {
         if (!bitrixSelectedProduct || bitrixSubmitting) return;
-        const quantity = Number(document.getElementById("bitrixImportQuantity").value);
-        if (!Number.isSafeInteger(quantity) || quantity <= 0) {
-            bitrixImportMessage("Введите целое положительное количество.");
+        const quantityInput = document.getElementById("bitrixImportQuantity").value.trim();
+        const quantity = Number(quantityInput);
+        if (!quantityInput || !Number.isSafeInteger(quantity) || quantity < (action === "create" ? 0 : 1)) {
+            bitrixImportMessage(action === "create" ? "Введите целое количество от 0." : "Введите целое положительное количество.");
             return;
         }
         bitrixSubmitting = true;
@@ -7830,7 +7834,7 @@
             const query = new URLSearchParams({
                 q: saved.article || saved.name,
                 notice: "success",
-                message: "Количество добавлено к остатку ERP",
+                message: quantity === 0 ? "Товар сохранён без прихода" : "Количество добавлено к остатку ERP",
             });
             window.location.assign("/warehouse?" + query.toString());
         } catch (error) {
