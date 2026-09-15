@@ -19,6 +19,9 @@
 .backup-grid { display: grid; gap: 18px; margin-bottom: 18px; }
 .backup-grid-storage { grid-template-columns: minmax(0, 1.65fr) minmax(300px, .85fr); }
 .backup-grid-primary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.backup-grid-primary > .backup-card { display: flex; flex-direction: column; }
+.backup-grid-primary .backup-table-wrap { max-height: 430px; overflow: auto; }
+.backup-grid-primary .backup-table th { position: sticky; top: 0; z-index: 1; background: var(--backup-surface); }
 .backup-card { background: var(--backup-surface); border: 1px solid var(--backup-border); border-radius: 14px; box-shadow: 0 4px 16px rgba(20, 42, 64, .055); padding: 22px; min-width: 0; }
 .backup-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .backup-card-heading h2 { margin: 0; font-size: 19px; }
@@ -76,11 +79,13 @@
 .table-empty { color: var(--backup-muted); text-align: center; padding: 26px !important; }
 .badge { display: inline-flex; border-radius: 999px; padding: 4px 8px; font-weight: 700; background: #edf1f6; color: #526276; white-space: nowrap; }
 .badge.verified, .badge.current { background: #e5f5ec; color: var(--backup-green); }
+.badge.not_checked { background: #fff2d3; color: var(--backup-yellow); }
 .badge.error { background: #fde8e8; color: var(--backup-red); }
 .badge.running { background: #e7f0ff; color: var(--backup-blue); }
 .backup-notice { padding: 12px 14px; margin-bottom: 18px; border-radius: 9px; background: #e7f0ff; color: #174c91; }
 .backup-notice.error { background: #fde8e8; color: #8f2020; }
 .backup-operation { display: flex; gap: 12px; align-items: center; padding: 13px 15px; background: #e7f0ff; color: #174c91; border-radius: 10px; margin-bottom: 18px; }
+.backup-operation[hidden] { display: none; }
 .backup-operation span[data-operation-message] { display: block; margin-top: 3px; font-size: 12px; }
 .backup-operation-spinner { width: 17px; height: 17px; border: 2px solid #9abbe6; border-top-color: var(--backup-blue); border-radius: 50%; animation: backup-spin .8s linear infinite; }
 @keyframes backup-spin { to { transform: rotate(360deg); } }

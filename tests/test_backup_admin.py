@@ -41,13 +41,17 @@ class BackupAdminServiceTest(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def archive(self, name, size_marker=b"payload"):
-        path = self.daily / name
+    def archive_at(self, directory, name, size_marker=b"payload"):
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / name
         with tarfile.open(str(path), "w:gz") as archive:
             info = tarfile.TarInfo("instance/settings.json")
             info.size = len(size_marker)
             archive.addfile(info, io.BytesIO(size_marker))
         return path
+
+    def archive(self, name, size_marker=b"payload"):
+        return self.archive_at(self.daily, name, size_marker)
 
     def test_backup_listing_uses_real_files_and_sorts_newest_first(self):
         older = self.archive("clock-erp-daily-20260913-031701.tar.gz")
@@ -58,7 +62,64 @@ class BackupAdminServiceTest(unittest.TestCase):
 
         self.assertEqual([item["timestamp"][:10] for item in listing], ["2026-09-15", "2026-09-13"])
         self.assertEqual([item["size"] for item in listing], [newer.stat().st_size, older.stat().st_size])
-        self.assertEqual([item["status"] for item in listing], ["ready", "ready"])
+        self.assertEqual([item["status"] for item in listing], ["not_checked", "not_checked"])
+
+    def test_corrupt_named_archive_is_error_without_breaking_listing(self):
+        valid = self.archive("clock-erp-daily-20260915-031701.tar.gz")
+        corrupt = self.daily / "clock-erp-daily-20260916-031701.tar.gz"
+        corrupt.write_bytes(b"not-a-gzip-archive")
+
+        listing = self.service.list_backups()
+
+        self.assertEqual(len(listing), 2)
+        self.assertEqual(listing[0]["size"], corrupt.stat().st_size)
+        self.assertEqual(listing[0]["status"], "error")
+        self.assertEqual(listing[0]["integrity_status"], "failed")
+        self.assertEqual(listing[1]["size"], valid.stat().st_size)
+        self.assertEqual(listing[1]["status"], "not_checked")
+        with mock.patch.object(self.service, "service_status", return_value={"active": True}), \
+             mock.patch.object(self.service, "git_status", return_value={"available": True, "history": []}), \
+             mock.patch.object(self.service, "storage_status", return_value={"state": "ok"}):
+            status = self.service.status()
+        self.assertEqual(status["restore_points"], [])
+        self.assertEqual(status["overall"], "critical")
+
+    def test_explicit_production_legacy_layouts_are_discovered(self):
+        self.archive("clock-erp-daily-20260915-031701.tar.gz")
+        self.archive_at(
+            self.backups,
+            "clock-erp-pre-deploy-pr281-20260818-235042.tar.gz",
+        )
+        self.archive_at(
+            self.backups,
+            "clock-erp-pre-product-analytics-20260825-175546.tar.gz",
+        )
+        self.archive_at(
+            self.backups / "temporary",
+            "clock-erp-p0-20260827-151704-726da8b.tar.gz",
+        )
+        self.archive_at(
+            self.backups / "preserved-orders-491",
+            "clock-erp-daily-20260901-000710.tar.gz",
+        )
+        self.archive_at(
+            self.backups / "pr524-preserve-20260915",
+            "clock-erp-daily-20260914-031701.tar.gz",
+        )
+        self.archive_at(self.backups, "changed-source.tar.gz")
+
+        listing = self.service.list_backups()
+
+        self.assertEqual(len(listing), 5)
+        self.assertEqual(
+            [item["timestamp"][:10] for item in listing],
+            ["2026-09-15", "2026-09-01", "2026-08-27", "2026-08-25", "2026-08-18"],
+        )
+        self.assertEqual(
+            [item["type"] for item in listing],
+            ["automatic", "automatic", "temporary", "temporary", "temporary"],
+        )
+        self.assertTrue(all(not item["metadata"] for item in listing))
 
     def test_old_backup_without_metadata_is_not_restore_point(self):
         self.archive("clock-erp-daily-20260915-031701.tar.gz")
@@ -187,6 +248,15 @@ class BackupAdminServiceTest(unittest.TestCase):
             "17 3 * * * root backup --create-daily\n", encoding="utf-8"
         )
         self.assertEqual(self.service.schedule_status()["label"], "Ежедневно в 03:17")
+
+    def test_ui_hides_idle_operation_and_scrolls_primary_history(self):
+        project_root = Path(__file__).resolve().parents[1]
+        css = (project_root / "app/static/css/backups.css").read_text(encoding="utf-8")
+        js = (project_root / "app/static/js/backups.js").read_text(encoding="utf-8")
+        self.assertIn(".backup-operation[hidden] { display: none; }", css)
+        self.assertIn(".backup-grid-primary .backup-table-wrap { max-height: 430px; overflow: auto; }", css)
+        self.assertIn("panel.hidden = !operation.active", js)
+        self.assertIn('not_checked: "Не проверен"', js)
 
 
 class shutil_usage:

@@ -9,7 +9,10 @@
     const text = (selector, value) => { const node = q(selector); if (node) node.textContent = value; };
     const unknown = "Не удалось определить";
     const typeLabels = { automatic: "Автоматический", manual: "Ручной", pre_restore: "Перед восстановлением", temporary: "Временный" };
-    const statusLabels = { ready: "Готов", verified: "Проверен", error: "Ошибка", creating: "Создаётся", verifying: "Проверяется" };
+    const statusLabels = { not_checked: "Не проверен", verified: "Проверен", error: "Повреждён", creating: "Создаётся", verifying: "Проверяется" };
+    let watchedOperationId = bootstrap.status && bootstrap.status.operation && bootstrap.status.operation.active
+        ? bootstrap.status.operation.id
+        : null;
 
     function bytes(value) {
         if (!Number.isFinite(value)) return unknown;
@@ -217,6 +220,19 @@
         const operation = status.operation || {};
         const panel = q("[data-operation]");
         panel.hidden = !operation.active;
+        if (operation.active) {
+            watchedOperationId = operation.id || watchedOperationId;
+        } else if (
+            watchedOperationId
+            && operation.id === watchedOperationId
+            && (operation.status === "complete" || operation.status === "error")
+        ) {
+            showMessage(
+                operation.message || (operation.status === "complete" ? "Бэкап создан" : "Не удалось создать бэкап"),
+                operation.status === "error"
+            );
+            watchedOperationId = null;
+        }
         text("[data-operation-title]", operation.kind === "manual_backup" ? "Создание бэкапа" : "Выполняется операция");
         text("[data-operation-message]", operation.message || operation.status || "");
         const create = q("[data-create-backup]");
@@ -250,6 +266,7 @@
             });
             const payload = await response.json();
             if (!response.ok) throw new Error(payload.message || "Не удалось создать бэкап");
+            watchedOperationId = payload.data && payload.data.id || watchedOperationId;
             showMessage("Создание бэкапа запущено", false);
             await refresh();
         } catch (error) {

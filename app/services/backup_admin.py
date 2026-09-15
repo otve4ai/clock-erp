@@ -21,6 +21,16 @@ LEGACY_DAILY_RE = re.compile(r"^clock-erp-(\d{8})-(\d{6})\.tar\.gz$")
 TEMP_RE = re.compile(
     r"^clock-erp-temp-(\d{8})-(\d{6})-([A-Za-z0-9_.-]+)\.tar\.gz$"
 )
+LEGACY_PRE_DEPLOY_RE = re.compile(
+    r"^clock-erp-pre-deploy-pr\d+-(\d{8})-(\d{6})\.tar\.gz$"
+)
+LEGACY_PRE_PRODUCT_RE = re.compile(
+    r"^clock-erp-pre-product-analytics-(\d{8})-(\d{6})\.tar\.gz$"
+)
+LEGACY_P0_RE = re.compile(
+    r"^clock-erp-p0-(\d{8})-(\d{6})-[0-9a-f]+\.tar\.gz$"
+)
+PRESERVED_ORDERS_DIR_RE = re.compile(r"^preserved-orders-\d+$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 MANUAL_LABEL = "manual"
 PREFLIGHT_LABEL = "pre-restore"
@@ -127,12 +137,41 @@ class BackupAdminService:
     def _metadata_path(self, backup_id):
         return self.metadata_root / (backup_id + ".json")
 
+    @staticmethod
+    def _archive_is_readable(path):
+        try:
+            if path.stat().st_size <= 0:
+                return False
+            with tarfile.open(str(path), "r:gz") as archive:
+                return archive.next() is not None
+        except (OSError, EOFError, tarfile.TarError):
+            return False
+
     def _backup_candidates(self):
         candidates = []
-        locations = ((self.backup_root / "daily", "automatic"),
-                     (self.backup_root, "automatic"),
-                     (self.backup_root / "temporary", "temporary"))
-        for directory, default_type in locations:
+        locations = (
+            (self.backup_root / "daily", "automatic", (DAILY_RE,)),
+            (
+                self.backup_root,
+                "automatic",
+                (DAILY_RE, LEGACY_DAILY_RE, LEGACY_PRE_DEPLOY_RE,
+                 LEGACY_PRE_PRODUCT_RE),
+            ),
+            (self.backup_root / "temporary", "temporary", (TEMP_RE, LEGACY_P0_RE)),
+        )
+        try:
+            preserved_directories = [
+                path for path in self.backup_root.iterdir()
+                if path.is_dir() and not path.is_symlink()
+                and PRESERVED_ORDERS_DIR_RE.match(path.name)
+            ]
+        except OSError:
+            preserved_directories = []
+        locations += tuple(
+            (directory, "automatic", (DAILY_RE,))
+            for directory in preserved_directories
+        )
+        for directory, default_type, patterns in locations:
             try:
                 entries = list(directory.iterdir())
             except OSError:
@@ -140,13 +179,21 @@ class BackupAdminService:
             for path in entries:
                 if path.is_symlink() or not path.is_file():
                     continue
-                match = DAILY_RE.match(path.name) or LEGACY_DAILY_RE.match(path.name)
+                match = None
+                for pattern in patterns:
+                    match = pattern.match(path.name)
+                    if match is not None:
+                        break
                 backup_type = default_type
                 label = ""
                 if match is None:
-                    match = TEMP_RE.match(path.name)
-                    if match is None:
-                        continue
+                    continue
+                if (LEGACY_PRE_DEPLOY_RE.match(path.name)
+                        or LEGACY_PRE_PRODUCT_RE.match(path.name)):
+                    backup_type = "temporary"
+                temporary_match = TEMP_RE.match(path.name)
+                if temporary_match is not None:
+                    match = temporary_match
                     label = match.group(3)
                     backup_type = (
                         "pre_restore" if label.startswith(PREFLIGHT_LABEL)
@@ -176,9 +223,11 @@ class BackupAdminService:
                 if metadata and not metadata_valid:
                     metadata = {}
                 integrity = str(metadata.get("integrity_status") or "not_checked")
-                status = "verified" if integrity == "verified" else "ready"
-                if stat.st_size <= 0 or integrity == "failed":
+                archive_readable = self._archive_is_readable(path)
+                status = "verified" if integrity == "verified" else "not_checked"
+                if not archive_readable or integrity == "failed":
                     status = "error"
+                    integrity = "failed"
                 candidates.append({
                     "backup_id": backup_id,
                     "timestamp": timestamp,
@@ -435,13 +484,19 @@ class BackupAdminService:
             max(0, time.time() - last_backup.get("created_epoch", time.time()))
             if last_backup else None
         )
-        if storage["state"] == "critical" or service.get("active") is False or not last_backup:
+        if (
+            storage["state"] == "critical"
+            or service.get("active") is False
+            or not last_backup
+            or last_backup.get("status") == "error"
+        ):
             overall = "critical"
         elif backup_age is not None and backup_age > 48 * 60 * 60:
             overall = "critical"
         elif (
             storage["state"] in ("warning", "unknown")
             or service.get("active") is None
+            or last_backup.get("status") != "verified"
             or (backup_age is not None and backup_age > 30 * 60 * 60)
         ):
             overall = "warning"
@@ -465,7 +520,8 @@ class BackupAdminService:
                 ),
             },
             "restore_points": [backup for backup in backups if (
-                backup.get("metadata") and backup.get("integrity_status") == "verified"
+                backup.get("metadata") and backup.get("status") == "verified"
+                and backup.get("integrity_status") == "verified"
                 and backup.get("git_commit") and backup.get("schema_versions")
             )],
         }
