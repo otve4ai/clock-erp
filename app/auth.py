@@ -483,6 +483,10 @@ class AuthStore:
                 "UPDATE users SET active=0,session_version=session_version+1,updated_at=? WHERE id=?",
                 (int(time.time()), user_id),
             )
+            connection.execute(
+                "UPDATE auth_tokens SET used_at=? WHERE user_id=? AND used_at IS NULL",
+                (int(time.time()), user_id),
+            )
             connection.execute("DELETE FROM auth_sessions WHERE user_id=?", (user_id,))
             connection.commit()
         return self._row_dict(before)
