@@ -44,6 +44,7 @@ class BaseLayoutRegressionTest(unittest.TestCase):
                 ("team", "Команда", "/app/team"),
                 ("services", "Сервисы", "/app/services"),
                 ("settings", "Настройки", "/app/settings"),
+                ("backups", "Бэкапы", "/app/backups"),
             ],
         )
         sidebar = self.source("app/templates/_sidebar.html")
