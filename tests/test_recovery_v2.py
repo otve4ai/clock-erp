@@ -343,6 +343,22 @@ class RecoveryV2Test(unittest.TestCase):
         result = self._engine().run(self._operation(backup=backup)["id"])
         self.assertEqual(result["status"], "completed")
 
+    def test_release_replaces_tracked_instance_directory_with_runtime_link(self):
+        bootstrap = self.instance / "navigation_settings.json"
+        bootstrap.write_text("{}\n", encoding="utf-8")
+        self._git("add", "-f", "instance/navigation_settings.json")
+        self._git("commit", "-m", "tracked instance bootstrap")
+        commit = self._git("rev-parse", "HEAD").stdout.strip()
+        self._git("update-ref", "refs/remotes/origin/main", commit)
+
+        release = self._engine()._create_release(commit)
+
+        self.assertTrue((release / "instance").is_symlink())
+        self.assertEqual(
+            os.path.realpath(str(release / "instance")),
+            os.path.realpath(str(self.instance)),
+        )
+
     def test_successful_full_restore_switches_exact_release_and_data(self):
         backup = self._make_backup(commit=self.commit_one)
         result = self._engine().run(self._operation("full_restore", backup, self.commit_one)["id"])

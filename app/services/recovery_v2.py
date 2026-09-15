@@ -700,7 +700,12 @@ class RecoveryEngine:
             for name in ("instance", "venv", ".env"):
                 source = self.project_root / name
                 if source.exists():
-                    os.symlink(str(source), str(temporary / name))
+                    target = temporary / name
+                    if target.is_symlink() or target.is_file():
+                        target.unlink()
+                    elif target.is_dir():
+                        shutil.rmtree(str(target))
+                    os.symlink(str(source), str(target))
             contract_hash, _ = self._contract_for_commit(commit)
             _atomic_json_write(temporary / ".erp-release.json", {
                 "commit": commit, "contract_hash": contract_hash, "created_at": _utc_now(),
