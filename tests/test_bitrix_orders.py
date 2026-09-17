@@ -348,9 +348,21 @@ class BitrixOrderNormalizationTest(unittest.TestCase):
     def test_partial_response_keeps_missing_fields_explicit(self):
         order = normalize_order({"id": 1, "status": "N", "price": "0"})
         self.assertEqual(order["sync_state"], "partial")
-        self.assertIn("customer", order["sync_missing"])
-        self.assertIn("phone", order["sync_missing"])
-        self.assertIn("items", order["sync_missing"])
+        self.assertEqual(order["sync_missing"], ["items"])
+
+    def test_contacts_are_optional_for_complete_priced_order(self):
+        order = normalize_order({
+            "id": 21147, "status": "A", "price": "41404.02",
+            "products": [
+                {"id": 1, "name": "Switch Sunflower Black", "quantity": 1, "price": "40425"},
+                {"id": 2, "name": "Warranty", "quantity": 1, "price": "979.02"},
+            ],
+        })
+        self.assertEqual(order["sync_missing"], [])
+        self.assertEqual(order["sync_state"], "complete")
+        self.assertTrue(order["calculation_consistent"])
+        self.assertIsNone(order["customer"])
+        self.assertIsNone(order["phone"])
 
     def test_price_types_are_kept_separate(self):
         order = normalize_order({

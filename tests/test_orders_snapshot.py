@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from app import web
+from app.clients.bitrix_orders import normalize_order, refresh_order_sync_state
 from app.catalog_db import CatalogDatabase
 from app.domain_schema_migrations import apply_domain_migrations
 from app.schema_migrations import apply_migrations
@@ -53,6 +54,55 @@ class OrdersSnapshotStoreTest(unittest.TestCase):
 
     def query(self, **args):
         return self.store.query(args, now=datetime(2026, 8, 23, 15, 0))
+
+    def test_detail_enrichment_clears_summary_missing_fields(self):
+        summary = normalize_order({"id": 21147, "status": "A", "price": 100})
+        summary["id"] = "21147"
+        summary["sync_missing"] = ["customer", "phone", "items"]
+        self.store.replace([summary], 1001)
+        detail = normalize_order({
+            "id": 21147, "status": "A", "price": 100,
+            "products": [{"id": 1, "name": "Watch", "quantity": 1, "price": 100}],
+        })
+        self.store.enrich_from_detail("21147", detail)
+        actual = self.store.get("21147")
+        self.assertEqual(actual["sync_missing"], [])
+        self.assertEqual(actual["sync_state"], "complete")
+        merged = self.store._merge_bitrix_payload(actual, summary)
+        self.assertEqual(merged["sync_missing"], [])
+        self.assertEqual(merged["products"], actual["products"])
+
+    def test_stale_partial_is_reconciled_on_read_without_database_write(self):
+        order = normalize_order({
+            "id": 21147, "status": "A", "price": 100,
+            "products": [{"id": 1, "quantity": 1, "price": 100}],
+        })
+        order["id"] = "21147"
+        self.store.replace([order], 1001)
+        order.update(sync_state="partial", sync_missing=["customer", "phone", "items"])
+        stale_json = json.dumps(order)
+        with self.store.connection() as connection:
+            connection.execute("UPDATE orders_snapshot SET payload_json=? WHERE order_id=?",
+                               (stale_json, "21147"))
+        for actual in (self.store.get("21147"),
+                       self.store.get_by_identity("tictactoy", "21147"),
+                       self.query(q="21147")["rows"][0]):
+            self.assertEqual(actual["sync_state"], "complete")
+            self.assertEqual(actual["sync_missing"], [])
+        with self.store.connection() as connection:
+            self.assertEqual(connection.execute(
+                "SELECT payload_json FROM orders_snapshot WHERE order_id='21147'"
+            ).fetchone()[0], stale_json)
+
+    def test_real_missing_and_error_states_stay_blocked(self):
+        incomplete = {"sync_state": "partial", "sync_missing": [],
+                      "status": "?", "products": []}
+        self.assertEqual(refresh_order_sync_state(incomplete)["sync_missing"],
+                         ["items", "total", "status"])
+        error = dict(incomplete, sync_state="error")
+        self.assertEqual(refresh_order_sync_state(error), error)
+        unknown = dict(incomplete, sync_missing=["transport"])
+        self.assertIn("transport", refresh_order_sync_state(unknown)["sync_missing"])
 
     def test_db_total_limit_offset_page_sizes_and_stable_complete_walk(self):
         first = self.query()
