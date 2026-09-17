@@ -109,7 +109,7 @@ class SalesListDesignSystemContractTest(unittest.TestCase):
         self.assertIn("var(--erp-primary) 12%", template)
         self.assertIn("box-shadow: inset 3px 0", template)
         self.assertIn(
-            ".is-partially-returned) {\n            background: #eaf3ff !important;",
+            ".sale-row.is-shared-sale {\n            background: #eaf3ff !important;",
             template,
         )
         self.assertIn(
@@ -119,7 +119,7 @@ class SalesListDesignSystemContractTest(unittest.TestCase):
         for status_class in (
             ".is-cancelled", ".is-returned", ".is-partially-returned",
         ):
-            self.assertIn(":not({})".format(status_class), template)
+            self.assertNotIn(":not({})".format(status_class), template)
         self.assertNotIn("data-order-group", template)
 
     def test_edit_sale_action_is_compact_accessible_and_keeps_existing_flow(self):
