@@ -106,6 +106,12 @@ class SalesListDesignSystemContractTest(unittest.TestCase):
         self.assertIn("loop.nextitem.id == sale.id", template)
         self.assertIn("is-shared-sale", template)
         self.assertIn("continues-shared-sale", template)
+        self.assertIn("var(--erp-primary) 12%", template)
+        self.assertIn("box-shadow: inset 3px 0", template)
+        self.assertIn(
+            ".is-partially-returned) {\n            background: #eaf3ff;",
+            template,
+        )
         for status_class in (
             ".is-cancelled", ".is-returned", ".is-partially-returned",
         ):
