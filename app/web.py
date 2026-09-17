@@ -1648,7 +1648,7 @@ def customers_page():
     filters = {key: request.args.get(key, "") for key in filter_keys}
     if request.args.get("mine") == "1":
         filters["customer_ids"] = [int(value) for value in _collaboration_store().assigned_entity_ids("customer", current_auth_user()["id"]) if value.isdigit()]
-    waiting_ids, attention_ids = [], []
+    waiting_ids = []
     try:
         with purchase_store().connect() as connection:
             waiting_ids = [int(item[0]) for item in connection.execute(
@@ -1656,18 +1656,7 @@ def customers_page():
             ).fetchall()]
     except (OSError, sqlite3.Error, RuntimeError):
         pass
-    try:
-        with _tasks_store().connect() as connection:
-            attention_ids = [int(item[0]) for item in connection.execute(
-                "SELECT DISTINCT l.entity_id FROM tasks t JOIN task_links l ON l.task_id=t.id "
-                "WHERE l.entity_type='customer' AND t.deleted_at IS NULL "
-                "AND t.status IN ('new','in_progress','waiting') "
-                "AND t.due_date IS NOT NULL AND t.due_date<date('now') AND l.entity_id GLOB '[0-9]*'"
-            ).fetchall()]
-    except (OSError, sqlite3.Error, RuntimeError):
-        pass
     if filters["segment"] == "waiting": filters["customer_ids"] = waiting_ids
-    if filters["segment"] == "attention": filters["customer_ids"] = attention_ids
     try:
         result = customer_store().list(
             query=query,
@@ -1688,7 +1677,6 @@ def customers_page():
         per_page_options=CUSTOMER_PAGE_SIZES,
     )
     result["segment_counts"]["waiting"] = len(set(waiting_ids))
-    result["segment_counts"]["attention"] = len(set(attention_ids))
     return render_template(
         "customers.html", customers=result["rows"], customers_total=result["total"],
         query=query, pagination=pagination, filters=filters,
@@ -1711,7 +1699,7 @@ def customer_detail_page(customer_id):
     if customer is None:
         abort(404)
     requested_tab = str(request.args.get("tab") or "overview")
-    tab = requested_tab if requested_tab in {"overview", "orders", "sales", "repairs", "purchases", "tasks", "mail", "contacts", "duplicates"} else "overview"
+    tab = requested_tab if requested_tab in {"overview", "orders", "sales", "repairs", "purchases", "comments", "mail", "contacts", "duplicates"} else "overview"
     operation_type = {"orders": "order", "sales": "sale", "repairs": "repair"}.get(tab)
     per_page = request.args.get("per_page", 20) if operation_type else 20
     try:
@@ -1738,17 +1726,6 @@ def customer_detail_page(customer_id):
         )["rows"]
     except (OSError, sqlite3.Error, RuntimeError):
         app.logger.exception("Customer purchase requests could not be loaded customer_id=%s", customer_id)
-    tasks = []
-    try:
-        with _tasks_store().connect() as connection:
-            tasks = [dict(row) for row in connection.execute(
-                "SELECT t.* FROM tasks t JOIN task_links l ON l.task_id=t.id "
-                "WHERE l.entity_type='customer' AND l.entity_id=? AND t.deleted_at IS NULL "
-                "ORDER BY t.status IN ('new','in_progress','waiting') DESC,t.due_date,t.id DESC LIMIT 200",
-                (str(customer_id),),
-            ).fetchall()]
-    except (OSError, sqlite3.Error, RuntimeError):
-        app.logger.exception("Customer tasks could not be loaded customer_id=%s", customer_id)
     mail_threads = []
     try:
         mail_threads = _mail_store().threads_for_entity("customer", customer_id)
@@ -1757,16 +1734,13 @@ def customer_detail_page(customer_id):
     contacts = store.contacts(customer_id)
     duplicates = store.duplicate_candidates(customer_id)
     timeline = store.timeline(customer_id, request.args.get("event_type", ""))
-    customer["open_tasks_count"] = sum(1 for item in tasks if item.get("status") not in {"completed", "cancelled"})
     customer["purchase_requests_count"] = len(purchase_requests)
     if any(item.get("status") not in {"notified", "sold", "closed"} and not item.get("archived") for item in purchase_requests):
         customer["segments"].append("Ожидает товар")
-    if any(item.get("status") not in {"completed", "cancelled"} and item.get("due_date") and item["due_date"] < datetime.now().date().isoformat() for item in tasks):
-        customer["segments"].append("Требует внимания")
     return render_template(
         "customer_detail.html", customer=customer, tab=tab,
         customer_operations=operations["rows"] if operation_type else operations["rows"][:5],
-        pagination=pagination, purchase_requests=purchase_requests, tasks=tasks,
+        pagination=pagination, purchase_requests=purchase_requests,
         mail_threads=mail_threads,
         contacts=contacts, duplicates=duplicates, timeline=timeline,
         can_manage_customers=(not auth_is_enabled() or (current_auth_user() or {}).get("role") == "admin"),
@@ -4983,44 +4957,6 @@ def inventory_discrepancy_update_api(item_id):
             item_id, payload, str(user.get("id") or ""), _inventory_actor()
         ),
     })
-
-
-@app.post("/api/v1/inventory-discrepancies/<item_id>/task")
-def inventory_discrepancy_task_api(item_id):
-    _inventory_require_edit()
-    user = current_auth_user() or {}
-    control = InventoryControl()
-    discrepancy = control.discrepancy(item_id)
-    if discrepancy is None:
-        return jsonify(ok=False, message="Расхождение не найдено."), 404
-    if discrepancy.get("task_id"):
-        return jsonify(ok=True, task_id=discrepancy["task_id"], duplicate=True)
-    delta = int(discrepancy["quantity_delta"])
-    title = "Проверить {} {} шт. {} по {}".format(
-        "излишек" if delta > 0 else "недостачу", abs(delta),
-        discrepancy.get("name") or discrepancy.get("article") or "товара",
-        discrepancy["document_number"],
-    )
-    payload = _inventory_payload()
-    task_payload = {
-        "title": title,
-        "description": "Расхождение: {:+d} шт.\nДокумент: {}\n/app/inventory/{}".format(
-            delta, discrepancy["document_number"], discrepancy["session_id"]
-        ),
-        "section": "inbox", "priority": "important",
-        "due_date": payload.get("due_date"), "due_time": None,
-        "assignee_id": payload.get("assignee_user_id") or user.get("id"),
-        "entity_type": "product", "entity_id": str(discrepancy["product_id"]),
-        "idempotency_key": "inventory-discrepancy:{}".format(item_id),
-    }
-    try:
-        task, created = _tasks_store().create(
-            task_payload, user.get("id"), _task_user_exists, _task_entity
-        )
-        control.link_task(item_id, task["id"], str(user.get("id") or ""), _inventory_actor())
-    except (TaskValidationError, TaskNotFoundError, TaskConflictError) as error:
-        return _task_api_error(error)
-    return jsonify(ok=True, task_id=task["id"], duplicate=not created)
 
 
 @app.post("/api/v1/inventory-brands/<int:brand_id>/control")
@@ -23846,6 +23782,9 @@ def _serialize_tasks(rows):
         item["assignee_name"] = full_name or user.get("email") or "Сотрудник"
         author = users.get(int(item["author_id"])) or {}
         item["author_name"] = " ".join(str(author.get(key) or "").strip() for key in ("first_name", "last_name")).strip() or author.get("email") or "Сотрудник"
+        item.pop("links", None)
+        for key in ("entity_type", "entity_id", "entity_label", "entity_href"):
+            item.pop(key, None)
         item["can_delete"] = bool(
             not item.get("deleted_at") and (
                 is_admin or current_id in {
@@ -23857,6 +23796,14 @@ def _serialize_tasks(rows):
             actor = users.get(int(event["actor_id"])) or {}
             event["actor_name"] = " ".join(str(actor.get(key) or "").strip() for key in ("first_name", "last_name")).strip() or actor.get("email") or "Сотрудник"
         result.append(item)
+    return result
+
+
+def _standalone_task_payload(payload):
+    """Remove legacy entity-link fields from task writes."""
+    result = dict(payload)
+    for key in ("links", "entity_type", "entity_id"):
+        result.pop(key, None)
     return result
 
 
@@ -23904,7 +23851,7 @@ def api_tasks_collection_get():
         listing = _tasks_store().list(
             view=request.args.get("view", "today"), query=request.args.get("q", ""),
             assignee_id=request.args.get("assignee_id") or None,
-            priority=request.args.get("priority", ""), entity_type=request.args.get("entity_type", ""),
+            priority=request.args.get("priority", ""),
             status=request.args.get("status", ""), due=request.args.get("due", ""),
             only_mine=user.get("id") if request.args.get("only_mine") == "1" else None,
             scope=request.args.get("scope", "all"), current_user_id=user.get("id"),
@@ -23925,7 +23872,6 @@ def api_tasks_calendar_get():
             query=request.args.get("q", ""),
             assignee_id=request.args.get("assignee_id") or None,
             priority=request.args.get("priority", ""),
-            entity_type=request.args.get("entity_type", ""),
             status=request.args.get("status", ""), due=request.args.get("due", ""),
             only_mine=user.get("id") if request.args.get("only_mine") == "1" else None,
             scope=request.args.get("scope", "all"), current_user_id=user.get("id"),
@@ -23948,7 +23894,7 @@ def api_tasks_calendar_get():
 def api_task_calendar_reschedule(task_id):
     user = current_auth_user() or {}
     try:
-        payload = api_json_payload()
+        payload = _standalone_task_payload(api_json_payload())
         task = _tasks_store().calendar_reschedule(
             task_id, payload.get("due_date"), payload.get("due_time"), user.get("id"),
             actor_role=user.get("role", "employee"), section=payload.get("section", "inbox"),
@@ -23965,7 +23911,7 @@ def api_task_calendar_reschedule(task_id):
 def api_tasks_collection_post():
     user = current_auth_user() or {}
     try:
-        payload = api_json_payload()
+        payload = _standalone_task_payload(api_json_payload())
         payload.setdefault("assignee_id", user.get("id"))
         payload.setdefault("idempotency_key", request.headers.get("Idempotency-Key"))
         task, created = _tasks_store().create(
@@ -23990,7 +23936,7 @@ def api_task_resource(task_id):
             task = _tasks_store().get(task_id)
         else:
             previous_assignee_id = _tasks_store().get(task_id).get("assignee_id")
-            payload = api_json_payload()
+            payload = _standalone_task_payload(api_json_payload())
             payload.setdefault("assignment_operation_key", request.headers.get("Idempotency-Key"))
             task = _tasks_store().update(
                 task_id, payload, user.get("id"), _task_user_exists, _task_entity,
@@ -24151,72 +24097,9 @@ def api_user_notification_preferences():
     return api_success(_notification_store().save_preferences(user["id"], payload))
 
 
-@app.get("/api/v1/tasks/by-entity/<entity_type>/<entity_id>")
-def api_tasks_by_entity(entity_type, entity_id):
-    if not _task_entity(entity_type, entity_id):
-        return api_error("TASK_ENTITY_NOT_FOUND", "Объект не найден или недоступен.", 404)
-    try:
-        rows = _tasks_store().for_entity(entity_type, entity_id)
-    except TaskValidationError as error:
-        return _task_api_error(error)
-    return api_success(_serialize_tasks(rows))
-
-
 @app.get("/api/v1/tasks/assignees")
 def api_task_assignees():
     return api_success(_task_users())
-
-
-@app.get("/api/v1/tasks/entities")
-def api_task_entities():
-    entity_type = str(request.args.get("type") or "").strip()
-    query = str(request.args.get("q") or "").strip()
-    if entity_type not in TASK_ENTITY_TYPES:
-        return api_error("TASK_ENTITY_TYPE_INVALID", "Неизвестный тип связи.", 422)
-    exact = _task_entity(entity_type, query) if query else None
-    results = [exact] if exact else []
-    if entity_type == "customer":
-        results += [_task_entity("customer", row["id"]) for row in customer_store().list(query=query, per_page=20)["rows"]]
-    elif entity_type == "order":
-        store = OrdersSnapshotStore().initialize()
-        folded = "%{}%".format(query.casefold())
-        with store.connection() as connection:
-            rows = connection.execute(
-                "SELECT order_id FROM orders_snapshot WHERE number_fold LIKE ? OR customer_fold LIKE ? ORDER BY created_sort DESC LIMIT 20",
-                (folded, folded),
-            ).fetchall()
-        results += [_task_entity("order", row["order_id"]) for row in rows]
-    elif entity_type in {"product", "sale"}:
-        with CatalogDatabase().connect() as connection:
-            if entity_type == "product":
-                rows = connection.execute(
-                    "SELECT id FROM catalog_excel_products WHERE active=1 AND (lower(excel_name_raw) LIKE ? OR lower(excel_article) LIKE ?) ORDER BY id DESC LIMIT 20",
-                    ("%{}%".format(query.casefold()), "%{}%".format(query.casefold())),
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    "SELECT id FROM erp_sales WHERE deleted_at IS NULL AND (lower(id) LIKE ? OR lower(COALESCE(external_order_id,'')) LIKE ?) ORDER BY created_at DESC LIMIT 20",
-                    ("%{}%".format(query.casefold()), "%{}%".format(query.casefold())),
-                ).fetchall()
-        results += [_task_entity(entity_type, row["id"]) for row in rows]
-    elif entity_type == "repair":
-        folded = query.casefold()
-        candidates = load_repair_cases()
-        results += [_task_entity("repair", case.get("id")) for case in candidates
-                   if folded in " ".join(str(case.get(key) or "") for key in ("repair_number", "client_name", "product_name")).casefold()][:20]
-    else:
-        try:
-            listing = purchase_store().list_requests({"q": query, "page": 1, "per_page": 20})
-            results += [_task_entity("purchase", row.get("id")) for row in listing["rows"]]
-        except (sqlite3.Error, ValueError, RuntimeError):
-            results = results
-    unique = []
-    seen = set()
-    for item in results:
-        if item and item["id"] not in seen:
-            seen.add(item["id"])
-            unique.append(item)
-    return api_success(unique[:20])
 
 
 def _collaboration_entity(entity_type, entity_id):
@@ -24879,7 +24762,7 @@ def api_mail_thread_link(thread_id):
     try:
         entity_type = str(payload.get("entity_type") or "")
         entity_id = str(payload.get("entity_id") or "")
-        entity = _collaboration_entity(entity_type, entity_id) if entity_type == "task" else _task_entity(entity_type, entity_id)
+        entity = _task_entity(entity_type, entity_id)
         if not entity:
             raise MailValidationError("Связанный объект ERP не найден.")
         _mail_store().replace_link(thread_id, payload["entity_type"], payload["entity_id"], entity["label"], _mail_actor_id())
@@ -24898,35 +24781,6 @@ def api_mail_thread_unlink(thread_id, entity_type, entity_id):
         return api_success({"removed": True})
     except MailError as error:
         return _mail_error_response(error)
-
-
-@app.post("/api/v1/mail/threads/<int:thread_id>/tasks")
-def api_mail_create_task(thread_id):
-    require_csrf_when_authenticated()
-    user = current_auth_user() or {}
-    try:
-        thread = _mail_store().get_thread(thread_id)
-        payload = api_json_payload()
-        task_payload = {
-            "title": str(payload.get("title") or thread.get("subject") or "Письмо")[:240],
-            "description": str(payload.get("description") or "Переписка: /app/mail?thread={}".format(thread_id))[:10000],
-            "assignee_id": int(payload.get("assignee_id") or thread.get("assignee_id") or user.get("id")),
-            "due_date": payload.get("due_date"), "section": "inbox", "status": "new", "priority": "other",
-            "links": [], "idempotency_key": request.headers.get("Idempotency-Key") or "mail-task-{}-{}".format(thread_id, uuid.uuid4().hex),
-        }
-        for link in thread.get("links") or []:
-            if link["entity_type"] in TASK_ENTITY_TYPES:
-                task_payload["links"].append({"entity_type": link["entity_type"], "entity_id": link["entity_id"]})
-        task, created = _tasks_store().create(task_payload, user.get("id"), _task_user_exists, _task_entity, collaboration=_collaboration_store(), actor=user)
-        _mail_store().replace_link(thread_id, "task", str(task["id"]), task["title"], _mail_actor_id())
-        if created:
-            _record_task_audit(task, "created")
-        _mail_audit(thread_id, "linked", thread.get("subject"), metadata={"event": "task_created", "task_id": task["id"]})
-        return api_success(_serialize_tasks([task])[0], 201 if created else 200)
-    except (MailError, TaskValidationError, TaskNotFoundError, TaskConflictError) as error:
-        if isinstance(error, MailError):
-            return _mail_error_response(error)
-        return _task_api_error(error)
 
 
 @app.post("/api/v1/mail/outbox")

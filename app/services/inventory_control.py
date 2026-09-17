@@ -25,7 +25,6 @@ DECISIONS = {
     "confirm_actual": "Подтвердить фактическое количество",
     "keep_stock": "Оставить остаток без изменения",
     "adjust": "Выполнить корректировку",
-    "create_task": "Создать задачу",
     "resolved": "Отметить как разобранное",
 }
 REVIEW_STATUSES = {
@@ -285,16 +284,6 @@ class InventoryControl:
             )
             row = connection.execute("SELECT * FROM erp_inventory_reviews WHERE item_id=?", (str(item_id),)).fetchone()
         return dict(row)
-
-    def link_task(self, item_id, task_id, actor_id="", actor_name=""):
-        self.initialize(); now = utc_now()
-        with self.database.transaction() as connection:
-            row = connection.execute("SELECT task_id FROM erp_inventory_reviews WHERE item_id=?", (str(item_id),)).fetchone()
-            if row is None: raise InventoryError("Расхождение не найдено.")
-            if row["task_id"] is not None: return int(row["task_id"]), False
-            connection.execute("UPDATE erp_inventory_reviews SET task_id=?,decision_code='create_task',updated_at=?,updated_by=? WHERE item_id=? AND task_id IS NULL", (int(task_id), now, actor_name or None, str(item_id)))
-            connection.execute("INSERT INTO erp_inventory_review_events(item_id,action,actor_id,actor_name,details_json,created_at) VALUES(?,?,?,?,?,?)", (str(item_id), "task_created", str(actor_id or "") or None, actor_name or None, json.dumps({"task_id": int(task_id)}), now))
-        return int(task_id), True
 
     def events(self, session_id):
         self.initialize()

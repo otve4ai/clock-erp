@@ -137,12 +137,27 @@ class TasksApiTest(unittest.TestCase):
         page = self.client.get("/app/tasks").get_data(as_text=True)
         self.assertIn("Просрочено", page)
         self.assertIn("Ожидаю", page)
-        self.assertIn("Название, описание, клиент, заказ или товар", page)
+        self.assertIn("Название, описание или контакт", page)
+        self.assertNotIn("Связанные объекты", page)
         self.assertIn('aria-controls="advancedFilters"', page)
         self.assertIn("tasks.css?v=5", page)
         self.assertIn("tasks.js?v=5", page)
         self.assertIn("Календарь", page)
         self.assertNotIn("<script>alert(1)</script>", page)
+
+    def test_entity_links_are_ignored_and_entity_endpoints_are_removed(self):
+        self.login()
+        created = self.client.post("/api/v1/tasks", json={
+            "title": "Самостоятельная задача", "assignee_id": self.user_id,
+            "entity_type": "order", "entity_id": "42",
+            "links": [{"entity_type": "order", "entity_id": "42"}],
+        }, headers={"X-CSRF-Token": "tasks-csrf"})
+        self.assertEqual(created.status_code, 201)
+        data = created.get_json()["data"]
+        self.assertNotIn("links", data)
+        self.assertNotIn("entity_type", data)
+        self.assertEqual(self.client.get("/api/v1/tasks/by-entity/order/42").status_code, 404)
+        self.assertEqual(self.client.get("/api/v1/tasks/entities?type=order&q=42").status_code, 404)
 
     def test_calendar_api_range_reschedule_and_permission(self):
         self.login()

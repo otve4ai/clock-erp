@@ -267,13 +267,11 @@ class OrdersUiRedesignTest(unittest.TestCase):
         self.assertNotIn('class="button button-secondary" aria-label="Продажа проведена"', header)
         self.assertEqual(header.count('data-order-actions-trigger'), 1)
         menu = header.split('data-order-actions-dropdown', 1)[1]
-        labels = (
-            "Создать задачу", "Отправить SMS", "История SMS",
-            "Открыть в Bitrix", "Печать заказа",
-        )
+        labels = ("Отправить SMS", "История SMS", "Открыть в Bitrix", "Печать заказа")
         positions = [menu.index(label) for label in labels]
         self.assertEqual(positions, sorted(positions))
-        self.assertIn("url_for('tasks_page'", menu)
+        self.assertNotIn("Создать задачу", menu)
+        self.assertNotIn("url_for('tasks_page'", menu)
         self.assertIn("url_for('sms_page'", menu)
         self.assertIn("selected_order_bitrix_url", menu)
         self.assertIn("url_for('order_print_page'", menu)
@@ -323,20 +321,11 @@ class OrdersUiRedesignTest(unittest.TestCase):
         ]
         self.assertEqual(positions, sorted(positions))
 
-    def test_order_task_block_exposes_context_create_and_safe_delete_ui(self):
-        script = (PROJECT_ROOT / "app/static/js/entity-tasks.js").read_text(encoding="utf-8")
-        styles = (PROJECT_ROOT / "app/static/css/entity-tasks.css").read_text(encoding="utf-8")
-        self.assertIn('data-entity-label="Заказ №{{ detail_number }}"', self.source)
-        self.assertIn("Создать задачу", script)
-        self.assertIn("Удалить задачу?", script)
-        self.assertIn("исчезнет из карточки заказа", script)
-        self.assertIn('method: "DELETE"', script)
-        self.assertIn('"X-CSRF-Token"', script)
-        self.assertIn("Задача удалена", script)
-        self.assertIn("В этом заказе пока нет задач", script)
-        self.assertIn("confirm.disabled = true", script)
-        self.assertIn("event.key === \"Escape\"", script)
-        self.assertIn("position: fixed", styles)
+    def test_order_page_has_no_task_integration(self):
+        self.assertNotIn("entity-tasks", self.source)
+        self.assertNotIn("Создать задачу", self.source)
+        self.assertFalse((PROJECT_ROOT / "app/static/js/entity-tasks.js").exists())
+        self.assertFalse((PROJECT_ROOT / "app/static/css/entity-tasks.css").exists())
 
     def test_internal_comments_are_compact_append_only_and_have_shortcuts(self):
         comments = self.source.split(

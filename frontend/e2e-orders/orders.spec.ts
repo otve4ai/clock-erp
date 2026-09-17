@@ -36,14 +36,14 @@ test('distant pages, card selection and scroll survive back', async ({ page }) =
   await expect(page.locator('.list-footer')).toContainText('Показано 121–125 из 125');
 });
 
-test('WB products, sale action, tasks, history and source-safe selection', async ({ page }) => {
+test('WB products, sale action, history and source-safe selection', async ({ page }) => {
   await page.goto('/order/wildberries/9001?source=wildberries');
   await expect(page.locator('.order-control-actions').getByRole('link', { name: 'Открыть продажу', exact: true })).toBeVisible();
   await expect(page.locator('[data-open-sale-dialog]')).toHaveCount(0);
   await expect(page.locator('.order-products img')).toBeVisible();
   await expect(page.locator('.order-wb-history')).toContainText('Заказ восстановлен из Wildberries');
-  await expect(page.locator('[data-entity-tasks]')).toBeHidden();
-  await expect(page.locator('.order-control-actions').getByRole('link', { name: '+ Создать задачу', exact: true })).toBeVisible();
+  await expect(page.locator('[data-entity-tasks]')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: '+ Создать задачу', exact: true })).toHaveCount(0);
   await expect(page.getByText('Только чтение', { exact: true })).toHaveCount(0);
   await expect(page.locator('.order-technical-fields')).toBeHidden();
   await page.locator('.order-technical summary').click();

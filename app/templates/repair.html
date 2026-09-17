@@ -8,7 +8,6 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/themes.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/erp-components.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/repair-workflow.css', v='2') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/entity-tasks.css', v='1') }}">
 </head>
 <body class="repair-page">
 {% from "_pagination.html" import render_erp_pagination %}
@@ -247,10 +246,8 @@
             </details>
             ${relationLinks ? `<section class="repair-detail-section"><h3>Связи</h3>${relationLinks}</section>` : ''}
             ${!repair.is_archived && !repair.workflow.action && !repair.workflow.needs_review ? `<details class="repair-secondary-details"><summary>Ещё · возобновить ремонт</summary>${renderActionForm(repair)}</details>` : ''}
-            <section class="entity-tasks" data-entity-tasks data-entity-type="repair" data-entity-id="${escapeHtml(repair.id)}">Загружаем задачи…</section>
             <details class="repair-detail-section repair-secondary-details"><summary>История ремонта · ${(repair.history || []).length}</summary><ul class="repair-history">${history || '<li>Событий пока нет</li>'}</ul></details>`;
-        window.VechasuEntityTasksInit?.(body);
-        footer.innerHTML = `<details class="repair-footer-more"><summary class="repair-button">Ещё</summary><div>{% if sms_permissions.send %}${repair.client_phone ? `<a class="repair-button" href="/app/sms?repair_id=${encodeURIComponent(repair.id)}&compose=1">Отправить SMS</a>` : ''}{% endif %}{% if sms_permissions.view %}<a class="repair-button" href="/app/sms?repair_id=${encodeURIComponent(repair.id)}">История SMS</a>{% endif %}<a class="repair-button" href="/app/tasks?entity_type=repair&entity_id=${encodeURIComponent(repair.id)}&title=${encodeURIComponent('Ремонт №' + (repair.repair_number || repair.id))}">Создать задачу</a>${repair.is_archived && repair.status === 'completed' ? '<button class="repair-button" type="button" data-repeat-repair>Создать повторный ремонт</button>' : ''}${repair.is_archived ? (repair.workflow.closed ? '' : '<button class="repair-button" type="button" data-restore-repair>Вернуть в активные</button>') : repair.can_archive ? '<button class="repair-button" type="button" data-archive-repair>В архив</button>' : ''}${repair.is_archived ? '' : '<button class="repair-button" type="button" data-edit-repair>Редактировать</button>'}</div></details><button class="repair-button" type="button" data-close-repair>Закрыть</button>`;
+        footer.innerHTML = `<details class="repair-footer-more"><summary class="repair-button">Ещё</summary><div>{% if sms_permissions.send %}${repair.client_phone ? `<a class="repair-button" href="/app/sms?repair_id=${encodeURIComponent(repair.id)}&compose=1">Отправить SMS</a>` : ''}{% endif %}{% if sms_permissions.view %}<a class="repair-button" href="/app/sms?repair_id=${encodeURIComponent(repair.id)}">История SMS</a>{% endif %}${repair.is_archived && repair.status === 'completed' ? '<button class="repair-button" type="button" data-repeat-repair>Создать повторный ремонт</button>' : ''}${repair.is_archived ? (repair.workflow.closed ? '' : '<button class="repair-button" type="button" data-restore-repair>Вернуть в активные</button>') : repair.can_archive ? '<button class="repair-button" type="button" data-archive-repair>В архив</button>' : ''}${repair.is_archived ? '' : '<button class="repair-button" type="button" data-edit-repair>Редактировать</button>'}</div></details><button class="repair-button" type="button" data-close-repair>Закрыть</button>`;
         body.querySelectorAll('[data-related]').forEach(button => button.addEventListener('click', () => loadRepair(button.dataset.related)));
         bindActionForm();
         body.querySelector('[data-review-repair]')?.addEventListener('click', () => openEditor(repair));
@@ -529,6 +526,5 @@
     let columnState={}; try { columnState=JSON.parse(localStorage.getItem('vechasu:repair-columns-v3')||'{}') || {}; } catch {} document.querySelectorAll('[data-repair-column]').forEach(control=>{const key=control.dataset.repairColumn;control.checked=columnState[key] ?? !['channel','control','event'].includes(key);document.querySelectorAll(`[data-column="${key}"]`).forEach(node=>node.hidden=!control.checked);control.addEventListener('change',()=>{columnState[key]=control.checked;localStorage.setItem('vechasu:repair-columns-v3',JSON.stringify(columnState));document.querySelectorAll(`[data-column="${key}"]`).forEach(node=>node.hidden=!control.checked);});});
 })();
 </script>
-<script src="{{ url_for('static', filename='js/entity-tasks.js', v='1') }}"></script>
 </body>
 </html>

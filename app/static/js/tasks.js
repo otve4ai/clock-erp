@@ -18,7 +18,7 @@
         includeCompleted: initial.get("completed") === "1",
         scope: ["mine", "created", "team", "all"].includes(initial.get("scope")) ? initial.get("scope") : "all",
         page: Math.max(1, Number(initial.get("page")) || 1),
-        rows: [], pages: 1, total: 0, requestToken: 0, task: null, links: [],
+        rows: [], pages: 1, total: 0, requestToken: 0, task: null,
         returnFocus: null, restoreTaskFocusId: null, filtersOpen: initial.get("filters") === "1", drawerHistoryPushed: false,
         pendingCompletions: new Set(), calendarRows: [], undatedRows: [], calendarRange: null, countsToken: 0,
     };
@@ -34,10 +34,9 @@
         { node: q("#assigneeFilter"), param: "assignee_id", label: "Ответственный" },
         { node: q("#priorityFilter"), param: "priority", label: "Приоритет" },
         { node: q("#statusFilter"), param: "status", label: "Статус" },
-        { node: q("#entityFilter"), param: "entity_type", label: "Связь" },
         { node: q("#dueFilter"), param: "due", label: "Срок" },
     ];
-    let searchTimer = 0, entityTimer = 0;
+    let searchTimer = 0;
 
     function notify(message, isError = false, undo = null) {
         status.replaceChildren(document.createTextNode(message));
@@ -183,15 +182,6 @@
         setFiltersOpen(state.filtersOpen, false);
     }
 
-    function entityChip(link) {
-        const element = document.createElement(link.entity_href ? "a" : "span");
-        element.className = "task-badge";
-        if (link.entity_href) element.href = link.entity_href;
-        element.textContent = link.entity_label || `${link.entity_type} ${link.entity_id}`;
-        element.addEventListener("click", (event) => event.stopPropagation());
-        return element;
-    }
-
     function metaItem(className, content) {
         const item = document.createElement("span");
         item.className = `task-meta-item ${className}`;
@@ -245,7 +235,6 @@
         avatar.textContent = initials(task.assignee_name);
         avatar.title = task.assignee_name || "Сотрудник";
         meta.append(metaItem("task-assignee", avatar));
-        (task.links || []).forEach((link) => meta.append(entityChip(link)));
         open.append(meta);
         open.addEventListener("click", () => openTask(task.id, open));
 
@@ -433,13 +422,6 @@
         avatar.textContent = initials(task.assignee_name);
         avatar.title = task.assignee_name;
         card.append(time, dot, title);
-        if (task.entity_type) {
-            const relation = document.createElement("span");
-            relation.className = "calendar-task-relation";
-            relation.textContent = { customer: "К", order: "З", product: "Т", sale: "П", repair: "Р", purchase: "Зк" }[task.entity_type] || "↗";
-            relation.title = task.entity_label || "Связанная запись";
-            card.append(relation);
-        }
         card.append(avatar);
         card.addEventListener("click", (event) => { event.stopPropagation(); openTask(task.id, card); });
         card.addEventListener("dragstart", (event) => {
@@ -742,23 +724,6 @@
         }
     }
 
-    function renderLinks() {
-        const wrap = q("#selectedEntities");
-        wrap.replaceChildren();
-        state.links.forEach((link, index) => {
-            const item = document.createElement("span");
-            item.className = "selected-entity";
-            item.append(entityChip(link));
-            const remove = document.createElement("button");
-            remove.type = "button";
-            remove.textContent = "×";
-            remove.setAttribute("aria-label", `Убрать связь ${link.entity_label}`);
-            remove.addEventListener("click", () => { state.links.splice(index, 1); renderLinks(); });
-            item.append(remove);
-            wrap.append(item);
-        });
-    }
-
     function renderHistory(events) {
         const section = q("#taskHistory"), ordered = section.querySelector("ol");
         ordered.replaceChildren();
@@ -783,7 +748,6 @@
     function fill(task) {
         form.reset();
         state.task = task;
-        state.links = task ? JSON.parse(JSON.stringify(task.links || [])) : [];
         const fields = ["title", "description", "section", "status", "priority", "due_date", "due_time", "reminder_at", "assignee_id", "source_comment", "contact_name", "contact_phone", "contact_email", "contact_channel", "waiting_for", "check_date", "waiting_comment", "repeat_type", "repeat_interval", "completion_result"];
         fields.forEach((name) => { if (task && form.elements[name]) form.elements[name].value = task[name] || ""; });
         form.elements.id.value = task ? task.id : "";
@@ -794,7 +758,6 @@
         }
         q("#taskDrawerTitle").textContent = task ? task.title : "Новая задача";
         q("#taskDrawerKicker").textContent = task ? `Задача №${task.id} · автор: ${task.author_name}` : "Карточка задачи";
-        renderLinks();
         renderHistory(task ? task.history || [] : []);
         updateActionVisibility();
         errorBox.hidden = true;
@@ -820,8 +783,6 @@
 
     function openNew(trigger = document.activeElement, sync = true) {
         fill(null);
-        if (boot.prefillTitle) form.elements.title.value = boot.prefillTitle;
-        if (boot.prefillContext) form.elements.source_comment.value = boot.prefillContext;
         showDrawer(trigger);
         if (sync) { state.drawerHistoryPushed = true; syncUrl("push", null, true); }
     }
@@ -849,7 +810,6 @@
         const data = Object.fromEntries(new FormData(form));
         delete data.id;
         if (state.task) data.version = state.task.version;
-        data.links = state.links.map((link) => ({ entity_type: link.entity_type, entity_id: String(link.entity_id) }));
         return data;
     }
 
@@ -1007,30 +967,6 @@
             hideDrawer(); state.drawerHistoryPushed = false; syncUrl("replace", null, false); await load();
         } else { form.elements.section.value = button.dataset.move; form.elements.due_date.value = ""; }
     }));
-    q("#entitySearch").addEventListener("input", (event) => {
-        clearTimeout(entityTimer);
-        const value = event.target.value.trim(), results = q("#entityResults");
-        if (!value) { results.hidden = true; return; }
-        entityTimer = window.setTimeout(async () => {
-            try {
-                const payload = await api(`/api/v1/tasks/entities?type=${encodeURIComponent(q("#entityType").value)}&q=${encodeURIComponent(value)}`);
-                results.replaceChildren();
-                payload.data.forEach((entity) => {
-                    const button = document.createElement("button");
-                    button.type = "button";
-                    button.role = "option";
-                    button.textContent = entity.label;
-                    button.addEventListener("click", () => {
-                        const type = q("#entityType").value;
-                        if (!state.links.some((link) => link.entity_type === type && String(link.entity_id) === String(entity.id))) state.links.push({ ...entity, entity_type: type, entity_id: String(entity.id) });
-                        renderLinks(); results.hidden = true; event.target.value = "";
-                    });
-                    results.append(button);
-                });
-                results.hidden = !payload.data.length;
-            } catch (error) { notify(error.message, true); }
-        }, 250);
-    });
     drawer.addEventListener("keydown", (event) => {
         if (event.key === "Escape") { event.preventDefault(); closeDrawer(); return; }
         if (event.key !== "Tab") return;
@@ -1054,14 +990,7 @@
     load();
     const requested = initial.get("task");
     if (requested) openTask(requested, q("#newTask"), false);
-    else if (initial.get("new") === "1" || (boot.prefillType && boot.prefillId)) {
+    else if (initial.get("new") === "1") {
         openNew(q("#newTask"), false);
-        q("#entityType").value = boot.prefillType || "customer";
-        if (boot.prefillType && boot.prefillId) {
-            api(`/api/v1/tasks/entities?type=${encodeURIComponent(boot.prefillType)}&q=${encodeURIComponent(boot.prefillId)}`).then((payload) => {
-                const entity = payload.data.find((item) => String(item.id) === String(boot.prefillId));
-                if (entity) { state.links = [{ ...entity, entity_type: boot.prefillType, entity_id: String(entity.id) }]; renderLinks(); }
-            }).catch(() => {});
-        }
     }
 })();
