@@ -56,6 +56,11 @@ readonly SMS_LOGROTATE="/etc/logrotate.d/clock-erp-sms"
 readonly SERVICE_ENV_FILE="/etc/clock-erp/clock-erp.env"
 readonly MAIL_CRON="/etc/cron.d/clock-erp-mail"
 readonly MAIL_LOGROTATE="/etc/logrotate.d/clock-erp-mail"
+readonly RECOVERY_TOOL="/usr/local/sbin/clock-erp-recovery"
+readonly RELEASE_ROOT="/opt/clock-erp-releases"
+readonly CURRENT_LINK="/opt/clock-erp-current"
+readonly RECOVERY_DROPIN_DIR="/etc/systemd/system/clock-erp.service.d"
+readonly RECOVERY_DROPIN="$RECOVERY_DROPIN_DIR/20-recovery-runtime.conf"
 readonly HEALTHCHECK_URLS=(
     "http://127.0.0.1:5000/register"
     "http://127.0.0.1:5000/login"
@@ -112,6 +117,8 @@ BITRIX_COMMENT_TARGET_EXISTED=0
 BITRIX_ORDERS_EXPORT_BACKUP=""
 BITRIX_ORDERS_EXPORT_UPDATED=0
 BITRIX_ORDERS_EXPORT_TARGET_EXISTED=0
+PREVIOUS_RELEASE=""
+RELEASE_SWITCHED=0
 
 cleanup_release() {
     if [[ -n "$RELEASE_DIR" && "$RELEASE_DIR" == "$BACKUP_DIR/temporary/release-"* ]]; then
@@ -238,6 +245,13 @@ rollback() {
             printf 'ROLLBACK_BLOCKED: server source tree became dirty\n' >&2
         fi
     fi
+    if [[ "$RELEASE_SWITCHED" == "1" && -n "$PREVIOUS_RELEASE" && -d "$PREVIOUS_RELEASE" ]]; then
+        rollback_link="$CURRENT_LINK.rollback.$$"
+        ln -s "$PREVIOUS_RELEASE" "$rollback_link"
+        mv -Tf "$rollback_link" "$CURRENT_LINK"
+        systemctl daemon-reload
+        printf 'ROLLBACK_OK: restored application release %s\n' "$PREVIOUS_RELEASE" >&2
+    fi
     if [[ "$SERVICE_STOPPED" == "1" ]]; then
         systemctl start "$SERVICE_NAME"
         SERVICE_STOPPED=0
@@ -325,6 +339,10 @@ fi
 if printf '%s\n' "$changed_files" | grep -Eq \
     '^scripts/migrate_(brand_inventory|inventory_scopes|repair_cases|unified_catalog)\.py$'; then
     UNREGISTERED_MIGRATION_CHANGE=1
+fi
+if [[ "$CATALOG_MIGRATION_REQUIRED" == "1" || "$DOMAIN_MIGRATION_REQUIRED" == "1" || "$PURCHASES_MIGRATION_REQUIRED" == "1" || "$CUSTOMERS_MIGRATION_REQUIRED" == "1" || "$SMS_MIGRATION_REQUIRED" == "1" || "$SERVICES_MIGRATION_REQUIRED" == "1" || "$MAIL_MIGRATION_REQUIRED" == "1" ]]; then
+    printf '%s\n' "$changed_files" | grep -qx 'ops/recovery-schema-contract.json' \
+        || { printf 'PRECHECK_FAILED: schema-changing deploy must update Recovery V2 contract\n' >&2; false; }
 fi
 if [[ "$UNREGISTERED_MIGRATION_CHANGE" == "1" ]]; then
     printf '%s\n' \
@@ -530,6 +548,11 @@ install -o root -g root -m 0644 ops/clock-erp-sms.cron "$SMS_CRON"
 install -o root -g root -m 0644 ops/clock-erp-sms.logrotate "$SMS_LOGROTATE"
 install -o root -g root -m 0644 ops/clock-erp-mail.cron "$MAIL_CRON"
 install -o root -g root -m 0644 ops/clock-erp-mail.logrotate "$MAIL_LOGROTATE"
+install -o root -g root -m 0755 scripts/clock_erp_recovery.py "$RECOVERY_TOOL"
+mkdir -p "$RECOVERY_DROPIN_DIR"
+install -o root -g root -m 0644 ops/clock-erp-recovery.conf "$RECOVERY_DROPIN"
+install -o root -g root -m 0644 deploy/systemd/vechasu-wb-sync.service /etc/systemd/system/vechasu-wb-sync.service
+install -o root -g root -m 0644 deploy/systemd/vechasu-wb-full-sync.service /etc/systemd/system/vechasu-wb-full-sync.service
 
 if [[ -f "$BITRIX_ENDPOINT_SOURCE" && -f "$BITRIX_ENDPOINT_TARGET" ]]; then
     /opt/php81/bin/php -l "$BITRIX_ENDPOINT_SOURCE" >/dev/null
@@ -700,6 +723,64 @@ if [[ "$CATALOG_MIGRATION_REQUIRED" == "1" || "$DOMAIN_MIGRATION_REQUIRED" == "1
     fi
     printf 'DATA_SAFETY_OK=%s\n' "$DATA_SNAPSHOT_AFTER"
 fi
+
+printf 'RELEASE RUNTIME: immutable code and atomic current pointer\n'
+FAILURE_STAGE="RELEASE RUNTIME"
+mkdir -p "$RELEASE_ROOT"
+chmod 755 "$RELEASE_ROOT"
+if [[ -L "$CURRENT_LINK" ]]; then
+    PREVIOUS_RELEASE="$(readlink -f "$CURRENT_LINK")"
+else
+    PREVIOUS_RELEASE="$PROJECT_DIR"
+fi
+APPLICATION_RELEASE="$RELEASE_ROOT/$CURRENT_COMMIT"
+if [[ -d "$APPLICATION_RELEASE" ]] && {
+    [[ ! -L "$APPLICATION_RELEASE/instance" ]] ||
+    [[ "$(readlink -f "$APPLICATION_RELEASE/instance")" != "$PROJECT_DIR/instance" ]] ||
+    [[ ! -L "$APPLICATION_RELEASE/venv" ]] ||
+    [[ "$(readlink -f "$APPLICATION_RELEASE/venv")" != "$PROJECT_DIR/venv" ]];
+}; then
+    [[ "$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)" != "$APPLICATION_RELEASE" ]] \
+        || { printf 'RELEASE_RUNTIME_FAILED: active release has invalid runtime links\n' >&2; false; }
+    incomplete_release="$BACKUP_DIR/temporary/incomplete-release-${CURRENT_COMMIT}-$(date +%Y%m%d-%H%M%S)"
+    mv "$APPLICATION_RELEASE" "$incomplete_release"
+    printf 'RELEASE_RUNTIME_QUARANTINED=%s\n' "$incomplete_release"
+fi
+if [[ ! -d "$APPLICATION_RELEASE" ]]; then
+    release_pending="$(mktemp -d "$RELEASE_ROOT/.release-XXXXXX")"
+    git archive "$CURRENT_COMMIT" | tar -x -C "$release_pending"
+    if [[ -e "$release_pending/instance" || -L "$release_pending/instance" ]]; then
+        rm -rf -- "$release_pending/instance"
+    fi
+    ln -s "$PROJECT_DIR/instance" "$release_pending/instance"
+    ln -s "$PROJECT_DIR/venv" "$release_pending/venv"
+    if [[ -f "$PROJECT_DIR/.env" ]]; then
+        ln -s "$PROJECT_DIR/.env" "$release_pending/.env"
+    fi
+    "$PYTHON_BIN" - "$CURRENT_COMMIT" "$release_pending/.erp-release.json" <<'PYTHON_RELEASE'
+import json
+import os
+import sys
+import tempfile
+
+commit, target = sys.argv[1:]
+directory = os.path.dirname(target)
+descriptor, pending = tempfile.mkstemp(prefix=".release-manifest-", dir=directory)
+with os.fdopen(descriptor, "w") as stream:
+    json.dump({"commit": commit}, stream, sort_keys=True)
+    stream.write("\n")
+    stream.flush()
+    os.fsync(stream.fileno())
+os.chmod(pending, 0o600)
+os.rename(pending, target)
+PYTHON_RELEASE
+    mv "$release_pending" "$APPLICATION_RELEASE"
+fi
+next_link="$CURRENT_LINK.next.$$"
+ln -s "$APPLICATION_RELEASE" "$next_link"
+mv -Tf "$next_link" "$CURRENT_LINK"
+RELEASE_SWITCHED=1
+systemctl daemon-reload
 
 printf 'SERVICE START: controlled full restart\n'
 FAILURE_STAGE="SERVICE START"

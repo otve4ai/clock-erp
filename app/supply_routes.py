@@ -24,6 +24,11 @@ def register_supply_routes(w):
         if auth_is_enabled() and user.get('role') in ('viewer', 'readonly', 'read_only'):
             abort(403)
 
+    def admin_only():
+        user = current_auth_user() or {}
+        if auth_is_enabled() and user.get('role') != 'admin':
+            abort(403)
+
     def guarded(fn):
         @wraps(fn)
         def wrapped(*args, **kwargs):
@@ -32,7 +37,8 @@ def register_supply_routes(w):
                     writable()
                 return fn(*args, **kwargs)
             except (SupplyError, ReceiptInventoryError, ExcelDraftError, ValueError) as error:
-                return jsonify(ok=False, message=str(error)), 422
+                preview = getattr(error, 'preview', None)
+                return jsonify(ok=False, message=str(error), data=preview), 409 if preview else 422
             except BitrixCatalogReadOnlyError:
                 return jsonify(ok=False, message='Bitrix недоступен. Сохранённые поставки можно проводить без Bitrix.'), 503
             except sqlite3.Error:
@@ -60,14 +66,31 @@ def register_supply_routes(w):
     def supply(supply_id):
         engine = SupplyEngine()
         if request.method == 'DELETE':
-            engine.delete(supply_id)
-            return jsonify(ok=True)
+            admin_only()
+            return jsonify(ok=True, data=engine.delete(supply_id, actor()))
         if request.method == 'PATCH':
             p = request.get_json(silent=True) or {}
             if not isinstance(p, dict):
                 raise SupplyError('Некорректные данные поставки.')
             return jsonify(ok=True, data=engine.update(supply_id, p.get('title'), p.get('comment'), p.get('items')))
         return jsonify(ok=True, data=engine.get(supply_id))
+
+    @app.route('/api/v1/receipts/supplies/<supply_id>/delete-preview', methods=['GET'])
+    @guarded
+    def supply_delete_preview(supply_id):
+        admin_only()
+        return jsonify(ok=True, data=SupplyEngine().preview_delete(supply_id))
+
+    @app.route('/api/v1/receipts/supplies/<supply_id>/details', methods=['PATCH'])
+    @guarded
+    def supply_details(supply_id):
+        admin_only()
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            raise SupplyError('Некорректные данные поставки.')
+        return jsonify(ok=True, data=SupplyEngine().update_details(
+            supply_id, payload.get('title'), payload.get('comment'), actor(),
+        ))
 
     @app.route('/api/v1/receipts/supplies/<supply_id>/items', methods=['POST'])
     @guarded

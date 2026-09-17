@@ -1,6 +1,8 @@
 import datetime as dt
 import io
 import sqlite3
+import json
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -14,6 +16,7 @@ from scripts.retain_erp_backups import (
     create_backup,
     discover_backups,
     retention_plan,
+    write_recovery_metadata,
 )
 
 
@@ -254,6 +257,43 @@ class BackupRetentionTest(unittest.TestCase):
             stdout=mock.ANY,
             stderr=mock.ANY,
         )
+
+    def test_new_daily_backup_gets_exact_recovery_metadata(self):
+        project = Path(self.temp.name) / "project-metadata"
+        instance = project / "instance"
+        contract = project / "ops" / "recovery-schema-contract.json"
+        contract.parent.mkdir(parents=True)
+        instance.mkdir()
+        contract.write_text(json.dumps({
+            "contract_version": 2,
+            "databases": {"catalog.db": ["products"]},
+        }), encoding="utf-8")
+        with sqlite3.connect(str(instance / "catalog.db")) as connection:
+            connection.execute("CREATE TABLE products (id INTEGER PRIMARY KEY)")
+        (project / ".gitignore").write_text("instance/\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-b", "main"], cwd=str(project), check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(project), check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=str(project), check=True)
+        subprocess.run(["git", "add", "."], cwd=str(project), check=True)
+        subprocess.run(["git", "commit", "-m", "schema"], cwd=str(project), check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        archive = create_backup(
+            project, self.root, dt.datetime(2026, 8, 21, 3, 17, 0),
+            "daily", apply_changes=True,
+        )
+
+        write_recovery_metadata(project, self.root, archive, "automatic")
+
+        metadata_files = list((self.root / "metadata").glob("*.json"))
+        self.assertEqual(len(metadata_files), 1)
+        metadata = json.loads(metadata_files[0].read_text(encoding="utf-8"))
+        self.assertEqual(metadata["metadata_version"], 2)
+        self.assertEqual(metadata["type"], "automatic")
+        self.assertEqual(metadata["integrity_status"], "verified")
+        self.assertEqual(metadata["git_branch"], "main")
+        self.assertIn("catalog.db", metadata["database_manifest"])
+        self.assertIn("catalog.db", metadata["file_manifest"])
 
 
 if __name__ == "__main__":

@@ -440,6 +440,58 @@ def create_backup(project_root, backup_root, now, kind, label=None, apply_change
         shutil.rmtree(str(staging), ignore_errors=True)
 
 
+def write_recovery_metadata(project_root, backup_root, archive_path, backup_type):
+    """Attach Recovery V2 metadata without making backup creation Flask-dependent."""
+    import hashlib
+    import json
+    import sys
+
+    root_text = str(project_root)
+    if root_text not in sys.path:
+        sys.path.insert(0, root_text)
+    try:
+        from app.services.backup_admin import BackupAdminService, _atomic_json_write
+        current_release = Path("/opt/clock-erp-current")
+        runtime_root = current_release if current_release.is_symlink() else project_root
+        service = BackupAdminService(
+            project_root, backup_root, Path(__file__), remote_check=False,
+            recovery_contract=runtime_root / "ops" / "recovery-schema-contract.json",
+            current_release=current_release,
+        )
+        relative = str(archive_path.relative_to(backup_root))
+        backup_id = hashlib.sha256(relative.encode("utf-8")).hexdigest()[:24]
+        candidate = next(
+            item for item in service.list_backups(public=False)
+            if item["backup_id"] == backup_id
+        )
+        expected = sorted(path.name for path in (project_root / "instance").glob("*.db"))
+        databases = service._verify_archive(archive_path, expected)
+        contract_hash, database_manifest, file_manifest = service._capture_recovery_metadata(
+            archive_path
+        )
+        git = service.git_status(history_limit=1)
+        commit = git.get("commit")
+        branch = git.get("branch")
+        if not commit or not branch:
+            raise RuntimeError("deployed Git version is unavailable")
+        metadata = {
+            "metadata_version": 2, "backup_id": backup_id,
+            "timestamp": candidate["timestamp"], "type": backup_type,
+            "size": archive_path.stat().st_size, "git_commit": commit,
+            "git_branch": branch, "app_version": commit[:12],
+            "schema_versions": dict(
+                (name, item["user_version"]) for name, item in database_manifest.items()
+            ),
+            "database_manifest": database_manifest, "file_manifest": file_manifest,
+            "recovery_contract": contract_hash, "integrity_status": "verified",
+            "databases": databases,
+        }
+        _atomic_json_write(service._metadata_path(backup_id), metadata)
+        print("METADATA_VERIFIED|{}".format(backup_id))
+    except Exception as error:
+        print("METADATA_FAILED|{}".format(type(error).__name__), file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--backup-root", type=Path, required=True)
@@ -490,10 +542,18 @@ def main():
         apply_plan(actions, backup_root, arguments.apply)
 
     if arguments.create_daily:
-        create_backup(
+        daily_before = set(path for _timestamp, path, _valid in discover_backups(backup_root)["daily"])
+        created = create_backup(
             arguments.project_root.resolve(), backup_root, now, "daily",
             apply_changes=arguments.apply,
         )
+        if (
+            arguments.apply and created and created.is_file()
+            and created not in daily_before
+        ):
+            write_recovery_metadata(
+                arguments.project_root.resolve(), backup_root, created, "automatic"
+            )
     elif arguments.create_temporary:
         create_backup(
             arguments.project_root.resolve(), backup_root, now, "temporary",

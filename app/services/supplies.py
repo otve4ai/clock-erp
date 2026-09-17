@@ -182,11 +182,47 @@ class SupplyEngine:
                 failure_hook(connection)
             return self._get(connection, supply_id)
 
-    def delete(self, supply_id):
+    def preview_delete(self, supply_id):
+        with self.database.connect() as connection:
+            self._row(connection, supply_id)
+            return ReceiptInventory._delete_plan(connection, supply_id)
+
+    def delete(self, supply_id, actor='', failure_hook=None):
+        # Validate that the document belongs to the active supply workspace before
+        # delegating to the shared, atomic stock rollback.
+        with self.database.connect() as connection:
+            self._row(connection, supply_id)
+        return ReceiptInventory(self.database).delete_receipt(
+            supply_id,
+            user_name=actor,
+            failure_hook=failure_hook,
+        )
+
+    def update_details(self, supply_id, title, comment, actor=''):
+        title = str(title or '').strip()
+        comment = str(comment or '').strip()
+        if not title or len(title) > 200 or len(comment) > 2000:
+            raise SupplyError('Укажите название до 200 символов и комментарий до 2000 символов.')
         with self.database.transaction() as connection:
-            self._row(connection, supply_id, draft=True)
-            # Keep references/audit, hide the deleted draft. No stock operation.
-            connection.execute("UPDATE erp_receipts SET status = 'cancelled', cancelled_at = ?, updated_at = ? WHERE id = ?", (utc_now(), utc_now(), supply_id))
+            row = self._row(connection, supply_id)
+            meta = self._metadata(row)
+            before = {'title': str(meta.get('title') or ''), 'comment': row['comment'] or ''}
+            after = {'title': title, 'comment': comment}
+            meta['title'] = title
+            now = utc_now()
+            connection.execute(
+                'UPDATE erp_receipts SET comment = ?, metadata_json = ?, updated_at = ? WHERE id = ?',
+                (comment, json.dumps(meta, ensure_ascii=False), now, supply_id),
+            )
+            AuditJournal(self.database).record(
+                'receipt', supply_id, 'updated', 'Поставка #{}'.format(row['number']),
+                object_secondary=title, before=before, after=after,
+                metadata={'number': row['number'], 'title': title},
+                actor_id=actor, actor_name=actor,
+                actor_type='user' if actor else 'system', status=row['status'],
+                source='Приход', connection=connection,
+            )
+            return self._get(connection, supply_id)
 
     def post(self, supply_id, actor='', failure_hook=None):
         with self.database.transaction() as connection:

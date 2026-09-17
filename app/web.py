@@ -61,6 +61,7 @@ from app.services.bitrix_catalog_importer import BitrixCatalogImporter
 from app.services.bitrix_erp_product_sync import (
     BitrixERPProductSync,
     enrichment_from_product,
+    single_import_quantity,
 )
 from app.services.audit_journal import AuditJournal
 from app.services.order_presentation import present_order, status_key, status_label, navigation_counts
@@ -163,6 +164,12 @@ from app.services.brand_images import (
     BrandImageStore,
     BrandImageValidationError,
 )
+from app.services.backup_admin import (
+    BackupAdminError,
+    BackupAdminService,
+    BackupBusyError,
+    BackupNotFoundError,
+)
 from app.services.product_images import (
     ProductImageStore,
     validate_product_image,
@@ -175,7 +182,6 @@ from app.services.out_of_stock import OutOfStockChecks
 from app.services.product_excel_export import ProductExcelExport
 from app.services.receipt_inventory import (
     ReceiptInventory,
-    positive_integer as positive_receipt_integer,
 )
 from app.services.shared_catalog import (
     CatalogReferenceError,
@@ -270,7 +276,11 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.exceptions import HTTPException
 from app.auth import (
+    ALLOWED_ROLES,
+    EMAIL_PATTERN,
     PRESENCE_TIMEOUT_SECONDS,
+    TeamAccountError,
+    _validate_password,
     auth_is_enabled,
     configure_auth,
     csrf_token,
@@ -321,11 +331,42 @@ app.wsgi_app = ProxyFix(
     x_proto=TRUSTED_PROXY_COUNT,
     x_host=TRUSTED_PROXY_COUNT,
 )
+
+
+@app.before_request
+def enforce_recovery_maintenance():
+    """Block business traffic while the out-of-process helper owns the data."""
+    marker = Path(app.config.get(
+        "ERP_MAINTENANCE_MARKER", "/run/clock-erp-maintenance.json"
+    ))
+    if not marker.is_file():
+        return None
+    allowed_gets = {"/login", "/app/backups", "/api/v1/backups/status"}
+    if request.method == "GET" and (
+        request.path in allowed_gets or request.path.startswith("/static/")
+    ):
+        return None
+    if request.path.startswith("/api/"):
+        return api_error(
+            "ERP_MAINTENANCE",
+            "ERP временно недоступна — выполняется восстановление.",
+            503,
+        )
+    return render_template("maintenance.html"), 503
+
+
 configure_auth(app, PROJECT_ROOT)
 from app.request_timing import register_order_request_timing
 register_order_request_timing(app)
 from app.orders_response import register_orders_response
 register_orders_response(app)
+
+
+app.config.setdefault(
+    "ERP_SOURCE_ROOT",
+    os.getenv("ERP_SOURCE_ROOT", "").strip()
+    or str(Path("/opt/clock-erp") if Path("/opt/clock-erp/.git").is_dir() else PROJECT_ROOT),
+)
 app.config.setdefault(
     "TASKS_DATABASE",
     os.getenv("ERP_TASKS_DATABASE", "").strip()
@@ -360,6 +401,54 @@ app.config.setdefault(
     os.getenv("ERP_SERVICES_DATABASE", "").strip()
     or str(PROJECT_ROOT / "instance" / "services.db"),
 )
+app.config.setdefault(
+    "ERP_BACKUP_ROOT",
+    os.getenv("ERP_BACKUP_ROOT", "").strip()
+    or str(
+        Path("/opt/clock-erp-backups")
+        if Path(app.config["ERP_SOURCE_ROOT"]) == Path("/opt/clock-erp")
+        else PROJECT_ROOT / "instance" / "backups"
+    ),
+)
+app.config.setdefault(
+    "ERP_BACKUP_SCRIPT",
+    os.getenv("ERP_BACKUP_SCRIPT", "").strip()
+    or str(
+        Path("/usr/local/sbin/clock-erp-backup-retention")
+        if Path("/usr/local/sbin/clock-erp-backup-retention").is_file()
+        else PROJECT_ROOT / "scripts" / "retain_erp_backups.py"
+    ),
+)
+app.config.setdefault(
+    "ERP_BACKUP_CRON",
+    os.getenv("ERP_BACKUP_CRON", "").strip()
+    or "/etc/cron.d/clock-erp-backup-retention",
+)
+app.config.setdefault("ERP_BACKUP_REMOTE_CHECK", True)
+app.config.setdefault(
+    "ERP_RECOVERY_HELPER",
+    os.getenv("ERP_RECOVERY_HELPER", "").strip()
+    or str(
+        Path("/usr/local/sbin/clock-erp-recovery")
+        if Path("/usr/local/sbin/clock-erp-recovery").is_file()
+        else PROJECT_ROOT / "scripts" / "clock_erp_recovery.py"
+    ),
+)
+app.config.setdefault(
+    "ERP_RECOVERY_CONTRACT",
+    os.getenv("ERP_RECOVERY_CONTRACT", "").strip()
+    or str(PROJECT_ROOT / "ops" / "recovery-schema-contract.json"),
+)
+app.config.setdefault(
+    "ERP_CURRENT_RELEASE",
+    os.getenv("ERP_CURRENT_RELEASE", "").strip() or "/opt/clock-erp-current",
+)
+app.config.setdefault(
+    "ERP_MAINTENANCE_MARKER",
+    os.getenv("ERP_MAINTENANCE_MARKER", "").strip()
+    or "/run/clock-erp-maintenance.json",
+)
+
 
 # Gunicorn imports this module once per worker. Pay the one required schema
 # verification during worker startup so the first ERP screen never inherits it.
@@ -2746,6 +2835,22 @@ def get_order_product_mapping(mapping_context, product):
     return mapping_context.get(order_product_mapping_key(product)) or {}
 
 
+def order_has_blocking_sync_issue(order):
+    """Keep incomplete-card guards, except a missing Bitrix monetary total."""
+    state = (order or {}).get("sync_state")
+    if state == "error":
+        return True
+    if state != "partial":
+        return False
+    missing = (order or {}).get("sync_missing")
+    # Unknown partial loads remain blocked; only an explicitly price-only
+    # omission is irrelevant to selling the ERP order lines.
+    return not (
+        isinstance(missing, list) and missing
+        and all(field == "total" for field in missing)
+    )
+
+
 def build_order_sale_readiness(order, mapping_context, already_conducted=False):
     issues = []
     required = {}
@@ -2758,16 +2863,8 @@ def build_order_sale_readiness(order, mapping_context, already_conducted=False):
         issues.append("Заказ не подтверждён")
     if not products:
         issues.append("Состав заказа не загружен")
-    if (order or {}).get("sync_state") in {"partial", "error"}:
+    if order_has_blocking_sync_issue(order):
         issues.append("Карточка загружена не полностью")
-    if "calculation_complete" in (order or {}) and not order.get(
-        "calculation_complete"
-    ):
-        issues.append("Расчёт заказа неполный")
-    elif "calculation_consistent" in (order or {}) and not order.get(
-        "calculation_consistent"
-    ):
-        issues.append("Расчёт заказа не сходится")
     for product in products:
         mapping = get_order_product_mapping(mapping_context, product)
         selected = mapping.get("product")
@@ -3184,16 +3281,10 @@ def _conduct_order_sale(order_id):
         issues.append("Чтобы провести продажу, сначала подтвердите заказ")
     if not products:
         issues.append("Заказ без товаров нельзя провести в продажу")
-    if full_order.get("sync_state") in {"partial", "error"}:
+    if order_has_blocking_sync_issue(full_order):
         issues.append("Карточка заказа загружена не полностью")
-    if "calculation_complete" in full_order and not full_order.get(
-        "calculation_complete"
-    ):
-        issues.append("Bitrix не передал полный расчёт доставки и скидки")
-    elif "calculation_consistent" in full_order and not full_order.get(
-        "calculation_consistent"
-    ):
-        issues.append("Сумма заказа не сходится с товарами, скидкой и доставкой")
+    # Bitrix reconciliation flags are diagnostic only. Sale amounts come from
+    # the ERP order lines; missing discount/delivery/total must not block them.
 
     for line_index, product in enumerate(products):
         identity = bitrix_order_product_identity(product)
@@ -11566,6 +11657,17 @@ def get_sales_product_metadata(lookup, product_id, product_name):
     }
 
 
+def is_warranty_sale_product(product_name):
+    normalized_name = " ".join(
+        str(product_name or "").split()
+    ).casefold()
+    warranty_prefix = "гарантия на товар"
+    return (
+        normalized_name == warranty_prefix
+        or normalized_name.startswith(warranty_prefix + " ")
+    )
+
+
 def sale_override_value(override, source, field, *source_aliases):
     """Keep an explicit empty override instead of reviving source data."""
     if field in override:
@@ -13467,6 +13569,9 @@ def sales_page():
     sales_product_images = {}
     for sale in sales:
         sale["search_text"] = build_sales_search_text(sale, active_source)
+        sale["is_warranty_item"] = is_warranty_sale_product(
+            sale.get("product_name")
+        )
         product_id = str(sale.get("product_id") or "").strip()
         current_product = current_sale_products.get(product_id)
         product_image_url = str(
@@ -18092,6 +18197,21 @@ NAVIGATION_DEFINITIONS = [
         "active_prefixes": ["/app/settings", "/settings"],
         "required": True,
     },
+    {
+        "key": "backups",
+        "label": "Бэкапы",
+        "description": "Состояние хранилища и точки восстановления ERP.",
+        "icon": "backups",
+        "href": "/app/backups",
+        "mobile_href": "/app/backups",
+        "position": 11,
+        "group": "system",
+        "mobile_primary": False,
+        "active_exact": [],
+        "active_prefixes": ["/app/backups", "/api/v1/backups"],
+        "roles": ("admin",),
+        "required": True,
+    },
 ]
 
 
@@ -18360,7 +18480,7 @@ SECTION_LABELS = {
     "inventory": "Инвентаризация", "receipts": "Приход",
     "journal": "Журнал", "inbox": "Входящие", "repair": "Ремонты", "customers": "Клиенты",
     "sms": "SMS", "purchases": "Закупки", "team": "Команда",
-    "services": "Сервисы", "settings": "Настройки",
+    "services": "Сервисы", "settings": "Настройки", "backups": "Бэкапы",
 }
 
 
@@ -18643,16 +18763,176 @@ def serialize_team_user(user, now=None):
     return item
 
 
+def _require_team_admin():
+    user = current_auth_user() or {}
+    if user.get("role") != "admin":
+        abort(403)
+    return user
+
+
+def _team_payload_validation(payload, password_required=False):
+    values = {
+        "name": str(payload.get("name") or "").strip(),
+        "login": str(payload.get("login") or "").strip(),
+        "email": str(payload.get("email") or "").strip(),
+        "role": str(payload.get("role") or "").strip(),
+    }
+    errors = {}
+    if not values["name"] or len(values["name"]) > 160:
+        errors["name"] = "Укажите имя длиной до 160 символов."
+    if not re.fullmatch(r"[^\s@]{3,64}", values["login"]):
+        errors["login"] = "Логин: от 3 до 64 символов, без пробелов и @."
+    if len(values["email"]) > 254 or not EMAIL_PATTERN.fullmatch(values["email"]):
+        errors["email"] = "Введите корректный email."
+    if values["role"] not in ALLOWED_ROLES:
+        errors["role"] = "Недопустимая роль."
+    password = str(payload.get("password") or "")
+    confirmation = str(payload.get("password_confirmation") or "")
+    if password_required or password or confirmation:
+        password, password_errors = _validate_password({
+            "password": password,
+            "password_confirmation": confirmation,
+        })
+        errors.update(password_errors)
+    return values, password, errors
+
+
+def _record_team_audit(target, action, before=None, after=None, text=""):
+    actor = current_audit_actor()
+    label = " ".join((
+        str(target.get("first_name") or "").strip(),
+        str(target.get("last_name") or "").strip(),
+    )).strip() or str(target.get("login") or target.get("email") or "Пользователь")
+    AuditJournal().record(
+        "user", str(target["id"]), action, label,
+        before=before, after=after, actor_id=actor["actor_id"],
+        actor_name=actor["actor_name"], actor_type=actor["actor_type"],
+        metadata={"text_snapshot": text}, source="ERP",
+    )
+
+
 @app.get("/app/team")
 def team_page():
+    _require_team_admin()
     now = int(time.time())
-    users = [serialize_team_user(user, now) for user in _team_presence_now(now)]
+    query = str(request.args.get("q") or "").strip()
+    users = [serialize_team_user(user, now) for user in get_auth_store().list_team_users(query)]
     return render_template(
         "team.html",
         team_users=users,
+        query=query,
+        roles=ALLOWED_ROLES,
         active_count=sum(1 for user in users if user["active"]),
         online_count=sum(1 for user in users if user["online"]),
     )
+
+
+@app.get("/app/team/<int:user_id>")
+def team_user_page(user_id):
+    _require_team_admin()
+    target = get_auth_store().get_team_user(user_id)
+    if target is None:
+        abort(404)
+    display_name = " ".join((target["first_name"] or "", target["last_name"] or "")).strip()
+    target["display_name"] = display_name or target["login"] or target["email"]
+    target["role_label"] = ALLOWED_ROLES.get(target["role"], target["role"])
+    category = str(request.args.get("category") or "").strip()
+    category_map = {
+        "sales": "sale", "orders": "order", "receipts": "receipt",
+        "inventory": "inventory", "products": "product", "auth": "user",
+        "admin": "user",
+    }
+    entity_type = category_map.get(category, "")
+    action = "logged_in" if category == "auth" else ""
+    period = str(request.args.get("period") or "30").strip()
+    date_from = str(request.args.get("date_from") or "").strip()
+    date_to = str(request.args.get("date_to") or "").strip()
+    if not date_from and period in {"1", "7", "30"}:
+        date_from = (datetime.now().date() - timedelta(days=int(period) - 1)).isoformat()
+    journal = AuditJournal()
+    listing = journal.list_events(
+        subject_user=str(user_id), entity_type=entity_type, action=action, date_from=date_from,
+        date_to=date_to, cursor=str(request.args.get("cursor") or ""), limit=25,
+    )
+    events = serialize_journal_events(listing["events"])
+    object_paths = {
+        "product": "/app/products?product_id={}",
+        "sale": "/app/sales?q={}",
+        "receipt": "/app/receipts?receipt_id={}",
+        "order": "/order/{}",
+        "repair": "/app/repairs?repair_id={}",
+        "customer": "/app/customers/{}",
+        "purchase": "/app/purchases?purchase_id={}",
+        "task": "/app/tasks?task_id={}",
+        "inventory": "/app/inventory/{}",
+    }
+    for event in events:
+        pattern = object_paths.get(event.get("entity_type"))
+        event["object_url"] = (
+            pattern.format(event.get("entity_id"))
+            if pattern and event.get("action") != "deleted" else ""
+        )
+    return render_template(
+        "team_user.html", team_user=target, roles=ALLOWED_ROLES,
+        events=events, next_cursor=listing["next_cursor"], category=category,
+        period=period, date_from=date_from, date_to=date_to,
+        journal_active=any(key in request.args for key in (
+            "category", "period", "date_from", "date_to", "cursor"
+        )),
+    )
+
+
+@app.post("/api/v1/team/users")
+def api_team_create_user():
+    _require_team_admin()
+    require_csrf_when_authenticated()
+    values, password, errors = _team_payload_validation(request.get_json(silent=True) or {}, True)
+    if errors:
+        return api_error("VALIDATION_ERROR", "Проверьте заполнение формы.", 422, fields=errors)
+    try:
+        target = get_auth_store().create_team_user(password=password, **values)
+    except TeamAccountError as error:
+        return api_error(error.code, error.message, 409, fields={error.field: error.message} if error.field else {})
+    _record_team_audit(target, "created", after={
+        "name": values["name"], "login": values["login"], "email": values["email"],
+        "role": values["role"], "active": True,
+    }, text="Пользователь создан")
+    return api_success({"user_id": target["id"], "redirect": "/app/team/{}".format(target["id"])}, 201)
+
+
+@app.put("/api/v1/team/users/<int:user_id>")
+def api_team_update_user(user_id):
+    _require_team_admin()
+    require_csrf_when_authenticated()
+    values, password, errors = _team_payload_validation(request.get_json(silent=True) or {}, False)
+    if errors:
+        return api_error("VALIDATION_ERROR", "Проверьте заполнение формы.", 422, fields=errors)
+    try:
+        before, target = get_auth_store().update_team_user(user_id, password=password, **values)
+    except TeamAccountError as error:
+        return api_error(error.code, error.message, 409, fields={error.field: error.message} if error.field else {})
+    safe_before = {"name": " ".join((before["first_name"], before["last_name"])).strip(),
+                   "login": before["login"], "email": before["email"], "role": before["role"], "active": bool(before["active"])}
+    safe_after = {"name": values["name"], "login": values["login"], "email": values["email"],
+                  "role": values["role"], "active": bool(target["active"])}
+    _record_team_audit(target, "updated", before=safe_before, after=safe_after,
+                       text="Данные и доступ пользователя изменены")
+    if password:
+        _record_team_audit(target, "updated", text="Пароль пользователя изменён")
+    return api_success({"user_id": target["id"]})
+
+
+@app.delete("/api/v1/team/users/<int:user_id>")
+def api_team_delete_user(user_id):
+    actor = _require_team_admin()
+    require_csrf_when_authenticated()
+    try:
+        target = get_auth_store().deactivate_team_user(user_id, actor["id"])
+    except TeamAccountError as error:
+        return api_error(error.code, error.message, 409)
+    _record_team_audit(target, "deleted", before={"active": True}, after={"active": False},
+                       text="Учётная запись деактивирована; история сохранена")
+    return api_success({"redirect": "/app/team"})
 
 
 @app.post("/api/v1/presence/heartbeat")
@@ -19606,7 +19886,7 @@ def api_bitrix_product_import(bitrix_id):
     store = ProductImageStore(database)
     prepared = None
     try:
-        quantity = None if supply_id else positive_receipt_integer(payload.get("quantity"), "Количество")
+        quantity = None if supply_id else single_import_quantity(payload.get("quantity"), action)
         client = _bitrix_single_client()
         product = client.get_product(bitrix_id)
         if product is None:
@@ -24760,6 +25040,251 @@ def api_mail_settings_save():
         })
     except MailError as error:
         return _mail_error_response(error)
+
+
+# -----------------------------
+# Backup administration
+# -----------------------------
+
+def _backup_owner_required():
+    if auth_is_enabled() and (current_auth_user() or {}).get("role") != "admin":
+        abort(403)
+
+
+def _backup_admin_service():
+    cache_key = (
+        str(app.config["ERP_SOURCE_ROOT"]),
+        str(app.config["ERP_BACKUP_ROOT"]),
+        str(app.config["ERP_BACKUP_SCRIPT"]),
+        str(app.config["ERP_BACKUP_CRON"]),
+        bool(app.config["ERP_BACKUP_REMOTE_CHECK"]),
+        str(app.config["ERP_RECOVERY_HELPER"]),
+        str(app.config["ERP_RECOVERY_CONTRACT"]),
+        str(app.config["ERP_CURRENT_RELEASE"]),
+    )
+    cached = app.extensions.get("backup_admin_service")
+    if cached and cached[0] == cache_key:
+        return cached[1]
+    service = BackupAdminService(
+        app.config["ERP_SOURCE_ROOT"],
+        app.config["ERP_BACKUP_ROOT"],
+        app.config["ERP_BACKUP_SCRIPT"],
+        service_name="clock-erp",
+        cron_path=app.config["ERP_BACKUP_CRON"],
+        remote_check=app.config["ERP_BACKUP_REMOTE_CHECK"],
+        recovery_helper=app.config["ERP_RECOVERY_HELPER"],
+        recovery_contract=app.config["ERP_RECOVERY_CONTRACT"],
+        current_release=app.config["ERP_CURRENT_RELEASE"],
+    )
+    app.extensions["backup_admin_service"] = (cache_key, service)
+    return service
+
+
+def _backup_actor():
+    user = current_auth_user() or {}
+    return {"id": user.get("id") or "system", "email": user.get("email") or "system"}
+
+
+@app.get("/app/backups")
+def backups_page():
+    _backup_owner_required()
+    try:
+        status = _backup_admin_service().status()
+    except Exception:
+        app.logger.exception("Backup administration status could not be loaded")
+        status = {
+            "checked_at": None, "overall": "critical", "backups": [],
+            "restore_points": [], "last_backup": None,
+            "backup_directory": {"available": False, "message": "Бэкапы недоступны"},
+            "storage": {"state": "unknown", "total": None, "used": None,
+                        "free": None, "percent": None, "categories": {}},
+            "service": {"available": False, "active": None, "state": "unavailable"},
+            "schedule": {"available": False, "label": "Расписание не определено"},
+            "git": {"available": False, "history": []},
+            "operation": {"active": False, "status": "idle"},
+            "capabilities": {
+                "manual_backup": False, "data_restore": False,
+                "code_rollback": False, "full_restore": False,
+                "blocked_reason": "Не удалось получить состояние backup-системы",
+            },
+        }
+    return render_template("backups.html", backup_status=status)
+
+
+@app.get("/api/v1/backups/status")
+def api_backups_status():
+    _backup_owner_required()
+    try:
+        return api_success(_backup_admin_service().status())
+    except Exception:
+        app.logger.exception("Backup administration API status failed")
+        return api_error("BACKUPS_UNAVAILABLE", "Не удалось получить состояние backup-системы.", 503)
+
+
+@app.post("/api/v1/backups")
+def api_backups_create():
+    _backup_owner_required()
+    require_csrf_when_authenticated()
+    try:
+        return api_success(
+            _backup_admin_service().start_manual_backup(_backup_actor()), status=202
+        )
+    except BackupBusyError as error:
+        return api_error("BACKUP_BUSY", str(error), 409)
+    except BackupAdminError as error:
+        return api_error("BACKUP_BLOCKED", str(error), 409)
+    except Exception:
+        app.logger.exception("Manual backup could not be started")
+        return api_error("BACKUP_FAILED", "Не удалось создать бэкап.", 503)
+
+
+@app.post("/api/v1/backups/<backup_id>/restore")
+def api_backup_restore(backup_id):
+    _backup_owner_required()
+    require_csrf_when_authenticated()
+    payload = request.get_json(silent=True) or {}
+    if payload.get("confirmation") != "ВОССТАНОВИТЬ":
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "data_restore", backup_id=backup_id,
+            reason="confirmation failed",
+        )
+        return api_error("RESTORE_CONFIRMATION_REQUIRED", "Для восстановления введите ВОССТАНОВИТЬ.", 422)
+    try:
+        operation = _backup_admin_service().start_recovery(
+            _backup_actor(), "data_restore", backup_id=backup_id,
+            idempotency_key=request.headers.get("X-Idempotency-Key"),
+        )
+        return api_success(operation, status=202)
+    except BackupNotFoundError as error:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "data_restore", backup_id=backup_id,
+            reason="unknown backup id",
+        )
+        return api_error("BACKUP_NOT_FOUND", str(error), 404)
+    except BackupAdminError as error:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "data_restore", backup_id=backup_id,
+            reason=type(error).__name__,
+        )
+        return api_error("RESTORE_BLOCKED", str(error), 409)
+    except Exception as error:
+        app.logger.exception("Data restore could not be started")
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "data_restore", backup_id=backup_id,
+            reason=type(error).__name__,
+        )
+        return api_error("RESTORE_FAILED", "Не удалось запустить восстановление данных.", 503)
+
+
+@app.post("/api/v1/backups/code/<commit>/rollback")
+def api_backup_code_rollback(commit):
+    _backup_owner_required()
+    require_csrf_when_authenticated()
+    payload = request.get_json(silent=True) or {}
+    if payload.get("confirmation") != "ОТКАТИТЬ КОД":
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "code_rollback", target_commit=commit,
+            reason="confirmation failed",
+        )
+        return api_error("ROLLBACK_CONFIRMATION_REQUIRED", "Для отката введите ОТКАТИТЬ КОД.", 422)
+    git = _backup_admin_service().git_status(history_limit=15)
+    if git.get("dirty") is not False:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "code_rollback", target_commit=commit,
+            reason="dirty or unavailable working tree status",
+        )
+        return api_error(
+            "ROLLBACK_DIRTY_TREE",
+            (
+                "Откат кода заблокирован: production содержит незакоммиченные изменения."
+                if git.get("dirty") else
+                "Откат кода заблокирован: не удалось подтвердить чистоту production."
+            ),
+            409,
+        )
+    try:
+        operation = _backup_admin_service().start_recovery(
+            _backup_actor(), "code_rollback", target_commit=commit,
+            idempotency_key=request.headers.get("X-Idempotency-Key"),
+        )
+        return api_success(operation, status=202)
+    except BackupNotFoundError as error:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "code_rollback", target_commit=commit,
+            reason="unknown commit",
+        )
+        return api_error("COMMIT_NOT_FOUND", str(error), 404)
+    except BackupAdminError as error:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "code_rollback", target_commit=commit,
+            reason=type(error).__name__,
+        )
+        return api_error("ROLLBACK_BLOCKED", str(error), 409)
+    except Exception as error:
+        app.logger.exception("Code rollback could not be started")
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "code_rollback", target_commit=commit,
+            reason=type(error).__name__,
+        )
+        return api_error("ROLLBACK_FAILED", "Не удалось запустить откат кода.", 503)
+
+
+@app.post("/api/v1/backups/<backup_id>/restore-system")
+def api_backup_restore_system(backup_id):
+    _backup_owner_required()
+    require_csrf_when_authenticated()
+    payload = request.get_json(silent=True) or {}
+    if payload.get("confirmation") != "ВОССТАНОВИТЬ СИСТЕМУ":
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "full_restore", backup_id=backup_id,
+            reason="confirmation failed",
+        )
+        return api_error(
+            "FULL_RESTORE_CONFIRMATION_REQUIRED",
+            "Для полного восстановления введите ВОССТАНОВИТЬ СИСТЕМУ.",
+            422,
+        )
+    try:
+        backup = _backup_admin_service().resolve_backup(backup_id)
+        if not (
+            backup.get("metadata") and backup.get("integrity_status") == "verified"
+            and backup.get("git_commit") and backup.get("schema_versions")
+        ):
+            _backup_admin_service().audit_refused_attempt(
+                _backup_actor(), "full_restore", backup_id=backup_id,
+                target_commit=backup.get("git_commit"),
+                reason="unverified restore point",
+            )
+            return api_error(
+                "RESTORE_POINT_UNVERIFIED",
+                "Полное восстановление заблокировано: совместимость кода и данных не подтверждена.",
+                409,
+            )
+        operation = _backup_admin_service().start_recovery(
+            _backup_actor(), "full_restore", backup_id=backup_id,
+            target_commit=backup.get("git_commit"),
+            idempotency_key=request.headers.get("X-Idempotency-Key"),
+        )
+        return api_success(operation, status=202)
+    except BackupNotFoundError as error:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "full_restore", backup_id=backup_id,
+            reason="unknown restore point",
+        )
+        return api_error("RESTORE_POINT_NOT_FOUND", str(error), 404)
+    except BackupAdminError as error:
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "full_restore", backup_id=backup_id,
+            reason=type(error).__name__,
+        )
+        return api_error("FULL_RESTORE_BLOCKED", str(error), 409)
+    except Exception as error:
+        app.logger.exception("Full restore could not be started")
+        _backup_admin_service().audit_refused_attempt(
+            _backup_actor(), "full_restore", backup_id=backup_id,
+            reason=type(error).__name__,
+        )
+        return api_error("FULL_RESTORE_FAILED", "Не удалось запустить полное восстановление.", 503)
 
 
 @app.delete("/api/v1/mail/settings")

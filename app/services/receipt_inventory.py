@@ -16,6 +16,12 @@ class ReceiptInventoryError(ValueError):
     pass
 
 
+class ReceiptDeleteConflictError(ReceiptInventoryError):
+    def __init__(self, preview):
+        self.preview = preview
+        super().__init__("Поставку нельзя удалить: остаток одной или нескольких позиций станет отрицательным.")
+
+
 def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -691,6 +697,221 @@ class ReceiptInventory:
         self.database.initialize()
         with self.database.connect() as connection:
             return self._receipt_payload(connection, receipt_id)
+
+    def preview_delete(self, receipt_id):
+        """Build a read-only deletion plan from current database state."""
+        self.database.initialize()
+        with self.database.connect() as connection:
+            return self._delete_plan(connection, receipt_id)
+
+    def delete_receipt(self, receipt_id, user_name="", failure_hook=None):
+        """Delete a receipt and apply its conservative stock rollback atomically."""
+        receipt_id = str(receipt_id or "").strip()
+        self.database.initialize()
+        with self.database.transaction() as connection:
+            plan = self._delete_plan(connection, receipt_id)
+            if plan["has_conflicts"]:
+                raise ReceiptDeleteConflictError(plan)
+            now = utc_now()
+            assert_products_unlocked(
+                connection,
+                [item["product_id"] for item in plan["items"]],
+                ReceiptInventoryError,
+            )
+            for item in plan["items"]:
+                if item["status"] != "WILL_DECREASE":
+                    continue
+                write_balance(
+                    connection,
+                    item["product_id"],
+                    item["stock_after"],
+                    "receipt_delete",
+                    now,
+                    ("receipt", receipt_id),
+                )
+            connection.execute(
+                "DELETE FROM catalog_stock_movements WHERE receipt_id = ?",
+                (receipt_id,),
+            )
+            connection.execute(
+                "DELETE FROM erp_receipt_items WHERE receipt_id = ?",
+                (receipt_id,),
+            )
+            connection.execute("DELETE FROM erp_receipts WHERE id = ?", (receipt_id,))
+            AuditJournal(self.database).record(
+                "receipt",
+                receipt_id,
+                "deleted",
+                "Поставка #{}".format(plan["number"]),
+                object_secondary=plan["name"],
+                before={"status": plan["receipt_status"]},
+                after={"status": "deleted"},
+                metadata={
+                    "number": plan["number"],
+                    "name": plan["name"],
+                    "comment": plan["comment"],
+                    "items": [
+                        {key: value for key, value in item.items() if key != "sales"}
+                        for item in plan["items"]
+                    ],
+                    "decreased_positions": plan["decreased_positions"],
+                    "decreased_quantity": plan["decreased_quantity"],
+                    "skipped_positions": plan["skipped_positions"],
+                },
+                actor_id=user_name,
+                actor_name=user_name,
+                actor_type="user" if user_name else "system",
+                occurred_at=now,
+                status="deleted",
+                source="Приход",
+                connection=connection,
+            )
+            if failure_hook:
+                failure_hook(connection)
+        return plan
+
+    def update_details(self, receipt_id, name, comment, user_name=""):
+        """Edit receipt display fields without touching lines or stock."""
+        receipt_id = str(receipt_id or "").strip()
+        name = str(name or "").strip()
+        comment = str(comment or "").strip()
+        if len(name) > 200:
+            raise ReceiptInventoryError("Название не должно превышать 200 символов.")
+        if len(comment) > 2000:
+            raise ReceiptInventoryError("Комментарий не должен превышать 2000 символов.")
+        self.database.initialize()
+        with self.database.transaction() as connection:
+            current = connection.execute(
+                "SELECT * FROM erp_receipts WHERE id = ?", (receipt_id,)
+            ).fetchone()
+            if current is None:
+                raise ReceiptInventoryError("Поставка не найдена.")
+            now = utc_now()
+            try:
+                metadata = json.loads(current["metadata_json"] or "{}")
+            except (TypeError, ValueError):
+                metadata = {}
+            before = {"name": str(metadata.get("name") or ""), "comment": current["comment"] or ""}
+            after = {"name": name, "comment": comment}
+            metadata["name"] = name
+            connection.execute(
+                "UPDATE erp_receipts SET comment = ?, metadata_json = ?, updated_at = ? WHERE id = ?",
+                (comment, json.dumps(metadata, ensure_ascii=False, sort_keys=True), now, receipt_id),
+            )
+            AuditJournal(self.database).record(
+                "receipt",
+                receipt_id,
+                "updated",
+                "Поставка #{}".format(current["number"] or receipt_id),
+                object_secondary=name,
+                before=before,
+                after=after,
+                metadata={"number": current["number"] or receipt_id, "name": name},
+                actor_id=user_name,
+                actor_name=user_name,
+                actor_type="user" if user_name else "system",
+                occurred_at=now,
+                status=current["status"],
+                source="Приход",
+                connection=connection,
+            )
+        return self.get_receipt(receipt_id)
+
+    @staticmethod
+    def _delete_plan(connection, receipt_id):
+        receipt_id = str(receipt_id or "").strip()
+        receipt = connection.execute(
+            "SELECT * FROM erp_receipts WHERE id = ?", (receipt_id,)
+        ).fetchone()
+        if receipt is None:
+            raise ReceiptInventoryError("Поставка не найдена.")
+        if receipt["status"] == "cancelled":
+            raise ReceiptInventoryError("Отменённую поставку нельзя удалить повторно.")
+        try:
+            receipt_metadata = json.loads(receipt["metadata_json"] or "{}")
+        except (TypeError, ValueError):
+            receipt_metadata = {}
+        rows = connection.execute(
+            "SELECT i.product_id, SUM(i.quantity) AS quantity, p.stock, "
+            "p.excel_name_raw AS product_name, p.excel_article AS article, "
+            "COALESCE(p.bitrix_thumbnail_url, p.bitrix_primary_image_url, '') AS image_url "
+            "FROM erp_receipt_items i JOIN catalog_excel_products p ON p.id = i.product_id "
+            "WHERE i.receipt_id = ? AND i.active = 1 "
+            "GROUP BY i.product_id ORDER BY MIN(i.id)",
+            (receipt_id,),
+        ).fetchall()
+        posted_at_row = connection.execute(
+            "SELECT MIN(created_at) AS posted_at FROM catalog_stock_movements "
+            "WHERE receipt_id = ? AND movement_type = 'receipt'",
+            (receipt_id,),
+        ).fetchone()
+        posted_at = posted_at_row["posted_at"] or receipt["created_at"]
+        items = []
+        for row in rows:
+            sales = []
+            if receipt["status"] == "posted":
+                receipt_movement = connection.execute(
+                    "SELECT MAX(rowid) AS movement_rowid "
+                    "FROM catalog_stock_movements WHERE receipt_id = ? "
+                    "AND product_id = ? AND movement_type = 'receipt'",
+                    (receipt_id, row["product_id"]),
+                ).fetchone()
+                sale_rows = connection.execute(
+                    "SELECT DISTINCT s.id, s.external_order_id, s.created_at, s.metadata_json "
+                    "FROM erp_sales s JOIN erp_sale_items si ON si.sale_id = s.id "
+                    "JOIN catalog_stock_movements sm ON sm.sale_id = s.id "
+                    "AND sm.sale_item_id = si.id AND sm.movement_type = 'sale' "
+                    "WHERE si.product_id = ? AND sm.rowid > ? "
+                    "AND s.status IN ('completed', 'partially_returned') "
+                    "AND s.cancelled_at IS NULL AND s.deleted_at IS NULL "
+                    "ORDER BY s.created_at, s.id",
+                    (row["product_id"], receipt_movement["movement_rowid"] or 0),
+                ).fetchall()
+                for sale in sale_rows:
+                    try:
+                        metadata = json.loads(sale["metadata_json"] or "{}")
+                    except (TypeError, ValueError):
+                        metadata = {}
+                    sales.append({
+                        "id": sale["id"],
+                        "number": sale["external_order_id"] or metadata.get("order_number") or sale["id"],
+                        "date": str(sale["created_at"] or "")[:10],
+                    })
+            row = overlay(connection, row, row["product_id"], ("receipt", receipt_id))
+            quantity = float(row["quantity"] or 0)
+            stock = float(row["stock"] or 0)
+            stock_after = stock if sales or receipt["status"] == "draft" else stock - quantity
+            status = (
+                "DRAFT_DELETE" if receipt["status"] == "draft"
+                else "SKIPPED_DUE_TO_LATER_SALE" if sales
+                else "CONFLICT_NEGATIVE_STOCK" if stock_after < -0.000001
+                else "WILL_DECREASE"
+            )
+            reason = (
+                "После проведения поставки зафиксирована последующая продажа товара; "
+                "остаток при удалении поставки не изменён."
+                if status == "SKIPPED_DUE_TO_LATER_SALE"
+                else ""
+            )
+            items.append({
+                "product_id": int(row["product_id"]), "product_name": row["product_name"] or "",
+                "article": row["article"] or "", "image_url": row["image_url"] or "",
+                "quantity": quantity, "current_stock": stock, "stock_after": stock_after,
+                "status": status, "reason": reason, "sales": sales,
+                "sale_ids": [sale["id"] for sale in sales],
+                "sale_numbers": [sale["number"] for sale in sales],
+                "sale_dates": [sale["date"] for sale in sales],
+            })
+        return {
+            "receipt_id": receipt_id, "number": receipt["number"] or receipt_id,
+            "name": str(receipt_metadata.get("title") or receipt_metadata.get("name") or ""),
+            "comment": receipt["comment"] or "",
+            "receipt_status": receipt["status"], "posted_at": posted_at, "items": items,
+            "decreased_positions": sum(i["status"] == "WILL_DECREASE" for i in items),
+            "decreased_quantity": sum(i["quantity"] for i in items if i["status"] == "WILL_DECREASE"),
+            "skipped_positions": sum(i["status"] == "SKIPPED_DUE_TO_LATER_SALE" for i in items),
+            "has_conflicts": any(i["status"] == "CONFLICT_NEGATIVE_STOCK" for i in items),
+        }
 
     @staticmethod
     def _receipt_payload(connection, receipt_id):

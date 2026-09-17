@@ -28,6 +28,12 @@ CATALOG_BATCH_ID = "bitrix-catalog-products"
 CATALOG_BATCH_SHA256 = hashlib.sha256(CATALOG_BATCH_ID.encode("utf-8")).hexdigest()
 
 
+def single_import_quantity(value, action):
+    if action == "create" and not isinstance(value, bool) and value in (0, "0"):
+        return 0
+    return positive_integer(value, "Количество")
+
+
 def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -231,7 +237,7 @@ class BitrixERPProductSync:
         if action not in {"create", "update", "resolve"}:
             raise ValueError("Неподдерживаемое действие импорта.")
         if action != "resolve":
-            quantity = positive_integer(quantity, "Количество")
+            quantity = single_import_quantity(quantity, action)
         if self._validate(product):
             raise ValueError("Товар Bitrix не содержит ID или названия.")
         actor = actor or {}
@@ -292,6 +298,13 @@ class BitrixERPProductSync:
                     "status": "created" if existing is None else "duplicate",
                     "match_method": match["method"], "erp_product_id": product_id,
                     "changes": {},
+                }
+
+            if quantity == 0:
+                return {
+                    "status": "created" if existing is None else "duplicate",
+                    "match_method": match["method"], "erp_product_id": product_id,
+                    "changes": {}, "receipt_id": None,
                 }
 
             # Use the same receipt document/ledger primitives as supplies. Both

@@ -14,6 +14,7 @@
         })[c],
     );
   const number = (n) => (n == null ? "—" : Number(n).toLocaleString("ru-RU"));
+  const isAdmin = document.body.dataset.isAdmin === "1";
   const image = (url) =>
     /^https?:\/\//.test(url || "") || (url || "").startsWith("/")
       ? `<img src="${esc(url)}" alt="" loading="lazy">`
@@ -40,11 +41,91 @@
   const hidden = new Set();
   let sortDirection = "desc";
   const storageKey = () => "erp-supply-columns-" + tab;
+  const movementColumns = [
+    { key: "date", label: "Дата" },
+    { key: "comment", label: "Комментарий" },
+    { key: "author", label: "Автор" },
+    { key: "time", label: "Время" },
+    { key: "type", label: "Тип прихода" },
+    { key: "document", label: "Документ" },
+    { key: "brand", label: "Бренд" },
+    { key: "category", label: "Категория" },
+    { key: "photo", label: "Фото" },
+    { key: "product", label: "Товар" },
+    { key: "article", label: "Артикул" },
+    { key: "before", label: "Было", numeric: true },
+    { key: "change", label: "Изменение", numeric: true },
+    { key: "after", label: "Стало", numeric: true },
+    { key: "source", label: "Источник" },
+  ];
+  const supplyColumns = [
+    { key: "date", label: "Дата" },
+    { key: "comment", label: "Комментарий" },
+    { key: "author", label: "Автор" },
+    { key: "number", label: "Номер" },
+    { key: "title", label: "Название" },
+    { key: "positions", label: "Позиций", numeric: true },
+    { key: "quantity", label: "Единиц", numeric: true },
+    { key: "status", label: "Статус" },
+    { key: "actions", label: "Действия" },
+  ];
+  const legacyColumnKeys = {
+    all: [
+      "date",
+      "time",
+      "type",
+      "document",
+      "comment",
+      "brand",
+      "category",
+      "photo",
+      "product",
+      "article",
+      "before",
+      "change",
+      "after",
+      "author",
+      "source",
+    ],
+    cancellations: [
+      "date",
+      "time",
+      "type",
+      "document",
+      "comment",
+      "brand",
+      "category",
+      "photo",
+      "product",
+      "article",
+      "before",
+      "change",
+      "after",
+      "author",
+      "source",
+    ],
+    supplies: [
+      "date",
+      "number",
+      "title",
+      "comment",
+      "positions",
+      "quantity",
+      "status",
+      "author",
+      "actions",
+    ],
+  };
   function restoreColumns() {
     hidden.clear();
     try {
-      for (const n of JSON.parse(localStorage.getItem(storageKey()) || "[]"))
-        hidden.add(n);
+      for (const value of JSON.parse(
+        localStorage.getItem(storageKey()) || "[]",
+      )) {
+        const key =
+          typeof value === "number" ? legacyColumnKeys[tab]?.[value] : value;
+        if (key) hidden.add(key);
+      }
     } catch {
       /* Fresh defaults when browser storage is unavailable. */
     }
@@ -70,6 +151,7 @@
     if (!response.ok || data.ok === false) {
       const error = new Error(data.message || "Операция отклонена сервером.");
       error.status = response.status;
+      error.data = data.data;
       throw error;
     }
     return data.data;
@@ -208,54 +290,39 @@
         0,
       ),
     );
-    const columns = supplies
-      ? [
-          "Дата",
-          "Номер",
-          "Название поставки",
-          "Комментарий",
-          "Позиций",
-          "Единиц",
-          "Статус",
-          "Автор",
-          "Действия",
-        ]
-      : [
-          "Дата",
-          "Время",
-          "Тип прихода",
-          "Документ",
-          "Комментарий",
-          "Бренд",
-          "Категория",
-          "Фото",
-          "Товар",
-          "Артикул",
-          "Было",
-          "Изменение",
-          "Стало",
-          "Автор",
-          "Источник",
-        ];
+    const columns = supplies ? supplyColumns : movementColumns;
+    $("records").dataset.layout = supplies ? "supplies" : "movements";
     $("columns").innerHTML = columns
       .map(
-        (c, i) =>
-          `<label><input type="checkbox" data-col="${i}" ${hidden.has(i) ? "" : "checked"}>${c}</label>`,
+        (column) =>
+          `<label><input type="checkbox" data-col="${column.key}" ${hidden.has(column.key) ? "" : "checked"}>${column.label}</label>`,
       )
       .join("");
-    const cell = (v, i, tag = "td") =>
-      `<${tag}${tag === "th" ? ' scope="col"' + (i === 0 ? ' aria-sort="' + (sortDirection === "desc" ? "descending" : "ascending") + '"' : "") : ""}${hidden.has(i) ? " hidden" : ""}>${v}</${tag}>`;
+    $("records").querySelector("colgroup").innerHTML = columns
+      .map(
+        (column) =>
+          `<col data-column="${column.key}"${hidden.has(column.key) ? " hidden" : ""}>`,
+      )
+      .join("");
+    const cell = (value, column, tag = "td") => {
+      const numeric = column.numeric ? " is-numeric" : "";
+      const content =
+        tag === "td" && !["photo", "actions", "source"].includes(column.key)
+          ? `<div class="record-cell-content">${value}</div>`
+          : value;
+      return `<${tag} data-column="${column.key}" class="record-column-${column.key}${numeric}"${tag === "th" ? ' scope="col"' + (column.key === "date" ? ' aria-sort="' + (sortDirection === "desc" ? "descending" : "ascending") + '"' : "") : ""}${hidden.has(column.key) ? " hidden" : ""}>${content}</${tag}>`;
+    };
     $("records").querySelector("thead").innerHTML =
       "<tr>" +
       columns
-        .map((v, i) =>
+        .map((column) =>
           cell(
-            i === 0
+            column.key === "date"
               ? '<button class="button" data-sort-date>Дата ' +
                   (sortDirection === "desc" ? "↓" : "↑") +
                   "</button>"
-              : v,
-            i,
+              : column.label,
+            column,
             "th",
           ),
         )
@@ -275,38 +342,42 @@
             : esc(r.created_at || "—");
           const button = `<button class="button" data-open="${esc(r.id)}">Открыть</button>`;
           const values = supplies
-            ? [
-                dateText,
-                esc(r.number),
-                esc(r.title),
-                esc(r.comment),
-                number(r.position_count),
-                number(r.total_quantity),
-                labels[r.status],
-                esc(r.created_by),
-                button,
-              ]
-            : [
-                dateText,
-                valid ? date.toLocaleTimeString("ru-RU") : "—",
-                labels[r.source_type] || "Архивная запись",
-                esc(r.title),
-                esc(r.comment),
-                esc(r.brand),
-                esc(r.category),
-                image(r.image_url),
-                `<div class="name">${esc(r.name)}</div>`,
-                esc(r.article),
-                number(r.stock_before),
-                `<span class="positive">+${number(r.quantity)}</span>`,
-                number(r.stock_after),
-                esc(r.user_name),
-                button,
-              ];
-          return "<tr>" + values.map((v, i) => cell(v, i)).join("") + "</tr>";
+            ? {
+                date: dateText,
+                comment: esc(r.comment || "—"),
+                author: esc(r.created_by || "—"),
+                number: esc(r.number || "—"),
+                title: esc(r.title || "—"),
+                positions: number(r.position_count),
+                quantity: number(r.total_quantity),
+                status: labels[r.status] || esc(r.status || "—"),
+                actions: button,
+              }
+            : {
+                date: dateText,
+                comment: esc(r.comment || "—"),
+                author: esc(r.user_name || "—"),
+                time: valid ? date.toLocaleTimeString("ru-RU") : "—",
+                type: labels[r.source_type] || "Архивная запись",
+                document: esc(r.title || "—"),
+                brand: esc(r.brand || "—"),
+                category: esc(r.category || "—"),
+                photo: image(r.image_url),
+                product: `<div class="name">${esc(r.name || "—")}</div>`,
+                article: esc(r.article || "—"),
+                before: number(r.stock_before),
+                change: `<span class="positive">+${number(r.quantity)}</span>`,
+                after: number(r.stock_after),
+                source: button,
+              };
+          return (
+            "<tr>" +
+            columns.map((column) => cell(values[column.key], column)).join("") +
+            "</tr>"
+          );
         })
         .join("") ||
-      `<tr><td colspan="${columns.length}">Записей пока нет</td></tr>`;
+      `<tr><td class="records-empty" colspan="${columns.length}">Записей пока нет</td></tr>`;
     $("page-info").textContent =
       `Страница ${page} из ${pages} · ${filtered.length} записей`;
     $("previous").disabled = page <= 1;
@@ -332,12 +403,16 @@
     const posted = current?.status === "posted";
     $("add-item").hidden =
       current && !["draft", "posted"].includes(current.status);
-    $("title").disabled = posted;
-    $("comment").disabled = posted;
+    $("title").disabled = posted && !isAdmin;
+    $("comment").disabled = posted && !isAdmin;
     $("draft-actions").hidden = posted;
     $("save-first-hint").hidden = Boolean(current);
-    for (const id of ["save-supply", "post-supply", "delete-supply"])
-      $(id).hidden = posted || (id === "delete-supply" && !current);
+    $("save-supply").hidden = posted && !isAdmin;
+    $("save-supply").textContent = posted
+      ? "Сохранить реквизиты"
+      : "Сохранить черновик";
+    $("post-supply").hidden = posted;
+    $("delete-supply").hidden = !current || !isAdmin;
     $("items").querySelector("tbody").innerHTML = items
       .map(
         (i, index) =>
@@ -395,8 +470,8 @@
     }, 0);
   $("columns").onchange = (e) => {
     if (e.target.dataset.col !== undefined) {
-      const n = Number(e.target.dataset.col);
-      e.target.checked ? hidden.delete(n) : hidden.add(n);
+      const key = e.target.dataset.col;
+      e.target.checked ? hidden.delete(key) : hidden.add(key);
       try {
         localStorage.setItem(storageKey(), JSON.stringify([...hidden]));
       } catch {
@@ -765,10 +840,29 @@
   };
   $("save-supply").onclick = () =>
     action(async () => {
-      await save();
+      if (current?.status === "posted") {
+        current = await api(
+          "supplies/" + encodeURIComponent(current.id) + "/details",
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              title: $("title").value,
+              comment: $("comment").value,
+            }),
+          },
+        );
+        items = current.items.map((item) => ({ ...item }));
+      } else {
+        await save();
+      }
       await load();
       await openSupply(current.id);
-      message("Черновик сохранён. Остаток не изменён.", true);
+      message(
+        current.status === "posted"
+          ? "Название и комментарий сохранены. Остаток не изменён."
+          : "Черновик сохранён. Остаток не изменён.",
+        true,
+      );
     }, true);
   $("post-supply").onclick = () =>
     action(async () => {
@@ -781,15 +875,115 @@
       await openSupply(id);
       message("Поставка проведена. Остатки обновлены.", true);
     }, true);
-  $("delete-supply").onclick = () =>
-    action(async () => {
+  const deleteLabels = {
+    DRAFT_DELETE: "Черновик будет удалён",
+    WILL_DECREASE: "Остаток будет уменьшен",
+    SKIPPED_DUE_TO_LATER_SALE: "Была продажа",
+    CONFLICT_NEGATIVE_STOCK: "Удаление заблокировано",
+  };
+  function renderDeletePreview(preview) {
+    $("delete-preview-warning").hidden = !preview.skipped_positions;
+    $("delete-preview-warning").textContent = preview.skipped_positions
+      ? "После проведения этой поставки часть товаров участвовала в продаже. Остаток этих позиций изменён не будет. Продажи останутся без изменений."
+      : "";
+    $("delete-preview-items").innerHTML = preview.items
+      .map((item) => {
+        const sales = (item.sales || [])
+          .map(
+            (sale) =>
+              `<a href="/sales?source=all&q=${encodeURIComponent(sale.number)}">Продажа ${esc(sale.number)}${sale.date ? " от " + esc(sale.date) : ""}</a>`,
+          )
+          .join(", ");
+        const kind =
+          item.status === "SKIPPED_DUE_TO_LATER_SALE"
+            ? "skipped"
+            : item.status === "CONFLICT_NEGATIVE_STOCK"
+              ? "conflict"
+              : "";
+        const product = `<div class="delete-product">${image(item.image_url)}<div><strong>${esc(item.product_name)}</strong><small>Артикул: ${esc(item.article || "—")}</small></div></div>`;
+        const row = `<tr><td>${product}</td><td>${number(item.quantity)} шт.</td><td>${number(item.current_stock)} шт.</td><td>${number(item.stock_after)} шт.${item.status === "WILL_DECREASE" ? `<small class="delete-sales">↓ −${number(item.quantity)}</small>` : ""}</td><td><span class="delete-status ${kind}">${esc(deleteLabels[item.status] || item.status)}</span>${sales ? `<span class="delete-sales">${sales}</span>` : ""}</td></tr>`;
+        const warning =
+          item.status === "SKIPPED_DUE_TO_LATER_SALE"
+            ? '<tr class="delete-row-warning"><td colspan="5">После проведения этой поставки товар участвовал в продаже. Остаток позиции изменён не будет. Продажа останется без изменений.</td></tr>'
+            : "";
+        return row + warning;
+      })
+      .join("");
+    $("delete-total-positions").textContent = number(
+      preview.decreased_positions,
+    );
+    $("delete-total-quantity").textContent =
+      "−" + number(preview.decreased_quantity);
+    $("delete-total-skipped").textContent = number(preview.skipped_positions);
+    $("confirm-delete").disabled = Boolean(preview.has_conflicts);
+    $("delete-preview-message").hidden = !preview.has_conflicts;
+    $("delete-preview-message").textContent = preview.has_conflicts
+      ? "Удаление невозможно: по одной или нескольким позициям остаток станет отрицательным."
+      : "";
+  }
+  $("delete-supply").onclick = () => {
+    $("delete-confirm-heading").textContent =
+      `Удалить поставку ${current.number}?`;
+    $("delete-confirm-text").textContent =
+      current.status === "draft"
+        ? "Вы собираетесь удалить черновик поставки. ERP проверит позиции и подтвердит, что складские остатки не изменятся."
+        : "Вы собираетесь удалить проведённую поставку. ERP проверит все позиции и покажет, как удаление повлияет на товары и продажи.";
+    $("delete-confirm-message").hidden = true;
+    $("delete-confirm-dialog").showModal();
+  };
+  document.querySelectorAll("[data-close-delete]").forEach((button) => {
+    button.onclick = () => $("delete-confirm-dialog").close();
+  });
+  document.querySelectorAll("[data-close-preview]").forEach((button) => {
+    button.onclick = () => $("delete-preview-dialog").close();
+  });
+  for (const id of ["delete-confirm-dialog", "delete-preview-dialog"]) {
+    $(id).addEventListener("click", (event) => {
+      if (event.target === $(id)) $(id).close();
+    });
+  }
+  $("continue-delete").onclick = async () => {
+    if (busy || !current) return;
+    busy = true;
+    $("continue-delete").disabled = true;
+    $("delete-confirm-message").hidden = true;
+    try {
+      const preview = await api(
+        "supplies/" + encodeURIComponent(current.id) + "/delete-preview",
+      );
+      renderDeletePreview(preview);
+      $("delete-confirm-dialog").close();
+      $("delete-preview-dialog").showModal();
+    } catch (error) {
+      $("delete-confirm-message").textContent = error.message;
+      $("delete-confirm-message").hidden = false;
+    } finally {
+      busy = false;
+      $("continue-delete").disabled = false;
+    }
+  };
+  $("confirm-delete").onclick = async () => {
+    if (busy || !current) return;
+    busy = true;
+    $("confirm-delete").disabled = true;
+    $("delete-preview-message").hidden = true;
+    try {
       await api("supplies/" + encodeURIComponent(current.id), {
         method: "DELETE",
       });
+      $("delete-preview-dialog").close();
       $("supply-dialog").close();
       await load();
-      message("Черновик удалён. Остаток не изменён.");
-    }, true);
+      message("Поставка удалена. Остатки пересчитаны по результатам проверки.");
+    } catch (error) {
+      if (error.data) renderDeletePreview(error.data);
+      $("delete-preview-message").textContent = error.message;
+      $("delete-preview-message").hidden = false;
+      $("confirm-delete").disabled = Boolean(error.data?.has_conflicts);
+    } finally {
+      busy = false;
+    }
+  };
   $("excel").onchange = () =>
     action(async () => {
       const file = $("excel").files[0];

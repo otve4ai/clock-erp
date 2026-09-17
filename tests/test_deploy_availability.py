@@ -120,6 +120,14 @@ class DeployAvailabilityTest(unittest.TestCase):
             script,
         )
 
+    def test_recovery_runtime_keeps_system_tools_on_service_path(self):
+        dropin = (PROJECT_ROOT / "ops" / "clock-erp-recovery.conf").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("/opt/clock-erp/venv/bin", dropin)
+        self.assertIn("/usr/bin", dropin)
+        self.assertIn("/usr/sbin", dropin)
+
     def test_services_vault_preflight_is_fail_closed_before_code_update(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
         backup = script.index('create-temporary "pre-services-vault-')
@@ -170,6 +178,16 @@ class DeployAvailabilityTest(unittest.TestCase):
         self.assertIn('connection.execute("DELETE FROM services', smoke)
         self.assertIn("secrets.token_urlsafe", smoke)
         self.assertIn("app.config.update(TESTING=True, AUTH_TESTING=True)", smoke)
+
+    def test_release_replaces_tracked_instance_directory_with_runtime_link(self):
+        script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+        release = script.index('APPLICATION_RELEASE="$RELEASE_ROOT/$CURRENT_COMMIT"')
+        remove_instance = script.index('rm -rf -- "$release_pending/instance"', release)
+        link_instance = script.index(
+            'ln -s "$PROJECT_DIR/instance" "$release_pending/instance"', release
+        )
+        self.assertLess(remove_instance, link_instance)
+        self.assertIn("RELEASE_RUNTIME_QUARANTINED", script)
 
     def test_customer_backfill_does_not_expand_an_empty_array_on_bash_42(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")

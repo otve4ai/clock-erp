@@ -4094,6 +4094,7 @@
         .bitrix-result small,.bitrix-muted { color:#64748b; }
         .bitrix-preview { display:grid;grid-template-columns:96px 1fr;gap:16px;padding:14px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc; }
         .bitrix-preview-photo { width:96px;height:96px; }
+        #bitrixPreviewPhoto { background:#fff; }
         .bitrix-preview-fields { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px; }
         .bitrix-taxonomy { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
         .bitrix-taxonomy select, .bitrix-taxonomy input { width:100%;min-height:40px;border:1px solid #cbd5e1;border-radius:9px;background:#fff; }
@@ -4756,8 +4757,8 @@
                                         </div>
                                     </div>
                                 </section>
-                                <div class="bitrix-taxonomy picker-taxonomy">
-                                    <label>Количество к приходу в ERP<input id="bitrixImportQuantity" type="number" min="1" step="1" value="1" required></label>
+                                <div id="bitrixImportQuantityField" class="bitrix-taxonomy picker-taxonomy" hidden>
+                                    <label>Количество к приходу в ERP<input id="bitrixImportQuantity" type="number" min="0" step="1" value="0" required></label>
                                 </div>
                                 <div id="bitrixDuplicateNotice" hidden>
                                     <strong>Товар уже есть в ERP.</strong> <span id="bitrixDuplicateText"></span>
@@ -5540,7 +5541,6 @@
             <div class="product-detail-card">
                 <div class="product-detail-label">Остаток</div>
                 <div id="detailStock" class="product-detail-value">—</div>
-                <a id="bundleSettings" href="#">Настроить состав</a>
                 <div id="bundleAvailability" role="status"></div>
                 <input id="editStock" class="product-detail-input" type="number" min="0" step="1" name="stock" aria-label="Остаток товара" required>
             </div>
@@ -6430,7 +6430,6 @@
             const publicProductUrl = button.dataset.publicProductUrl || "";
             const thumbnailUrl = button.dataset.thumbnailUrl || "";
             const productId = button.dataset.id || button.dataset.productId || "";
-            document.getElementById("bundleSettings").href = "/app/products/" + encodeURIComponent(productId) + "/bundle";
             const bundleStatus = document.getElementById("bundleAvailability");
             bundleStatus.dataset.productId = productId;
             bundleStatus.textContent = "";
@@ -7683,7 +7682,8 @@
 
     function resetBitrixSelection() {
         bitrixSelectedProduct = null;
-        document.getElementById("bitrixImportQuantity").value = "1";
+        document.getElementById("bitrixImportQuantityField").hidden = true;
+        document.getElementById("bitrixImportQuantity").value = "0";
         document.getElementById("bitrixSelectionEmpty").hidden = false;
         window.ERPProductPicker.highlight(document.getElementById("bitrixProductResults"), "");
         document.getElementById("bitrixProductPreview").hidden = true;
@@ -7742,6 +7742,7 @@
 
     function showBitrixPreview(product) {
         bitrixSelectedProduct = product;
+        document.getElementById("bitrixImportQuantityField").hidden = false;
         document.getElementById("bitrixSelectionEmpty").hidden = true;
         window.ERPProductPicker.highlight(document.getElementById("bitrixProductResults"), product.bitrix_id);
         document.getElementById("bitrixProductPreview").hidden = false;
@@ -7766,6 +7767,8 @@
         category.value = product.category_id || "";
         document.getElementById("bitrixTaxonomy").hidden = Boolean(product.duplicate) || (product.brand_recognized && product.category_recognized);
         const duplicate = Boolean(product.duplicate);
+        document.getElementById("bitrixImportQuantity").min = duplicate ? "1" : "0";
+        document.getElementById("bitrixImportQuantity").value = duplicate ? "1" : "0";
         document.getElementById("bitrixDuplicateNotice").hidden = !duplicate;
         document.getElementById("bitrixImportProduct").hidden = duplicate;
         document.getElementById("bitrixUpdateProduct").hidden = !duplicate || !product.existing || product.ambiguous;
@@ -7802,9 +7805,10 @@
     let bitrixSubmitting = false;
     async function submitBitrixImport(action) {
         if (!bitrixSelectedProduct || bitrixSubmitting) return;
-        const quantity = Number(document.getElementById("bitrixImportQuantity").value);
-        if (!Number.isSafeInteger(quantity) || quantity <= 0) {
-            bitrixImportMessage("Введите целое положительное количество.");
+        const quantityInput = document.getElementById("bitrixImportQuantity").value.trim();
+        const quantity = Number(quantityInput);
+        if (!quantityInput || !Number.isSafeInteger(quantity) || quantity < (action === "create" ? 0 : 1)) {
+            bitrixImportMessage(action === "create" ? "Введите целое количество от 0." : "Введите целое положительное количество.");
             return;
         }
         bitrixSubmitting = true;
@@ -7830,7 +7834,7 @@
             const query = new URLSearchParams({
                 q: saved.article || saved.name,
                 notice: "success",
-                message: "Количество добавлено к остатку ERP",
+                message: quantity === 0 ? "Товар сохранён без прихода" : "Количество добавлено к остатку ERP",
             });
             window.location.assign("/warehouse?" + query.toString());
         } catch (error) {
@@ -8029,7 +8033,6 @@
         }
 
         function applyWarehouseTableWidths(table, widths) {
-            let totalWidth = 0;
             const renderedWidths = {};
             warehouseTableDefaults.order.forEach(function(key) {
                 const width = Math.max(
@@ -8041,40 +8044,15 @@
                 );
                 widths[key] = width;
                 renderedWidths[key] = width;
-                const column = table.querySelector('col[data-column-key="' + key + '"]');
-                if (!column || !column.hidden) totalWidth += width;
             });
-            const scrollBody = document.getElementById("warehouseTableScrollBody");
-            let extra = Math.max(0, (scrollBody?.clientWidth || 0) - totalWidth);
-            const flexibleColumns = ["name", "category", "model"].filter(function(key) {
-                const column = table.querySelector('col[data-column-key="' + key + '"]');
-                return column && !column.hidden;
-            });
-            while (extra > 0.5 && flexibleColumns.length) {
-                const share = extra / flexibleColumns.length;
-                let applied = 0;
-                flexibleColumns.slice().forEach(function(key) {
-                    const capacity = warehouseTableMaximumWidths[key] - renderedWidths[key];
-                    const growth = Math.max(0, Math.min(share, capacity));
-                    renderedWidths[key] += growth;
-                    applied += growth;
-                    if (capacity <= share + 0.5) {
-                        flexibleColumns.splice(flexibleColumns.indexOf(key), 1);
-                    }
-                });
-                if (applied <= 0.5) break;
-                extra -= applied;
-            }
             let renderedTotal = 0;
             warehouseTableDefaults.order.forEach(function(key) {
                 const column = table.querySelector('col[data-column-key="' + key + '"]');
                 if (column) column.style.width = renderedWidths[key] + "px";
                 if (!column || !column.hidden) renderedTotal += renderedWidths[key];
             });
-            table.style.width = Math.max(
-                renderedTotal,
-                scrollBody?.clientWidth || 0
-            ) + "px";
+            table.style.width = renderedTotal + "px";
+            table.style.minWidth = renderedTotal + "px";
             syncWarehouseTableScrollbars(table);
         }
 
@@ -8300,14 +8278,23 @@
                 if (event.button !== 0 || event.target.closest("input, button, form, label, .warehouse-column-resize-handle")) return;
                 const header = event.target.closest("th[data-column-key]");
                 if (header) {
-                    dragState = { header: header, startX: event.clientX, dragging: false, target: null, after: false };
+                    dragState = { header: header, startX: event.clientX, dragging: false, target: null, after: false, preview: null };
                 }
             });
             window.addEventListener("pointermove", function(event) {
                 if (!dragState) return;
                 if (!dragState.dragging && Math.abs(event.clientX - dragState.startX) < 6) return;
-                dragState.dragging = true;
-                document.body.classList.add("warehouse-table-interacting");
+                if (!dragState.dragging) {
+                    dragState.dragging = true;
+                    document.body.classList.add("warehouse-table-interacting");
+                    dragState.header.classList.add("erp-column-dragging");
+                    dragState.preview = document.createElement("div");
+                    dragState.preview.className = "erp-column-drag-preview";
+                    dragState.preview.textContent = dragState.header.textContent.trim();
+                    document.body.appendChild(dragState.preview);
+                }
+                dragState.preview.style.left = event.clientX + 14 + "px";
+                dragState.preview.style.top = event.clientY + 14 + "px";
                 table.querySelectorAll(".warehouse-drop-before, .warehouse-drop-after").forEach(function(header) {
                     header.classList.remove("warehouse-drop-before", "warehouse-drop-after");
                 });
@@ -8340,6 +8327,8 @@
                         header.classList.remove("warehouse-drop-before", "warehouse-drop-after");
                     });
                     document.body.classList.remove("warehouse-table-interacting");
+                    dragState.header.classList.remove("erp-column-dragging");
+                    if (dragState.preview) dragState.preview.remove();
                 }
                 dragState = null;
             }, { signal: viewSignal });
