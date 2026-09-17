@@ -109,7 +109,11 @@ class SalesListDesignSystemContractTest(unittest.TestCase):
         self.assertIn("var(--erp-primary) 12%", template)
         self.assertIn("box-shadow: inset 3px 0", template)
         self.assertIn(
-            ".is-partially-returned) {\n            background: #eaf3ff;",
+            ".is-partially-returned) {\n            background: #eaf3ff !important;",
+            template,
+        )
+        self.assertIn(
+            "var(--erp-surface)\n            ) !important;",
             template,
         )
         for status_class in (
