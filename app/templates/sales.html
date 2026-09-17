@@ -1629,6 +1629,39 @@
         rel="stylesheet"
         href="{{ url_for('static', filename='css/erp-focus-mode.css') }}"
     >
+    <style>
+        .sales-list-page .sales-table.erp-data-table
+        .sale-row.is-shared-sale:not(.is-cancelled):not(.is-returned):not(.is-partially-returned) td {
+            background: #f5f9ff;
+            background: color-mix(
+                in srgb,
+                var(--erp-primary) 5%,
+                var(--erp-surface)
+            );
+        }
+
+        .sales-list-page .sales-table.erp-data-table
+        .sale-row.is-shared-sale:not(.is-cancelled):not(.is-returned):not(.is-partially-returned):hover td,
+        .sales-list-page .sales-table.erp-data-table
+        .sale-row.is-shared-sale:not(.is-cancelled):not(.is-returned):not(.is-partially-returned):focus-within td {
+            background: #eef5ff;
+            background: color-mix(
+                in srgb,
+                var(--erp-primary) 8%,
+                var(--erp-surface)
+            );
+        }
+
+        .sales-list-page .sales-table.erp-data-table
+        .sale-row.continues-shared-sale td {
+            border-bottom-color: #f0f4f8;
+            border-bottom-color: color-mix(
+                in srgb,
+                var(--erp-border) 45%,
+                var(--erp-surface)
+            );
+        }
+    </style>
     <script defer src="{{ url_for('static', filename='js/table-scroll-hint.js') }}"></script>
     <script defer src="{{ url_for('static', filename='js/erp-modal-shell.js') }}"></script>
     <script defer src="{{ url_for('static', filename='js/erp-focus-mode.js') }}"></script>
@@ -2418,8 +2451,10 @@
                         <tbody>
                             {% for sale in sales %}
                                 {%- set product_image_url = sales_product_images.get(sale.product_id|string, '') -%}
+                                {%- set shared_sale_count = sales | selectattr('inventory_managed', 'equalto', true) | selectattr('id', 'equalto', sale.id) | list | length if sale.id and sale.inventory_managed else 0 -%}
+                                {%- set continues_shared_sale = shared_sale_count > 1 and not loop.last and loop.nextitem.inventory_managed and loop.nextitem.id == sale.id -%}
                                 <tr
-                                    class="sale-row{% if sale.is_manual %} manual-row{% else %} automatic-row{% endif %}{% if sale.is_cancelled %} is-cancelled{% elif sale.return_status == 'returned' %} is-returned{% elif sale.return_status == 'partially_returned' %} is-partially-returned{% endif %}"
+                                    class="sale-row{% if sale.is_manual %} manual-row{% else %} automatic-row{% endif %}{% if shared_sale_count > 1 %} is-shared-sale{% endif %}{% if continues_shared_sale %} continues-shared-sale{% endif %}{% if sale.is_cancelled %} is-cancelled{% elif sale.return_status == 'returned' %} is-returned{% elif sale.return_status == 'partially_returned' %} is-partially-returned{% endif %}"
                                     data-sale-id="{{ sale.id }}"
                                     data-search="{{ sale.search_text }}"
                                     data-sort-date="{{ sale.created_at[:10] }}"

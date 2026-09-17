@@ -93,6 +93,25 @@ class SalesListDesignSystemContractTest(unittest.TestCase):
                 self.assertIn(endpoint, template)
         self.assertGreaterEqual(template.count('name="csrf_token"'), 6)
 
+    def test_repeated_sale_rows_require_managed_sales_with_the_same_id(self):
+        template = self.source("app/templates/sales.html")
+        self.assertIn(
+            "selectattr('inventory_managed', 'equalto', true)",
+            template,
+        )
+        self.assertIn("selectattr('id', 'equalto', sale.id)", template)
+        self.assertIn("sale.id and sale.inventory_managed", template)
+        self.assertIn("shared_sale_count > 1", template)
+        self.assertIn("loop.nextitem.inventory_managed", template)
+        self.assertIn("loop.nextitem.id == sale.id", template)
+        self.assertIn("is-shared-sale", template)
+        self.assertIn("continues-shared-sale", template)
+        for status_class in (
+            ".is-cancelled", ".is-returned", ".is-partially-returned",
+        ):
+            self.assertIn(":not({})".format(status_class), template)
+        self.assertNotIn("data-order-group", template)
+
     def test_edit_sale_action_is_compact_accessible_and_keeps_existing_flow(self):
         template = self.source("app/templates/sales.html")
         desktop_action = template.split(
