@@ -1632,11 +1632,21 @@
     <style>
         .sales-list-page .sales-table.erp-data-table
         .sale-row.is-shared-sale:not(.is-cancelled):not(.is-returned):not(.is-partially-returned) td {
-            background: #f5f9ff;
+            background: #eaf3ff;
             background: color-mix(
                 in srgb,
-                var(--erp-primary) 5%,
+                var(--erp-primary) 12%,
                 var(--erp-surface)
+            );
+        }
+
+        .sales-list-page .sales-table.erp-data-table
+        .sale-row.is-shared-sale:not(.is-cancelled):not(.is-returned):not(.is-partially-returned) td:first-child {
+            box-shadow: inset 3px 0 #60a5fa;
+            box-shadow: inset 3px 0 color-mix(
+                in srgb,
+                var(--erp-primary) 65%,
+                #ffffff
             );
         }
 
@@ -1644,10 +1654,10 @@
         .sale-row.is-shared-sale:not(.is-cancelled):not(.is-returned):not(.is-partially-returned):hover td,
         .sales-list-page .sales-table.erp-data-table
         .sale-row.is-shared-sale:not(.is-cancelled):not(.is-returned):not(.is-partially-returned):focus-within td {
-            background: #eef5ff;
+            background: #e1edff;
             background: color-mix(
                 in srgb,
-                var(--erp-primary) 8%,
+                var(--erp-primary) 17%,
                 var(--erp-surface)
             );
         }
