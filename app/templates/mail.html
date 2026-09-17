@@ -38,7 +38,7 @@
             {% if account and not account.enabled %}
             <p>Подключение остановлено. Письма, которые уже были загружены в ERP, сохранены.</p>
             {% else %}
-            <p>Получайте письма, отвечайте клиентам и связывайте переписку с заказами и задачами прямо в ERP</p>
+            <p>Получайте письма, отвечайте клиентам и связывайте переписку с объектами ERP</p>
             {% endif %}
             {% if can_manage %}
             <button class="mail-primary mail-connect-button" type="button" id="openConnectionWizard">{% if account %}Настроить почту{% else %}Подключить почту{% endif %}</button>
@@ -96,7 +96,7 @@
     <div class="thread-controls"><label>Ответственный<select id="threadAssignee"><option value="">Не назначен</option>{% for user in users %}<option value="{{ user.id }}">{{ (user.first_name ~ ' ' ~ user.last_name)|trim or user.email }}</option>{% endfor %}</select></label><label>Статус<select id="threadStatus"><option value="new">Новое</option><option value="in_progress">В работе</option><option value="waiting_customer">Ждём клиента</option><option value="answered">Отвечено</option><option value="closed">Закрыто</option></select></label><label>Срок ответа<input id="threadDue" type="datetime-local"></label></div>
     <div class="thread-links" id="threadLinks"></div><div class="thread-link-actions"><button type="button" class="mail-secondary" id="addThreadLink">+ Связать с ERP</button></div>
     <div class="thread-messages" id="threadMessages"></div>
-    <footer><button type="button" class="mail-secondary" id="threadTask">Создать задачу</button><button type="button" class="mail-secondary" id="threadArchive">В архив</button><span></span><button type="button" class="mail-secondary" id="forwardMail">Переслать</button><button type="button" class="mail-secondary" id="replyAll">Ответить всем</button><button type="button" class="mail-primary" id="replyMail">Ответить</button></footer>
+    <footer><button type="button" class="mail-secondary" id="threadArchive">В архив</button><span></span><button type="button" class="mail-secondary" id="forwardMail">Переслать</button><button type="button" class="mail-secondary" id="replyAll">Ответить всем</button><button type="button" class="mail-primary" id="replyMail">Ответить</button></footer>
 </aside>
 
 <aside class="mail-drawer compose" id="composeDrawer" role="dialog" aria-modal="true" aria-labelledby="composeTitle" hidden>

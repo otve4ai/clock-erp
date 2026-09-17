@@ -659,11 +659,9 @@ class TaskStore:
             "(erp_casefold(t.title) LIKE ? OR erp_casefold(t.description) LIKE ? OR "
             "erp_casefold(t.source_comment) LIKE ? OR erp_casefold(t.completion_result) LIKE ? OR "
             "erp_casefold(t.contact_name) LIKE ? OR erp_casefold(t.contact_phone) LIKE ? OR "
-            "erp_casefold(t.contact_email) LIKE ? OR erp_digits(t.contact_phone) LIKE ? OR EXISTS("
-            "SELECT 1 FROM task_links l WHERE l.task_id=t.id AND "
-            "(erp_casefold(l.entity_label) LIKE ? OR erp_casefold(l.entity_id) LIKE ?)))"
+            "erp_casefold(t.contact_email) LIKE ? OR erp_digits(t.contact_phone) LIKE ?)"
         )
-        return [clause], [folded] * 7 + [digits] + [folded] * 2
+        return [clause], [folded] * 7 + [digits]
 
     def counts(self, today=None, assignee_id=None, priority="", entity_type="", status="", due="",
                only_mine=None, scope="all", current_user_id=None, selected_view=None, query=""):
@@ -733,9 +731,8 @@ class TaskStore:
             clauses.append("(erp_casefold(t.title) LIKE ? OR erp_casefold(t.description) LIKE ? OR "
                            "erp_casefold(t.source_comment) LIKE ? OR erp_casefold(t.completion_result) LIKE ? OR "
                            "erp_casefold(t.contact_name) LIKE ? OR erp_casefold(t.contact_phone) LIKE ? OR "
-                           "erp_casefold(t.contact_email) LIKE ? OR erp_digits(t.contact_phone) LIKE ? OR EXISTS(SELECT 1 FROM task_links l WHERE l.task_id=t.id "
-                           "AND (erp_casefold(l.entity_label) LIKE ? OR erp_casefold(l.entity_id) LIKE ?)))")
-            parameters.extend([folded] * 7 + [digits] + [folded] * 2)
+                           "erp_casefold(t.contact_email) LIKE ? OR erp_digits(t.contact_phone) LIKE ?)")
+            parameters.extend([folded] * 7 + [digits])
         if assignee_id or only_mine:
             clauses.append("t.assignee_id=?")
             parameters.append(int(assignee_id or only_mine))
@@ -818,10 +815,8 @@ class TaskStore:
             clauses.append("(erp_casefold(t.title) LIKE ? OR erp_casefold(t.description) LIKE ? OR "
                            "erp_casefold(t.source_comment) LIKE ? OR erp_casefold(t.completion_result) LIKE ? OR "
                            "erp_casefold(t.contact_name) LIKE ? OR erp_casefold(t.contact_phone) LIKE ? OR "
-                           "erp_casefold(t.contact_email) LIKE ? OR erp_digits(t.contact_phone) LIKE ? OR EXISTS("
-                           "SELECT 1 FROM task_links l WHERE l.task_id=t.id AND "
-                           "(erp_casefold(l.entity_label) LIKE ? OR erp_casefold(l.entity_id) LIKE ?)))")
-            parameters.extend([folded] * 7 + [digits] + [folded] * 2)
+                           "erp_casefold(t.contact_email) LIKE ? OR erp_digits(t.contact_phone) LIKE ?)")
+            parameters.extend([folded] * 7 + [digits])
         if assignee_id or only_mine:
             clauses.append("t.assignee_id=?")
             parameters.append(int(assignee_id or only_mine))

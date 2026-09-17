@@ -197,7 +197,8 @@
     function renderThreadLinks() {
         const node = $("#threadLinks");
         if (!node || !current) return;
-        node.innerHTML = current.links.length ? "Связи: " + current.links.map((link) => `<span class="mail-status-chip">${escapeHtml(link.label || link.entity_type + " " + link.entity_id)} <button type="button" aria-label="Удалить связь" data-unlink-type="${escapeHtml(link.entity_type)}" data-unlink-id="${escapeHtml(link.entity_id)}">×</button></span>`).join(" ") : "Связи с клиентом, заказом, ремонтом, закупкой и задачей пока не добавлены.";
+        const visibleLinks = current.links.filter((link) => link.entity_type !== "task");
+        node.innerHTML = visibleLinks.length ? "Связи: " + visibleLinks.map((link) => `<span class="mail-status-chip">${escapeHtml(link.label || link.entity_type + " " + link.entity_id)} <button type="button" aria-label="Удалить связь" data-unlink-type="${escapeHtml(link.entity_type)}" data-unlink-id="${escapeHtml(link.entity_id)}">×</button></span>`).join(" ") : "Связи с клиентом, заказом, ремонтом или закупкой пока не добавлены.";
     }
 
     async function updateThread(patch) {
@@ -322,15 +323,6 @@
     $("#threadStatus")?.addEventListener("change", (event) => updateThread({status: event.target.value}));
     $("#threadDue")?.addEventListener("change", (event) => updateThread({due_at: event.target.value || null}));
     $("#threadArchive")?.addEventListener("click", () => updateThread({archived: !current.archived}));
-    $("#threadTask")?.addEventListener("click", async () => {
-        try {
-            await api(`/api/v1/mail/threads/${current.id}/tasks`, {method: "POST", headers: {"Idempotency-Key": `mail-task-${current.id}-${Date.now()}`}, body: "{}"});
-            notify("Задача создана");
-            openThread(current.id);
-        } catch (error) {
-            notify(error.message, "error");
-        }
-    });
     $("#composeForm")?.addEventListener("submit", (event) => { event.preventDefault(); submitCompose(false); });
     $("#saveDraft")?.addEventListener("click", () => submitCompose(true));
     document.querySelectorAll("[data-close]").forEach((button) => button.addEventListener("click", () => closeDrawer(button.closest(".mail-drawer"))));
@@ -392,7 +384,7 @@
         }
     });
     $("#addThreadLink")?.addEventListener("click", async () => {
-        const type = window.prompt("Тип связи: customer, order, repair, purchase или task", "customer");
+        const type = window.prompt("Тип связи: customer, order, repair или purchase", "customer");
         if (!type) return;
         const id = window.prompt("ID или номер объекта ERP");
         if (!id) return;
