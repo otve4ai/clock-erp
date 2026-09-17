@@ -111,6 +111,7 @@ class SalesListDesignSystemContractTest(unittest.TestCase):
             ".sale-row.is-shared-sale {\n            background: #eef3ff !important;",
             template,
         )
+        self.assertIn("var(--erp-primary) 8%", template)
         self.assertIn(
             "var(--erp-surface)\n            ) !important;",
             template,
