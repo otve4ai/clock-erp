@@ -26,6 +26,7 @@ class FakeWB:
         self.statuses = {'101':dict(id=101, supplierStatus='complete', wbStatus='waiting')}
         self.request_audit = []
         self.polled = []
+        self.order_windows = []
 
     def get_new_orders(self):
         self.request_audit.append('new')
@@ -38,6 +39,7 @@ class FakeWB:
 
     def get_orders(self, *args):
         self.request_audit.append('orders')
+        self.order_windows.append(args)
         return copy.deepcopy(self.rows)
 
     def get_supplies(self, **kwargs):
@@ -107,6 +109,11 @@ class WildberriesSyncTest(unittest.TestCase):
         self.assertEqual(self.store.get('wb:101')['wb_status'], 'canceled_by_client')
         self.assertEqual(self.effects()[0], 0)
 
+    def test_full_recovery_uses_maximum_supported_30_day_history(self):
+        self.sync('full')
+        date_from, date_to = self.client.order_windows[-1]
+        self.assertEqual(date_to - date_from, 30 * 86400)
+
     def test_full_rotation_not_limited_to_recent_creation(self):
         rows = []
         for i in range(1000, 1205):
@@ -131,6 +138,19 @@ class WildberriesSyncTest(unittest.TestCase):
         self.assertEqual(self.store.get('wb:101'),before)
         self.assertEqual(result['recovery']['last_success_at'],previous['last_success_at'])
 
+    def test_401_is_critical_even_if_another_stage_completed(self):
+        failure = WildberriesReadOnlyError(
+            'Wildberries отклонил токен: marketplace /api/v3/orders/new',
+            'WB_UNAUTHORIZED', 401, method='GET', service='marketplace',
+            path='/api/v3/orders/new', request_id='req-auth',
+        )
+        with mock.patch.object(self.client, 'get_new_orders', side_effect=failure):
+            result = self.sync()
+        self.assertEqual(result['outcome'], 'error')
+        self.assertEqual(result['error']['stage'], 'new_orders')
+        self.assertEqual(result['error']['status_code'], 401)
+        self.assertEqual(result['error']['request_id'], 'req-auth')
+
     def test_partial_missing_status_is_not_success(self):
         self.client.statuses = {}
         result = self.sync()
@@ -138,7 +158,7 @@ class WildberriesSyncTest(unittest.TestCase):
         self.assertGreater(result['errors'],0)
         self.assertFalse(result['recovery'].get('last_success_at'))
 
-    def test_lock_blocks_process_and_second_sync_without_api_calls(self):
+    def test_lock_blocks_concurrent_fast_while_full_owns_shared_resource(self):
         lock = SyncLock()
         self.assertTrue(lock.acquire())
         try:
@@ -151,6 +171,32 @@ class WildberriesSyncTest(unittest.TestCase):
         finally:
             lock.release()
         self.assertEqual(self.sync()['outcome'],'success')
+
+    def test_concurrent_full_and_fast_issue_only_full_requests(self):
+        entered = threading.Event()
+        release = threading.Event()
+        full_client = FakeWB()
+        original = full_client.get_new_orders
+
+        def blocked_new_orders():
+            entered.set()
+            release.wait(2)
+            return original()
+
+        full_client.get_new_orders = blocked_new_orders
+        result = {}
+        thread = threading.Thread(target=lambda: result.update(
+            full=run_sync(full_client, self.store, self.catalog, 'full')
+        ))
+        thread.start()
+        self.assertTrue(entered.wait(2))
+        fast_client = FakeWB()
+        skipped = run_sync(fast_client, self.store, self.catalog, 'fast')
+        release.set()
+        thread.join(5)
+        self.assertEqual(skipped['outcome'], 'skipped')
+        self.assertEqual(fast_client.request_audit, [])
+        self.assertEqual(result['full']['outcome'], 'success')
 
     def test_sqlite_short_writer_and_readers_do_not_fail_or_lose_local_data(self):
         self.sync()

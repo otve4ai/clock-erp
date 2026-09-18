@@ -110,7 +110,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature
 from app.services.wildberries_matching import order_product_candidates
 from app.services.wildberries_sales import WildberriesSales
 from app.services.wildberries_orders import synchronize_wildberries_orders
-from app.services.wildberries_sync import SyncLock, run_sync
+from app.services.wildberries_sync import SyncLock, recent_result, run_sync
 from app.services.user_notifications import UserNotificationStore
 from app.services.brand_values import normalize_brand
 from app.services.catalog_reader import CatalogReader
@@ -1911,9 +1911,84 @@ def wildberries_recovery_import():
         WB_SYNC_LOCK.release()
 
 
+WB_SYNC_STAGE_NAMES = {
+    "new_orders": "новые заказы",
+    "order_statuses": "статусы заказов",
+    "orders_history": "история заказов за 30 дней",
+    "full_recovery": "глубокая сверка",
+    "supply_order_ids": "состав поставок",
+    "recovery_order_statuses": "статусы глубокой сверки",
+    "recovery_import": "восстановление заказов",
+    "orchestrator": "оркестратор синхронизации",
+}
+
+
+def _wb_sync_failures(result):
+    recovery = result.get("recovery") or {}
+    return [item for item in (recovery.get("errors") or []) if isinstance(item, dict)]
+
+
+def _wb_sync_message(result):
+    if result.get("outcome") == "success":
+        return "Все этапы Wildberries успешно завершены."
+    failures = _wb_sync_failures(result)
+    stages = []
+    for item in failures:
+        name = WB_SYNC_STAGE_NAMES.get(item.get("stage"), item.get("stage") or "неизвестный этап")
+        if name not in stages:
+            stages.append(name)
+    detail = (failures[0].get("error") if failures else
+              (result.get("error") or {}).get("error") or "неизвестная ошибка")
+    prefix = "Проблемный этап" if len(stages) == 1 else "Проблемные этапы"
+    return "{}: {}. {}".format(prefix, ", ".join(stages) or "не определён", detail)
+
+
+def _publish_wb_sync_result(result):
+    outcome = result.get("outcome")
+    severity = "success" if outcome == "success" else "warning" if outcome == "partial" else "error"
+    title = ("Синхронизация Wildberries завершена" if outcome != "error"
+             else "Ошибка синхронизации Wildberries")
+    message = _wb_sync_message(result)
+    result["notification"] = {"title": title, "message": message,
+                              "severity": severity}
+    return _publish_system_event(
+        "wb_sync:{}".format(result.get("run_id") or getattr(g, "operation_id", "") or uuid.uuid4().hex),
+        title, message, severity=severity,
+        target_url="/orders?source=wildberries", entity_type="integration",
+        entity_id="wildberries", metadata={
+            "operation": "wb_orders_sync", "outcome": outcome,
+            "stages": [item.get("stage") for item in _wb_sync_failures(result) if item.get("stage")],
+        },
+    )
+
+
+def _wb_sync_api_error(result):
+    error = result.get("error") or (_wb_sync_failures(result) or [{}])[0]
+    return {"code": error.get("code", "WB_SYNC_FAILED"),
+            "message": _wb_sync_message(result), "diagnostic": error}
+
+
+def _wb_sync_http_status(result):
+    code = _wb_sync_api_error(result)["code"]
+    if code == "WB_NOT_CONFIGURED":
+        return 400
+    if code == "WB_RATE_LIMITED":
+        return 429
+    return 503
+
+
 @app.post("/api/orders/wildberries/sync")
 def wildberries_orders_sync_api():
     require_csrf_when_authenticated()
+    store = OrdersSnapshotStore()
+    store.initialize()
+    cached = recent_result(store, 'full')
+    if cached:
+        _publish_wb_sync_result(cached)
+        return jsonify({"ok": cached['outcome'] != 'error', "result": cached,
+                        **({"error": _wb_sync_api_error(cached)}
+                           if cached['outcome'] == 'error' else {})}), (
+            _wb_sync_http_status(cached) if cached['outcome'] == 'error' else 200)
     if not WB_SYNC_LOCK.acquire(blocking=False):
         return jsonify({
             "ok": False,
@@ -1924,14 +1999,12 @@ def wildberries_orders_sync_api():
             token=os.getenv("WB_API_TOKEN"),
             base_url=os.getenv("WB_API_BASE_URL", WB_DEFAULT_BASE_URL),
         )
-        store = OrdersSnapshotStore()
         previous_ids = store.source_ids("wildberries")
         result = run_sync(client, store, CatalogDatabase().path, mode='full', locked=True)
         if result['outcome'] == 'error':
-            error = result.get('error') or {}
-            code = error.get('code', 'WB_SYNC_FAILED')
-            return jsonify(ok=False, result=result, error=dict(code=code,
-                message=error.get('error', 'Ошибка синхронизации WB'))), (400 if code == 'WB_NOT_CONFIGURED' else 429 if code == 'WB_RATE_LIMITED' else 503)
+            _publish_wb_sync_result(result)
+            return jsonify(ok=False, result=result,
+                           error=_wb_sync_api_error(result)), _wb_sync_http_status(result)
         current_ids = store.source_ids("wildberries")
         saved_orders = [
             store.get(order_id)
@@ -1947,15 +2020,7 @@ def wildberries_orders_sync_api():
         result["unmatched"] = sum(
             1 for row in assembly_rows if row["matching_status"] != "matched"
         )
-        operation_id = getattr(g, "operation_id", "") or uuid.uuid4().hex
-        _publish_system_event(
-            "wb_sync:success:{}".format(operation_id),
-            "Синхронизация Wildberries завершена",
-            "Заказы Wildberries обновлены." if result['outcome'] == 'success' else "WB обновлён частично: проверьте диагностику.",
-            severity="success" if result['outcome'] == 'success' else "warning",
-            target_url="/orders?source=wildberries", entity_type="integration",
-            entity_id="wildberries", metadata={"operation": "wb_orders_sync"},
-        )
+        _publish_wb_sync_result(result)
         return jsonify({"ok": True, "result": result})
     except WildberriesReadOnlyError as error:
         app.logger.warning("Wildberries order sync unavailable code=%s", error.code)

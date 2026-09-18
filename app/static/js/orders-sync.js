@@ -49,7 +49,7 @@
         let result;
         try {
             result = await request(source, 'POST');
-            if (result.outcome === 'partial') window.VechasuNotify?.warning('Wildberries обновлён частично: проверьте диагностику.');
+            if (result.outcome === 'partial') window.VechasuNotify?.warning(result.notification?.message || 'Wildberries обновлён частично: проверьте диагностику.');
             else window.VechasuNotify?.success(`${source === 'tictactoy' ? 'TicTacToy' : 'Wildberries'}: заказы обновлены`);
         } catch (error) {
             failures.set(source, error.message);

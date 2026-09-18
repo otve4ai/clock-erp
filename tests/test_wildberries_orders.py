@@ -105,6 +105,50 @@ class WildberriesClientTest(unittest.TestCase):
                 WildberriesOrdersReadOnlyClient("secret", session=session).get_new_orders()
             self.assertEqual(raised.exception.code, "WB_INVALID_RESPONSE")
 
+    def test_429_retries_with_retry_after_then_succeeds(self):
+        session = mock.Mock()
+        session.get.side_effect = [
+            FakeResponse(429, {"message": "slow down"}, {"Retry-After": "2", "X-Request-Id": "req-429"}),
+            FakeResponse(200, {"orders": [raw_order(10)]}),
+        ]
+        sleep = mock.Mock()
+        client = WildberriesOrdersReadOnlyClient(
+            "secret", session=session, sleep=sleep, jitter=lambda base: 0,
+        )
+        self.assertEqual(client.get_new_orders()[0]["id"], 10)
+        self.assertEqual(session.get.call_count, 2)
+        sleep.assert_called_once_with(2.0)
+
+    def test_5xx_retries_with_backoff_then_succeeds(self):
+        session = mock.Mock()
+        session.get.side_effect = [
+            FakeResponse(503, {"message": "temporary"}, {"X-Request-Id": "req-503"}),
+            FakeResponse(200, {"orders": []}),
+        ]
+        sleep = mock.Mock()
+        client = WildberriesOrdersReadOnlyClient(
+            "secret", session=session, sleep=sleep, jitter=lambda base: 0,
+        )
+        self.assertEqual(client.get_new_orders(), [])
+        self.assertEqual(session.get.call_count, 2)
+        sleep.assert_called_once_with(0.5)
+
+    def test_401_is_not_retried_and_keeps_endpoint_diagnostics(self):
+        session = mock.Mock()
+        session.get.return_value = FakeResponse(
+            401, {"detail": "token category denied", "requestId": "req-401"}
+        )
+        client = WildberriesOrdersReadOnlyClient("secret", session=session, max_retries=5)
+        with self.assertRaises(WildberriesReadOnlyError) as raised:
+            client.get_new_orders()
+        error = raised.exception
+        self.assertEqual(session.get.call_count, 1)
+        self.assertEqual(error.status_code, 401)
+        self.assertEqual(error.path, "/api/v3/orders/new")
+        self.assertEqual(error.request_id, "req-401")
+        self.assertEqual(error.detail, "token category denied")
+        self.assertNotIn("secret", str(error))
+
 
 class WildberriesStorageTest(unittest.TestCase):
     def setUp(self):
@@ -357,8 +401,9 @@ class WildberriesRoutesTest(unittest.TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(first.get_json()["result"]["added"], 1)
         self.assertEqual(first.get_json()["result"]["unmatched"], 1)
-        self.assertEqual(second.get_json()["result"]["added"], 0)
-        self.assertEqual(second.get_json()["result"]["updated"], 1)
+        self.assertTrue(second.get_json()["result"]["coalesced"])
+        self.assertEqual(second.get_json()["result"]["run_id"], first.get_json()["result"]["run_id"])
+        self.assertEqual(fake_client.get_new_orders.call_count, 1)
 
 
 if __name__ == "__main__":
