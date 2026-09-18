@@ -1044,9 +1044,14 @@ class RecoveryEngine:
             rollback_attempted = production_changed
             rollback_ok = True
             if rollback_attempted:
+                if self.system_actions and not self._service_stopped:
+                    try:
+                        self._stop_service()
+                    except RecoveryError:
+                        rollback_ok = False
                 if self.failure_stage == "automatic_rollback":
                     rollback_ok = False
-                else:
+                elif rollback_ok:
                     rollback_ok = self._restore_previous_release(operation)
                     rollback_ok = self._restore_previous_instance(operation) and rollback_ok
                 if rollback_ok:
