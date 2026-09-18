@@ -1712,6 +1712,8 @@
         <script defer src="{{ url_for('static', filename='js/datetime-cell-e2e.js') }}"></script>
     {% endif %}
     <noscript><style>.sales-table-card-initializing { visibility: visible !important; }</style></noscript>
+    <link rel="stylesheet" href="{{ static_asset_url('css/sale-stock-notification.css') }}">
+    <script defer src="{{ static_asset_url('js/sale-stock-notification.js') }}"></script>
 </head>
 
 <body class="sales-page sales-list-page">
@@ -1759,9 +1761,10 @@
         }
     </script>
     {% include "_sidebar.html" %}
+    {% include "_sale_stock_notification.html" %}
 
     <main class="main" id="main-content" tabindex="-1">
-        {% if message %}
+        {% if message and not sale_stock_notification %}
             <div class="notice notice-{{ notice or 'success' }}" data-erp-notification-source>
                 {{ message }}
             </div>
