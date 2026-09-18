@@ -110,7 +110,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature
 from app.services.wildberries_matching import order_product_candidates
 from app.services.wildberries_sales import WildberriesSales
 from app.services.wildberries_orders import synchronize_wildberries_orders
-from app.services.wildberries_sync import SyncLock, run_sync
+from app.services.wildberries_sync import SyncLock, recent_result, run_sync
 from app.services.user_notifications import UserNotificationStore
 from app.services.brand_values import normalize_brand
 from app.services.catalog_reader import CatalogReader
@@ -937,6 +937,54 @@ def get_order_geography(order):
     for field in result:
         if not result[field]:
             result[field] = parsed[field]
+    return result
+
+
+def normalize_order_geography_for_catalog(geography):
+    """Return only selector-backed values; complete an unambiguous city path."""
+    result = {
+        field: str((geography or {}).get(field) or "").strip()
+        for field in ("country", "region", "city")
+    }
+    catalog = get_tictactoy_location_catalog()
+    country_lookup = {name.casefold(): name for name in catalog}
+    country = country_lookup.get(result["country"].casefold())
+    if not country:
+        return {"country": "", "region": "", "city": ""}
+    result["country"] = country
+
+    region_lookup = {
+        name.casefold(): name for name in catalog.get(country, {})
+    }
+    region = region_lookup.get(result["region"].casefold())
+    if region:
+        result["region"] = region
+    else:
+        result["region"] = ""
+
+    if not region and result["city"]:
+        city_matches = [
+            (candidate_region, candidate_city)
+            for candidate_region, cities in catalog.get(country, {}).items()
+            for candidate_city in cities
+            if candidate_city.casefold() == result["city"].casefold()
+        ]
+        if len(city_matches) == 1:
+            result["region"], result["city"] = city_matches[0]
+            region = result["region"]
+
+    if region:
+        city_lookup = {
+            name.casefold(): name
+            for name in catalog.get(country, {}).get(region, [])
+        }
+        city = city_lookup.get(result["city"].casefold())
+        if city:
+            result["city"] = city
+        else:
+            result["city"] = ""
+    else:
+        result["city"] = ""
     return result
 
 
@@ -1863,9 +1911,84 @@ def wildberries_recovery_import():
         WB_SYNC_LOCK.release()
 
 
+WB_SYNC_STAGE_NAMES = {
+    "new_orders": "новые заказы",
+    "order_statuses": "статусы заказов",
+    "orders_history": "история заказов за 60 дней",
+    "full_recovery": "глубокая сверка",
+    "supply_order_ids": "состав поставок",
+    "recovery_order_statuses": "статусы глубокой сверки",
+    "recovery_import": "восстановление заказов",
+    "orchestrator": "оркестратор синхронизации",
+}
+
+
+def _wb_sync_failures(result):
+    recovery = result.get("recovery") or {}
+    return [item for item in (recovery.get("errors") or []) if isinstance(item, dict)]
+
+
+def _wb_sync_message(result):
+    if result.get("outcome") == "success":
+        return "Все этапы Wildberries успешно завершены."
+    failures = _wb_sync_failures(result)
+    stages = []
+    for item in failures:
+        name = WB_SYNC_STAGE_NAMES.get(item.get("stage"), item.get("stage") or "неизвестный этап")
+        if name not in stages:
+            stages.append(name)
+    detail = (failures[0].get("error") if failures else
+              (result.get("error") or {}).get("error") or "неизвестная ошибка")
+    prefix = "Проблемный этап" if len(stages) == 1 else "Проблемные этапы"
+    return "{}: {}. {}".format(prefix, ", ".join(stages) or "не определён", detail)
+
+
+def _publish_wb_sync_result(result):
+    outcome = result.get("outcome")
+    severity = "success" if outcome == "success" else "warning" if outcome == "partial" else "error"
+    title = ("Синхронизация Wildberries завершена" if outcome != "error"
+             else "Ошибка синхронизации Wildberries")
+    message = _wb_sync_message(result)
+    result["notification"] = {"title": title, "message": message,
+                              "severity": severity}
+    return _publish_system_event(
+        "wb_sync:{}".format(result.get("run_id") or getattr(g, "operation_id", "") or uuid.uuid4().hex),
+        title, message, severity=severity,
+        target_url="/orders?source=wildberries", entity_type="integration",
+        entity_id="wildberries", metadata={
+            "operation": "wb_orders_sync", "outcome": outcome,
+            "stages": [item.get("stage") for item in _wb_sync_failures(result) if item.get("stage")],
+        },
+    )
+
+
+def _wb_sync_api_error(result):
+    error = result.get("error") or (_wb_sync_failures(result) or [{}])[0]
+    return {"code": error.get("code", "WB_SYNC_FAILED"),
+            "message": _wb_sync_message(result), "diagnostic": error}
+
+
+def _wb_sync_http_status(result):
+    code = _wb_sync_api_error(result)["code"]
+    if code == "WB_NOT_CONFIGURED":
+        return 400
+    if code == "WB_RATE_LIMITED":
+        return 429
+    return 503
+
+
 @app.post("/api/orders/wildberries/sync")
 def wildberries_orders_sync_api():
     require_csrf_when_authenticated()
+    store = OrdersSnapshotStore()
+    store.initialize()
+    cached = recent_result(store, 'full')
+    if cached:
+        _publish_wb_sync_result(cached)
+        return jsonify({"ok": cached['outcome'] != 'error', "result": cached,
+                        **({"error": _wb_sync_api_error(cached)}
+                           if cached['outcome'] == 'error' else {})}), (
+            _wb_sync_http_status(cached) if cached['outcome'] == 'error' else 200)
     if not WB_SYNC_LOCK.acquire(blocking=False):
         return jsonify({
             "ok": False,
@@ -1876,14 +1999,12 @@ def wildberries_orders_sync_api():
             token=os.getenv("WB_API_TOKEN"),
             base_url=os.getenv("WB_API_BASE_URL", WB_DEFAULT_BASE_URL),
         )
-        store = OrdersSnapshotStore()
         previous_ids = store.source_ids("wildberries")
         result = run_sync(client, store, CatalogDatabase().path, mode='full', locked=True)
         if result['outcome'] == 'error':
-            error = result.get('error') or {}
-            code = error.get('code', 'WB_SYNC_FAILED')
-            return jsonify(ok=False, result=result, error=dict(code=code,
-                message=error.get('error', 'Ошибка синхронизации WB'))), (400 if code == 'WB_NOT_CONFIGURED' else 429 if code == 'WB_RATE_LIMITED' else 503)
+            _publish_wb_sync_result(result)
+            return jsonify(ok=False, result=result,
+                           error=_wb_sync_api_error(result)), _wb_sync_http_status(result)
         current_ids = store.source_ids("wildberries")
         saved_orders = [
             store.get(order_id)
@@ -1899,15 +2020,7 @@ def wildberries_orders_sync_api():
         result["unmatched"] = sum(
             1 for row in assembly_rows if row["matching_status"] != "matched"
         )
-        operation_id = getattr(g, "operation_id", "") or uuid.uuid4().hex
-        _publish_system_event(
-            "wb_sync:success:{}".format(operation_id),
-            "Синхронизация Wildberries завершена",
-            "Заказы Wildberries обновлены." if result['outcome'] == 'success' else "WB обновлён частично: проверьте диагностику.",
-            severity="success" if result['outcome'] == 'success' else "warning",
-            target_url="/orders?source=wildberries", entity_type="integration",
-            entity_id="wildberries", metadata={"operation": "wb_orders_sync"},
-        )
+        _publish_wb_sync_result(result)
         return jsonify({"ok": True, "result": result})
     except WildberriesReadOnlyError as error:
         app.logger.warning("Wildberries order sync unavailable code=%s", error.code)
@@ -2062,7 +2175,11 @@ def enrich_orders_list_rows(rows, database=None):
         order.update({key: value for key, value in metadata.get(order_id, {}).items()
                       if key not in {"status", "status_name", "erp_status"}})
         mapping = previews.get("line:preview:" + order_id) or {}
-        if mapping.get("state") == "mapped" and mapping.get("product"):
+        if (
+            order.get("source") != "wildberries"
+            and mapping.get("state") == "mapped"
+            and mapping.get("product")
+        ):
             order["product_preview"] = mapping["product"]
     return prepared
 
@@ -2278,6 +2395,7 @@ def render_orders_page(
         else {"events": [], "total_display": "", "has_multiple_days": False}
     )
 
+    order_geography = get_order_geography(selected_order or {})
     response = make_response(render_template(
         "orders.html",
         order_detail_only=request.headers.get("X-Order-Detail") == "1",
@@ -2289,7 +2407,10 @@ def render_orders_page(
         ),
         order_product_mappings=order_mappings,
         order_sale_state=sale_state,
-        order_geography=get_order_geography(selected_order or {}),
+        order_geography=order_geography,
+        order_sale_geography=normalize_order_geography_for_catalog(
+            order_geography
+        ),
         order_country_options=build_sale_combobox_options(
             TICTACTOY_SALE_COUNTRIES
         ),
@@ -2452,10 +2573,16 @@ def build_order_sale_dialog_summary(products, mapping_context=None,
 
         mapping = get_order_product_mapping(mapping_context, product)
         mapped_product = mapping.get("product") or {}
-        article = first_order_product_value(
-            product, "sku", "SKU", "article", "ARTICLE",
-            "vendorCode", "vendor_code",
-        ) or mapped_product.get("article") or ""
+        if str(product.get("source") or "").casefold() == "wildberries":
+            article = first_order_product_value(
+                product, "display_article", "article", "vendor_code",
+                "vendorCode",
+            )
+        else:
+            article = first_order_product_value(
+                product, "sku", "SKU", "article", "ARTICLE",
+                "vendorCode", "vendor_code",
+            ) or mapped_product.get("article") or ""
 
         lines.append({
             "name": str(first_order_product_value(
@@ -5281,7 +5408,10 @@ def warehouse_page():
             (
                 item
                 for item in shared_brands
-                if str(item.get("id") or "") == selected_brand_id
+                if str(
+                    item.get("id")
+                    if item.get("id") is not None else ""
+                ) == selected_brand_id
             ),
             None,
         )
@@ -5300,7 +5430,9 @@ def warehouse_page():
         ), None)
         if selected_category_match:
             selected_category_id = str(selected_category_match["id"])
-    if selected_category_id:
+    if selected_category_id == "0" and not selected_brand_id:
+        selected_category = "Без категории"
+    elif selected_category_id:
         selected_category_match = next(
             (
                 item
@@ -5310,7 +5442,10 @@ def warehouse_page():
                     only_used_by_brand=True,
                 )
                 if selected_category_id in {
-                    str(item.get("id") or ""),
+                    str(
+                        item.get("id")
+                        if item.get("id") is not None else ""
+                    ),
                     *(str(value) for value in item.get("category_ids", [])),
                 }
             ),
@@ -5324,8 +5459,9 @@ def warehouse_page():
             selected_model_id = ""
             selected_model = ""
     if not selected_brand_id:
-        selected_category_id = ""
-        selected_category = ""
+        if selected_category_id != "0":
+            selected_category_id = ""
+            selected_category = ""
         selected_model_id = ""
         selected_model = ""
     if (selected_model_id or selected_model) and selected_brand_id and selected_category_id:

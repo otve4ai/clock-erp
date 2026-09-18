@@ -422,6 +422,27 @@ preview_orders = [
     },
 ]
 web.get_orders = lambda *args, **kwargs: [dict(item) for item in preview_orders]
+preview_geography_orders = {
+    "7902": {
+        "id": "7902", "number": "7902", "status": "A",
+        "status_name": "Подтверждён", "customer": "География Bitrix",
+        "order_total": 12990, "created_at": "2026-08-28 17:05:00",
+        "source": "tictactoy", "country": "Россия",
+        "region": "Санкт-Петербург", "city": "Санкт-Петербург",
+        "products": [],
+    },
+    "7903": {
+        "id": "7903", "number": "7903", "status": "D",
+        "status_name": "Собран", "customer": "Неизвестная география",
+        "order_total": 9900, "created_at": "2026-08-28 16:20:00",
+        "source": "tictactoy", "country": "Атлантида",
+        "region": "Центр", "city": "Посейдонис", "products": [],
+    },
+}
+live_get_order = web.get_order
+web.get_order = lambda order_id: dict(
+    preview_geography_orders[str(order_id)]
+) if str(order_id) in preview_geography_orders else live_get_order(order_id)
 from app.services.orders_snapshot import OrdersSnapshotStore  # noqa: E402
 OrdersSnapshotStore(PREVIEW_ROOT / "orders.db").replace(preview_orders, time.time())
 

@@ -260,7 +260,10 @@ class OrdersSnapshotStore:
             ):
                 continue
             value = incoming[field]
-            if field in {"external_customer_id", "customer", "phone", "email"} and not _text(value):
+            if field in {
+                "external_customer_id", "customer", "phone", "email",
+                "country", "region", "city", "location_id",
+            } and not _text(value):
                 continue
             if field in {"items", "products"} and not value and merged.get(field):
                 continue
@@ -450,8 +453,40 @@ class OrdersSnapshotStore:
                 order = dict(order)
                 if existing:
                     # Statuses are refreshed separately from /orders/status. Preserve
-                    # every ERP field (including nested product mapping) here.
-                    # /orders/new may omit statuses; never reset them to defaults.
+                    # every ERP field here. Only content-card presentation fields
+                    # may be enriched by a later read-only sync.
+                    previous = json.loads(existing["payload_json"])
+                    incoming_product = (order.get("products") or [{}])[0]
+                    products = list(previous.get("products") or [])
+                    changed = False
+                    if products and incoming_product.get("wb_content_enriched"):
+                        product = dict(products[0])
+                        for field in (
+                            "name", "article", "display_article", "vendor_code",
+                            "image_url", "image_urls", "wb_content_enriched",
+                        ):
+                            value = incoming_product.get(field)
+                            if value not in (None, "") and product.get(field) != value:
+                                product[field] = value
+                                changed = True
+                        products[0] = product
+                    for field in ("article", "vendor_code"):
+                        value = order.get(field)
+                        if value not in (None, "") and previous.get(field) != value:
+                            previous[field] = value
+                            changed = True
+                    if changed:
+                        previous["products"] = products
+                        connection.execute(
+                            "UPDATE orders_snapshot SET extra_fold=?, payload_json=?, "
+                            "loaded_at=? WHERE source='wildberries' AND external_order_id=?",
+                            (
+                                _extra_search(previous),
+                                json.dumps(previous, ensure_ascii=False, separators=(",", ":")),
+                                float(datetime.now().timestamp()),
+                                wb_order_id,
+                            ),
+                        )
                     updated += 1
                     continue
                 created = order.get("created_at") or order.get("date")

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import sys
+import traceback
 from pathlib import Path
 
 
@@ -22,12 +23,24 @@ from app.services.recovery_v2 import (  # noqa: E402
 )
 
 
+def serialize_result(value):
+    """Keep CLI JSON writable even when the server locale is ASCII."""
+    return json.dumps(value, ensure_ascii=True, sort_keys=True)
+
+
 def build_engine():
     production = SOURCE_ROOT == Path("/opt/clock-erp")
     backup_root = Path("/opt/clock-erp-backups") if production else SOURCE_ROOT / "instance" / "backups"
     backup_script = (
         Path("/usr/local/sbin/clock-erp-backup-retention")
         if production else SOURCE_ROOT / "scripts" / "retain_erp_backups.py"
+    )
+    failure = os.environ.get("ERP_RECOVERY_TEST_FAILURE") if not production else None
+    return RecoveryEngine(
+        SOURCE_ROOT, backup_root, backup_script,
+        (Path("/opt/clock-erp-current") if production else SOURCE_ROOT)
+        / "ops" / "recovery-schema-contract.json",
+        test_mode=not production and bool(failure), failure_stage=failure,
     )
 
 
@@ -61,13 +74,6 @@ def create_console_operation(engine, kind, backup_id, target_commit, idempotency
         )
     finally:
         guard.close()
-    failure = os.environ.get("ERP_RECOVERY_TEST_FAILURE") if not production else None
-    return RecoveryEngine(
-        SOURCE_ROOT, backup_root, backup_script,
-        (Path("/opt/clock-erp-current") if production else SOURCE_ROOT)
-        / "ops" / "recovery-schema-contract.json",
-        test_mode=not production and bool(failure), failure_stage=failure,
-    )
 
 
 def main():
@@ -121,7 +127,7 @@ def main():
     safe.pop("previous_release", None)
     safe.pop("staging_path", None)
     safe.pop("safety_backup_path", None)
-    print(json.dumps(safe, ensure_ascii=False, sort_keys=True))
+    print(serialize_result(safe))
     return 0 if result.get("status") not in ("failed", "critical") else 1
 
 
@@ -129,5 +135,6 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as error:
+        traceback.print_exc()
         print("RECOVERY_HELPER_FAILED:{}".format(type(error).__name__), file=sys.stderr)
         sys.exit(1)

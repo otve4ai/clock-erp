@@ -386,6 +386,113 @@ class CatalogFilteringTest(unittest.TestCase):
         self.assertIn("Сбросить всё", html)
         self.assertEqual(html.count('data-product-id="'), 100)
 
+    def test_warehouse_missing_brand_and_category_filter_matrix(self):
+        fixtures = (
+            ("Matrix missing both", None, None),
+            ("Matrix missing brand", None, self.duplicate_category_id),
+            ("Matrix missing category", self.brand["id"], None),
+            ("Matrix assigned", self.brand["id"], self.duplicate_category_id),
+            ("Matrix other", self.other_brand["id"], self.category_id),
+        )
+        for name, brand_id, category_id in fixtures:
+            self._insert_products(
+                count=1,
+                brand_id=brand_id,
+                category_id=category_id,
+                prefix=name,
+            )
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE catalog_excel_products SET excel_brand = '' "
+                "WHERE excel_name_raw LIKE 'Matrix missing b%'"
+            )
+            connection.execute(
+                "UPDATE catalog_excel_products SET excel_category = '' "
+                "WHERE excel_name_raw IN (?, ?)",
+                ("Matrix missing both 00000", "Matrix missing category 00000"),
+            )
+            fixture_rows = connection.execute(
+                "SELECT id, excel_name_raw, brand_id, category_id "
+                "FROM catalog_excel_products "
+                "WHERE excel_name_raw LIKE 'Matrix %'"
+            ).fetchall()
+
+        fixture_ids = {
+            row["excel_name_raw"]: int(row["id"])
+            for row in fixture_rows
+        }
+        expected_database_values = {
+            "Matrix missing both 00000": (None, None),
+            "Matrix missing brand 00000": (None, self.duplicate_category_id),
+            "Matrix missing category 00000": (self.brand["id"], None),
+            "Matrix assigned 00000": (
+                self.brand["id"], self.duplicate_category_id,
+            ),
+            "Matrix other 00000": (self.other_brand["id"], self.category_id),
+        }
+        self.assertEqual(
+            {
+                row["excel_name_raw"]: (row["brand_id"], row["category_id"])
+                for row in fixture_rows
+            },
+            expected_database_values,
+        )
+
+        scenarios = (
+            ("", set(expected_database_values)),
+            (
+                "brand=%D0%91%D0%B5%D0%B7+%D0%B1%D1%80%D0%B5%D0%BD%D0%B4%D0%B0&brand_id=0",
+                {"Matrix missing both 00000", "Matrix missing brand 00000"},
+            ),
+            (
+                "brand_id={}".format(self.brand["id"]),
+                {"Matrix missing category 00000", "Matrix assigned 00000"},
+            ),
+            (
+                "category=%D0%91%D0%B5%D0%B7+%D0%BA%D0%B0%D1%82%D0%B5%D0%B3%D0%BE%D1%80%D0%B8%D0%B8&category_id=0",
+                {"Matrix missing both 00000", "Matrix missing category 00000"},
+            ),
+            (
+                "brand=%D0%91%D0%B5%D0%B7+%D0%B1%D1%80%D0%B5%D0%BD%D0%B4%D0%B0&brand_id=0"
+                "&category=%D0%91%D0%B5%D0%B7+%D0%BA%D0%B0%D1%82%D0%B5%D0%B3%D0%BE%D1%80%D0%B8%D0%B8&category_id=0",
+                {"Matrix missing both 00000"},
+            ),
+            (
+                "brand=%D0%91%D0%B5%D0%B7+%D0%B1%D1%80%D0%B5%D0%BD%D0%B4%D0%B0&brand_id=0"
+                "&category_id={}".format(self.duplicate_category_id),
+                {"Matrix missing brand 00000"},
+            ),
+            (
+                "brand_id={}&category=%D0%91%D0%B5%D0%B7+%D0%BA%D0%B0%D1%82%D0%B5%D0%B3%D0%BE%D1%80%D0%B8%D0%B8"
+                "&category_id=0".format(self.brand["id"]),
+                {"Matrix missing category 00000"},
+            ),
+        )
+
+        for query, expected_names in scenarios:
+            with self.subTest(query=query or "without filters"):
+                response = self.client.get(
+                    "/warehouse?per_page=200" + ("&" + query if query else ""),
+                    headers={"X-ERP-Partial": "products-v1"},
+                )
+                html = response.get_data(as_text=True)
+                returned_fixture_names = {
+                    name for name, product_id in fixture_ids.items()
+                    if 'data-product-id="{}"'.format(product_id) in html
+                }
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(returned_fixture_names, expected_names)
+
+        brand_options = self.client.get(
+            "/api/v1/catalog/options?type=brand&limit=200"
+        ).get_json()["data"]
+        missing_brand = next(
+            item for item in brand_options if item["name"] == "Без бренда"
+        )
+        self.assertEqual(missing_brand["id"], 0)
+        self.assertEqual(missing_brand["product_count"], 2)
+
     def test_warehouse_period_chips_do_not_duplicate_stock_state(self):
         variants = (
             (

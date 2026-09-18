@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import tarfile
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -21,6 +22,7 @@ from app.services.recovery_v2 import (
     inspect_file_manifest,
     inspect_instance,
 )
+from scripts import clock_erp_recovery as recovery_helper
 
 
 CONTRACT = {
@@ -398,6 +400,61 @@ class RecoveryV2Test(unittest.TestCase):
         operation = self._operation()
         reloaded = BackupAdminService(self.project, self.backups, "/bin/false")
         self.assertEqual(reloaded.operation_status()["id"], operation["id"])
+
+    def test_helper_build_engine_returns_configured_engine(self):
+        with mock.patch.object(recovery_helper, "SOURCE_ROOT", self.project), \
+             mock.patch.dict(os.environ, {"ERP_RECOVERY_TEST_FAILURE": "preflight"}):
+            engine = recovery_helper.build_engine()
+        self.assertIsInstance(engine, RecoveryEngine)
+        self.assertEqual(engine.project_root, self.project.resolve())
+        self.assertEqual(engine.backup_root, (self.project / "instance" / "backups").resolve())
+        self.assertEqual(engine.failure_stage, "preflight")
+
+    def test_helper_result_is_safe_for_ascii_server_locale(self):
+        payload = recovery_helper.serialize_result({"message": "Восстановление завершено"})
+        payload.encode("ascii")
+        self.assertEqual(
+            json.loads(payload)["message"],
+            "Восстановление завершено",
+        )
+
+    def test_new_operation_has_fresh_persistent_timestamp(self):
+        operation = self._operation()
+        status = self.service.operation_status()
+        self.assertTrue(status["active"])
+        self.assertEqual(status["id"], operation["id"])
+        self.assertGreater(status["updated_epoch"], time.time() - 10)
+
+    def test_recent_persistent_heartbeat_prevents_false_stale_failure(self):
+        operation = self._operation()
+        operation["updated_epoch"] = 1
+        _atomic_json_write(self.backups / ".backup-admin-operation.json", operation)
+        heartbeat = (
+            self.backups / "recovery" / "operations"
+            / (operation["id"] + ".heartbeat.json")
+        )
+        _atomic_json_write(heartbeat, {
+            "operation_id": operation["id"],
+            "pid": 99999999,
+            "updated_epoch": time.time(),
+        })
+        status = self.service.operation_status()
+        self.assertTrue(status["active"])
+        self.assertEqual(status["status"], "pending")
+
+    def test_production_recovery_runs_in_separate_systemd_unit(self):
+        operation_id = "a" * 32
+        self.service.project_root = Path("/opt/clock-erp")
+        self.service.recovery_helper = Path("/usr/local/sbin/clock-erp-recovery")
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch("app.services.backup_admin.shutil.which", return_value="/usr/bin/systemd-run"), \
+             mock.patch("app.services.backup_admin.subprocess.run", return_value=completed) as run:
+            self.service._launch_recovery(operation_id)
+        command = run.call_args.args[0]
+        self.assertIn("--unit=clock-erp-recovery-" + operation_id, command)
+        self.assertIn("--service-type=simple", command)
+        self.assertNotIn("--scope", command)
+        self.assertEqual(command[-3:-1], ["run", operation_id])
 
     def test_stale_recovery_operation_becomes_visible_failure(self):
         operation = self._operation()

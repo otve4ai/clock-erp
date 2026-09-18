@@ -117,3 +117,51 @@ test('history to the current card cancels an unfinished different selection', as
   await expect(page).toHaveURL(/\/order\/7001/);
   await expect(page.locator('.order-detail-panel')).toContainText('7001');
 });
+
+test('Bitrix geography is visibly selected in the sale modal after every opening', async ({
+  page,
+}) => {
+  await page.goto('/order/7902', { waitUntil: 'domcontentloaded' });
+  await page.locator('[data-order-sale-action]').click();
+
+  const modal = page.locator('#orderSaleModal');
+  await expect(modal).toHaveClass(/is-open/);
+  await expect(modal.locator('#orderSaleCountry .brand-combobox-value')).toHaveText('Россия');
+  await expect(modal.locator('#orderSaleRegion .brand-combobox-value')).toHaveText('Санкт-Петербург');
+  await expect(modal.locator('#orderSaleCity .brand-combobox-value')).toHaveText('Санкт-Петербург');
+  await expect(modal.locator('input[name="country"]')).toHaveValue('Россия');
+  await expect(modal.locator('input[name="region"]')).toHaveValue('Санкт-Петербург');
+  await expect(modal.locator('input[name="city"]')).toHaveValue('Санкт-Петербург');
+
+  await modal.locator('[data-close-sale-dialog]').first().click();
+  await page.locator('[data-order-sale-action]').click();
+  await expect(modal.locator('#orderSaleCountry .brand-combobox-value')).toHaveText('Россия');
+  await expect(modal.locator('#orderSaleRegion .brand-combobox-value')).toHaveText('Санкт-Петербург');
+  await expect(modal.locator('#orderSaleCity .brand-combobox-value')).toHaveText('Санкт-Петербург');
+});
+
+test('unknown Bitrix geography stays unselected and the manual cascade remains usable', async ({
+  page,
+}) => {
+  await page.goto('/order/7903', { waitUntil: 'domcontentloaded' });
+  await page.locator('[data-order-sale-action]').click();
+
+  const modal = page.locator('#orderSaleModal');
+  const country = modal.locator('#orderSaleCountry');
+  const region = modal.locator('#orderSaleRegion');
+  const city = modal.locator('#orderSaleCity');
+  await expect(country.locator('.brand-combobox-value')).toHaveText('Выберите страну');
+  await expect(region.locator('.brand-combobox-value')).toHaveText('Выберите регион');
+  await expect(city.locator('.brand-combobox-value')).toHaveText('Выберите город');
+
+  await country.locator('.brand-combobox-trigger').click();
+  await country.locator('[role="option"][data-brand="Россия"]').click();
+  await region.locator('.brand-combobox-trigger').click();
+  await region.locator('[role="option"][data-brand="Санкт-Петербург"]').click();
+  await city.locator('.brand-combobox-trigger').click();
+  await city.locator('[role="option"][data-brand="Санкт-Петербург"]').click();
+
+  await expect(country.locator('.brand-combobox-value')).toHaveText('Россия');
+  await expect(region.locator('.brand-combobox-value')).toHaveText('Санкт-Петербург');
+  await expect(city.locator('.brand-combobox-value')).toHaveText('Санкт-Петербург');
+});

@@ -51,9 +51,18 @@ class WildberriesRecovery:
         self.now = int(time.time() if now is None else now)
 
     def recent_orders(self, days=14):
-        if not 1 <= int(days) <= 30:
-            raise ValueError("Период проверки должен составлять 1–30 дней")
-        return self.client.get_orders(self.now - int(days) * 86400, self.now)
+        if not 1 <= int(days) <= 90:
+            raise ValueError("Период проверки должен составлять 1–90 дней")
+        rows = {}
+        date_to = self.now
+        date_from = self.now - int(days) * 86400
+        while date_to > date_from:
+            window_from = max(date_from, date_to - 30 * 86400)
+            for row in self.client.get_orders(window_from, date_to):
+                if isinstance(row, dict) and row.get('id'):
+                    rows[str(row['id'])] = row
+            date_to = window_from
+        return list(rows.values())
 
     def classify(self, order_ids, raw_orders, supply_id="", statuses=None, status_error=""):
         rows = []
@@ -146,7 +155,10 @@ class WildberriesRecovery:
                 result['skipped'] += 1
                 continue
             if row['error'] or not row['order']:
-                result['failed'].append({'wb_order_id': row['wb_order_id'], 'error': row['error']})
+                stage = ('orders_history' if row['error'] == 'WB не вернул данные заказа за выбранный период'
+                         else 'recovery_import')
+                result['failed'].append({'wb_order_id': row['wb_order_id'],
+                                         'error': row['error'], 'stage': stage})
                 continue
             order = dict(row['order'])
             notice = 'Заказ восстановлен из Wildberries после пропущенной синхронизации. Поставка: ' + (row['supply_id'] or 'не указана')
@@ -232,17 +244,22 @@ class WildberriesRecovery:
                 memberships[supply['id']] = list(map(str, values))
                 ids.update(map(str, values))
             except WildberriesReadOnlyError as error:
-                errors.append({'supply_id': supply['id'], 'error': str(error)})
+                item = error.diagnostic('supply_order_ids')
+                item['supply_id'] = supply['id']
+                errors.append(item)
         statuses = {}
         ordered_ids = sorted(ids)
         for offset in range(0, len(ordered_ids), 100):
             try:
                 statuses.update(self.client.get_order_statuses(ordered_ids[offset:offset + 100]))
             except WildberriesReadOnlyError as error:
-                errors.append({'order_ids': ordered_ids[offset:offset + 100], 'error': str(error)})
+                item = error.diagnostic('recovery_order_statuses')
+                item['order_ids'] = ordered_ids[offset:offset + 100]
+                errors.append(item)
         missing_statuses = [value for value in ordered_ids if value not in statuses]
         if missing_statuses:
-            errors.append({'order_ids': missing_statuses, 'error': 'WB не вернул текущие статусы'})
+            errors.append({'order_ids': missing_statuses, 'error': 'WB не вернул текущие статусы',
+                           'stage': 'recovery_order_statuses'})
         statuses_updated = store.update_wildberries_statuses(statuses)
         rows = self.classify(ordered_ids, raw, statuses=statuses)
         for row in rows:
@@ -258,7 +275,9 @@ class WildberriesRecovery:
             if known < len(members):
                 warnings.append({'supply_id': supply_id, 'wb_count': len(members), 'erp_count': known, 'missing': len(members)-known})
         outcome = self.import_report(report, store)
-        return dict(statuses_updated=statuses_updated, recovered=outcome['imported'], attention=report['attention'] + len(errors) + len(outcome['failed']),
-                    supplies=warnings, errors=errors + outcome['failed'],
+        failed = [dict(item, stage=item.get('stage') or 'recovery_import')
+                  for item in outcome['failed']]
+        return dict(statuses_updated=statuses_updated, recovered=outcome['imported'], attention=report['attention'] + len(errors) + len(failed),
+                    supplies=warnings, errors=errors + failed,
                     missing=[row['wb_order_id'] for row in rows if not row['already_imported']],
                     pending=[row for row in rows if row['error'] and not row['already_imported'] and not row['sale_id']], checked_at=stamp())

@@ -10,7 +10,10 @@ Response bodies and authorization values are never logged.
 from __future__ import print_function
 
 import logging
+import random
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit, quote
 
 import requests
@@ -32,10 +35,27 @@ READ_ONLY_METHOD = "GET"
 class WildberriesReadOnlyError(RuntimeError):
     """A user-safe API error that never contains credentials or response data."""
 
-    def __init__(self, message, code="WB_API_ERROR", status_code=None):
+    def __init__(self, message, code="WB_API_ERROR", status_code=None,
+                 method=None, service=None, path=None, request_id=None,
+                 detail=None):
         super().__init__(message)
         self.code = code
         self.status_code = status_code
+        self.method = method
+        self.service = service
+        self.path = path
+        self.request_id = request_id
+        self.detail = detail
+
+    def diagnostic(self, stage=None):
+        result = {"error": str(self), "code": self.code}
+        for key in ("status_code", "method", "service", "path", "request_id", "detail"):
+            value = getattr(self, key, None)
+            if value not in (None, ""):
+                result[key] = value
+        if stage:
+            result["stage"] = stage
+        return result
 
 
 def mask_secret(value):
@@ -44,11 +64,46 @@ def mask_secret(value):
 
 
 def _retry_after(response, fallback):
-    value = getattr(response, "headers", {}).get("Retry-After")
+    headers = getattr(response, "headers", {}) or {}
+    candidates = (
+        (headers.get("Retry-After"), 1.0),
+        (headers.get("X-RateLimit-Retry"), 1.0),
+        (headers.get("X-Ratelimit-Retry"), 1.0),
+        (headers.get("X-RateLimit-Retry-After-Milliseconds"), 0.001),
+    )
+    for value, multiplier in candidates:
+        try:
+            return max(0.0, min(float(value) * multiplier, 30.0))
+        except (TypeError, ValueError):
+            if value and multiplier == 1.0:
+                try:
+                    parsed = parsedate_to_datetime(value)
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    seconds = (parsed - datetime.now(timezone.utc)).total_seconds()
+                    return max(0.0, min(seconds, 30.0))
+                except (TypeError, ValueError, OverflowError):
+                    pass
+    return max(0.0, min(float(fallback), 30.0))
+
+
+def _response_context(response):
+    headers = getattr(response, "headers", {}) or {}
+    request_id = next((headers.get(key) for key in (
+        "X-Request-Id", "X-Request-ID", "Request-Id", "requestId",
+    ) if headers.get(key)), None)
+    detail = None
     try:
-        return max(0.0, min(float(value), 30.0))
+        payload = response.json()
+        if isinstance(payload, dict):
+            request_id = request_id or payload.get("requestId") or payload.get("request_id")
+            detail = payload.get("detail") or payload.get("message") or payload.get("title")
     except (TypeError, ValueError):
-        return max(0.0, min(float(fallback), 30.0))
+        pass
+    return (
+        str(request_id or "")[:160] or None,
+        str(detail or "").replace("\n", " ")[:300] or None,
+    )
 
 
 class WildberriesReadOnlyClient:
@@ -62,6 +117,7 @@ class WildberriesReadOnlyClient:
         session=None,
         sleep=None,
         logger=None,
+        jitter=None,
         marketplace_base_url=DEFAULT_BASE_URL,
     ):
         self._token = str(token or "").strip()
@@ -70,6 +126,7 @@ class WildberriesReadOnlyClient:
         self.session = session or requests.Session()
         self.sleep = sleep or time.sleep
         self.logger = logger or logging.getLogger(__name__)
+        self.jitter = jitter or (lambda base: random.uniform(0.0, max(0.0, base * 0.25)))
         self.origins = dict(SERVICE_ORIGINS)
         self.origins["marketplace"] = self._validated_marketplace_origin(
             marketplace_base_url
@@ -123,9 +180,11 @@ class WildberriesReadOnlyClient:
         return self._read_json("GET", service, path, params=params)
 
     def _read_json(self, method, service, path, params=None, body=None):
-        if method != "GET" and (method, service, path) != (
-            "POST", "marketplace", "/api/v3/orders/status"
-        ):
+        read_only_posts = {
+            ("POST", "marketplace", "/api/v3/orders/status"),
+            ("POST", "content", "/content/v2/get/cards/list"),
+        }
+        if method != "GET" and (method, service, path) not in read_only_posts:
             raise WildberriesReadOnlyError("Запрос запрещён", "WB_READ_ONLY_GUARANTEE")
         url = self.origins[service] + path
         headers = self._headers()
@@ -137,12 +196,13 @@ class WildberriesReadOnlyClient:
             if delay > 0:
                 self.sleep(delay)
             self._last_sync_request = time.monotonic()
-            self.request_audit.append({
+            audit = {
                 "method": method,
                 "service": service,
                 "path": path,
                 "attempt": attempt + 1,
-            })
+            }
+            self.request_audit.append(audit)
             try:
                 options = dict(headers=headers, timeout=self.timeout, allow_redirects=False)
                 if method == "GET":
@@ -151,56 +211,80 @@ class WildberriesReadOnlyClient:
                     response = self.session.post(url, json=body, **options)
             except requests.Timeout:
                 if attempt < self.max_retries:
-                    self.sleep(min(0.5 * (2 ** attempt), 4.0))
+                    base = min(0.5 * (2 ** attempt), 4.0)
+                    self.sleep(base + self.jitter(base))
                     continue
                 raise WildberriesReadOnlyError(
-                    "Wildberries API не ответил вовремя", "WB_TIMEOUT"
+                    "Wildberries API не ответил вовремя: {} {} {}".format(method, service, path),
+                    "WB_TIMEOUT", method=method, service=service, path=path,
                 ) from None
             except requests.RequestException:
                 if attempt < self.max_retries:
-                    self.sleep(min(0.5 * (2 ** attempt), 4.0))
+                    base = min(0.5 * (2 ** attempt), 4.0)
+                    self.sleep(base + self.jitter(base))
                     continue
                 raise WildberriesReadOnlyError(
-                    "Wildberries API временно недоступен", "WB_UNAVAILABLE"
+                    "Wildberries API временно недоступен: {} {} {}".format(method, service, path),
+                    "WB_UNAVAILABLE", method=method, service=service, path=path,
                 ) from None
 
             status = int(response.status_code)
+            request_id, detail = _response_context(response)
+            if detail and self._token:
+                detail = detail.replace(self._token, "[REDACTED]")
+            audit.update(status_code=status, request_id=request_id)
             if status in RETRYABLE_STATUS_CODES and attempt < self.max_retries:
                 self.logger.warning(
-                    "Wildberries GET retry service=%s status=%s attempt=%s",
+                    "Wildberries retry method=%s service=%s status=%s attempt=%s request_id=%s",
+                    method,
                     service,
                     status,
                     attempt + 1,
+                    request_id or "-",
                 )
-                self.sleep(_retry_after(response, 0.5 * (2 ** attempt)))
+                base = min(0.5 * (2 ** attempt), 4.0)
+                fallback = base + self.jitter(base)
+                self.sleep(_retry_after(response, fallback))
                 continue
+            context = dict(status_code=status, method=method, service=service,
+                           path=path, request_id=request_id, detail=detail)
             if status == 401:
                 raise WildberriesReadOnlyError(
-                    "Wildberries отклонил токен", "WB_UNAUTHORIZED", status
+                    "Wildberries отклонил токен: {} {}".format(service, path),
+                    "WB_UNAUTHORIZED", **context
                 )
             if status == 403:
                 raise WildberriesReadOnlyError(
-                    "Токен Wildberries не имеет доступа к направлению {}".format(
-                        service
-                    ),
-                    "WB_FORBIDDEN",
-                    status,
+                    "Токен Wildberries не имеет доступа: {} {}".format(service, path),
+                    "WB_FORBIDDEN", **context
                 )
             if status == 429:
                 raise WildberriesReadOnlyError(
-                    "Превышен лимит запросов Wildberries",
-                    "WB_RATE_LIMITED",
-                    status,
+                    "Превышен лимит запросов Wildberries: {} {}".format(service, path),
+                    "WB_RATE_LIMITED", **context
                 )
             if status >= 500:
                 raise WildberriesReadOnlyError(
-                    "Wildberries API временно недоступен", "WB_SERVER_ERROR", status
+                    "Wildberries API временно недоступен: {} {}".format(service, path),
+                    "WB_SERVER_ERROR", **context
+                )
+            client_errors = {
+                400: ("WB_BAD_REQUEST", "Wildberries отклонил параметры запроса"),
+                404: ("WB_NOT_FOUND", "Ресурс Wildberries не найден"),
+                409: ("WB_CONFLICT", "Конфликт состояния Wildberries"),
+                422: ("WB_UNPROCESSABLE", "Wildberries не смог обработать параметры"),
+            }
+            if status in client_errors:
+                code, reason = client_errors[status]
+                suffix = ": {}".format(detail) if detail else ""
+                raise WildberriesReadOnlyError(
+                    "{}: {} {}{}".format(reason, service, path, suffix),
+                    code, **context
                 )
             if status >= 400:
                 raise WildberriesReadOnlyError(
-                    "Wildberries вернул ошибку HTTP {}".format(status),
-                    "WB_API_ERROR",
-                    status,
+                    "Wildberries вернул HTTP {}: {} {}".format(status, service, path),
+                    "WB_API_ERROR", **context
                 )
             try:
                 return response.json()
@@ -309,6 +393,38 @@ class WildberriesReadOnlyClient:
                 result[str(row["id"])] = row
         return result
 
+    def get_content_card(self, nm_id):
+        """Return one seller card by nmID through WB's read-only content API."""
+        value = str(nm_id or "").strip()
+        if not value.isdigit() or int(value) <= 0:
+            raise WildberriesReadOnlyError(
+                "Некорректный nmID Wildberries", "WB_INVALID_NM_ID"
+            )
+        payload = self._read_json(
+            "POST",
+            "content",
+            "/content/v2/get/cards/list",
+            body={
+                "settings": {
+                    "cursor": {"limit": 100},
+                    "filter": {"withPhoto": -1, "textSearch": value},
+                }
+            },
+        )
+        cards = payload.get("cards") if isinstance(payload, dict) else None
+        if not isinstance(cards, list):
+            raise WildberriesReadOnlyError(
+                "Wildberries вернул некорректный список карточек",
+                "WB_INVALID_RESPONSE",
+            )
+        for card in cards:
+            if (
+                isinstance(card, dict)
+                and str(card.get("nmID") or card.get("nmId") or "") == value
+            ):
+                return card
+        return None
+
     def get_warehouses(self):
         payload = self.request_json("GET", "marketplace", "/api/v3/warehouses")
         if not isinstance(payload, list):
@@ -356,13 +472,6 @@ class WildberriesReadOnlyClient:
         return [row for row in rows if isinstance(row, dict)]
 
     @staticmethod
-    def content_cards_unavailable():
-        raise WildberriesReadOnlyError(
-            "Карточки WB доступны только через POST и отключены политикой GET-only",
-            "WB_POST_READ_BLOCKED",
-        )
-
-    @staticmethod
     def marketplace_stocks_unavailable():
         raise WildberriesReadOnlyError(
             "Остатки FBS доступны только через POST и отключены политикой GET-only",
@@ -382,6 +491,7 @@ class WildberriesOrdersReadOnlyClient(WildberriesReadOnlyClient):
         session=None,
         sleep=None,
         logger=None,
+        jitter=None,
     ):
         super().__init__(
             token=token,
@@ -390,5 +500,6 @@ class WildberriesOrdersReadOnlyClient(WildberriesReadOnlyClient):
             session=session,
             sleep=sleep,
             logger=logger,
+            jitter=jitter,
             marketplace_base_url=base_url,
         )

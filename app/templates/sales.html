@@ -9451,7 +9451,7 @@
                 }
                 const result = payload.result;
                 if (result.outcome === 'partial') {
-                    window.VechasuNotify?.warning('WB обновлён частично: проверьте диагностику.');
+                    window.VechasuNotify?.warning(result.notification?.message || 'WB обновлён частично: проверьте диагностику.');
                     return;
                 }
                 window.VechasuNotify?.success(

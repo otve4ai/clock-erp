@@ -622,7 +622,26 @@ class BackupAdminService:
         operation = _safe_json_read(self.operation_path)
         if not operation:
             return {"active": False, "status": "idle"}
-        if operation.get("active") and time.time() - float(operation.get("updated_epoch", 0)) > 7200:
+        operation_id = str(operation.get("id") or "")
+        heartbeat = None
+        if re.fullmatch(r"[0-9a-f]{32}", operation_id):
+            heartbeat = _safe_json_read(
+                self.backup_root / "recovery" / "operations"
+                / (operation_id + ".heartbeat.json")
+            )
+        updated_epochs = [operation.get("updated_epoch")]
+        if heartbeat and heartbeat.get("operation_id") == operation_id:
+            updated_epochs.append(heartbeat.get("updated_epoch"))
+        valid_epochs = []
+        for value in updated_epochs:
+            try:
+                valid_epochs.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        last_update = max(valid_epochs or [0])
+        worker_pid = (heartbeat or {}).get("pid") or operation.get("worker_pid")
+        worker_alive = self._recovery_worker_alive(worker_pid, operation_id)
+        if operation.get("active") and time.time() - last_update > 7200 and not worker_alive:
             stale_status = "error" if operation.get("kind") == "manual_backup" else "failed"
             operation.update({
                 "active": False, "status": stale_status, "stage": stale_status,
@@ -636,7 +655,6 @@ class BackupAdminService:
                 })
             try:
                 _atomic_json_write(self.operation_path, operation)
-                operation_id = str(operation.get("id") or "")
                 if re.fullmatch(r"[0-9a-f]{32}", operation_id):
                     _atomic_json_write(
                         self.backup_root / "recovery" / "operations" / (operation_id + ".json"),
@@ -647,9 +665,28 @@ class BackupAdminService:
         for internal_key in (
             "safety_backup_path", "staging_path", "previous_instance",
             "previous_release", "target_release", "current_manifest",
+            "worker_pid",
         ):
             operation.pop(internal_key, None)
         return operation
+
+    @staticmethod
+    def _recovery_worker_alive(pid, operation_id):
+        try:
+            pid = int(pid)
+            if pid <= 1:
+                return False
+            os.kill(pid, 0)
+        except (OSError, TypeError, ValueError):
+            return False
+        command_path = Path("/proc") / str(pid) / "cmdline"
+        try:
+            command = command_path.read_bytes().replace(b"\0", b" ").decode(
+                "utf-8", "replace"
+            )
+        except OSError:
+            return True
+        return "clock-erp-recovery" in command and operation_id in command
 
     def status(self):
         backup_directory = self.backup_directory_status()
@@ -957,8 +994,31 @@ class BackupAdminService:
     def _launch_recovery(self, operation_id):
         log_root = self.backup_root / "recovery" / "logs"
         log_root.mkdir(parents=True, exist_ok=True)
+        log_path = log_root / (operation_id + "-launcher.log")
+        if self.project_root == Path("/opt/clock-erp"):
+            systemd_run = shutil.which("systemd-run")
+            if not systemd_run:
+                raise OSError("systemd-run is required for production recovery")
+            command = [
+                systemd_run,
+                "--unit=clock-erp-recovery-" + operation_id,
+                "--collect",
+                "--service-type=simple",
+                "/bin/sh", "-c",
+                'exec "$1" "$2" "$3" "$4" >>"$5" 2>&1',
+                "recovery-launcher", sys.executable, str(self.recovery_helper),
+                "run", operation_id, str(log_path),
+            ]
+            result = subprocess.run(
+                command, cwd="/", check=False,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                universal_newlines=True, timeout=self.subprocess_timeout,
+            )
+            if result.returncode != 0:
+                raise OSError("systemd-run could not start recovery helper")
+            return
         descriptor = os.open(
-            str(log_root / (operation_id + "-launcher.log")),
+            str(log_path),
             os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600,
         )
         stream = os.fdopen(descriptor, "ab", 0)
