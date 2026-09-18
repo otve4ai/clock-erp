@@ -19077,19 +19077,13 @@ JOURNAL_MONTHS = (
 
 
 def _journal_local_datetime(value):
-    raw = str(value or "").strip().replace("Z", "+00:00")
-    if len(raw) >= 6 and raw[-6] in {"+", "-"} and raw[-3] == ":":
-        raw = raw[:-3] + raw[-2:]
-    try:
-        date_format = (
-            "%Y-%m-%dT%H:%M:%S.%f%z"
-            if "." in raw else "%Y-%m-%dT%H:%M:%S%z"
-        )
-        parsed = datetime.strptime(raw, date_format)
-    except ValueError:
+    parsed_value = parse_erp_datetime(value)
+    if parsed_value is None:
         parsed = datetime.now(timezone.utc)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed_value[0]
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
     return parsed.astimezone()
 
 
