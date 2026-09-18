@@ -1,0 +1,127 @@
+.erp-toast-region.sale-stock-toast-region {
+    top: max(76px, calc(env(safe-area-inset-top) + 10px));
+}
+
+.sale-stock-toast {
+    position: relative;
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) 32px;
+    gap: 11px;
+    align-items: start;
+    max-height: min(560px, calc(100vh - 92px));
+    padding: 15px 12px 15px 15px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--theme-success, #166534) 28%, var(--theme-border, #e2e8f0));
+    border-left: 4px solid var(--theme-success, #16a34a);
+    border-radius: 13px;
+    background: var(--theme-surface-raised, #fff);
+    box-shadow: var(--theme-shadow-raised, 0 18px 42px rgba(15, 23, 42, .16));
+    color: var(--theme-text, #172033);
+    pointer-events: auto;
+    animation: erp-toast-enter 160ms ease-out both;
+}
+
+.sale-stock-toast__icon {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--theme-success-soft, #dcfce7);
+    color: var(--theme-success, #166534);
+    font-size: 18px;
+    font-weight: 900;
+}
+
+.sale-stock-toast__content {
+    min-width: 0;
+    max-height: calc(min(560px, 100vh - 92px) - 30px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+}
+
+.sale-stock-toast__title {
+    margin: 0;
+    color: var(--theme-text-strong, #0f172a);
+    font-size: 15px;
+    font-weight: 850;
+    line-height: 1.3;
+}
+
+.sale-stock-toast__order {
+    margin: 2px 0 11px;
+    color: var(--theme-text-muted, #64748b);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.sale-stock-toast__items {
+    display: grid;
+    gap: 7px;
+}
+
+.sale-stock-toast__item {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 10px;
+    padding: 9px;
+    border: 1px solid var(--theme-border, #e2e8f0);
+    border-radius: 10px;
+    background: var(--theme-surface-muted, #f8fafc);
+}
+
+.sale-stock-toast__item.is-empty {
+    border-color: #fecaca;
+    border-left: 3px solid #dc2626;
+    background: #fff1f2;
+}
+
+.sale-stock-toast__photo,
+.sale-stock-toast__photo-placeholder {
+    width: 42px;
+    height: 42px;
+    border-radius: 8px;
+    background: #eef2f7;
+}
+
+.sale-stock-toast__photo { object-fit: cover; }
+.sale-stock-toast__photo-placeholder { display: grid; place-items: center; color: #94a3b8; font-size: 18px; }
+.sale-stock-toast__product { min-width: 0; }
+.sale-stock-toast__name { overflow-wrap: anywhere; font-size: 13px; font-weight: 800; line-height: 1.35; }
+.sale-stock-toast__label { margin-top: 4px; color: var(--theme-text-muted, #64748b); font-size: 11px; }
+.sale-stock-toast__change { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; font-size: 15px; font-weight: 850; }
+.sale-stock-toast__after { color: var(--theme-success, #15803d); }
+.sale-stock-toast__item.is-empty .sale-stock-toast__after { color: #b91c1c; }
+.sale-stock-toast__warning { color: #b91c1c; font-size: 11px; font-weight: 900; letter-spacing: .025em; }
+
+.sale-stock-toast__close {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    margin: -5px -5px 0 0;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--theme-text-muted, #64748b);
+    font: inherit;
+    font-size: 21px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.sale-stock-toast__close:hover,
+.sale-stock-toast__close:focus-visible { background: var(--theme-hover, #f8fafc); color: var(--theme-text-strong, #0f172a); }
+.sale-stock-toast__close:focus-visible { outline: 2px solid var(--theme-focus, #2563eb); outline-offset: 2px; }
+
+@media (max-width: 600px) {
+    .erp-toast-region.sale-stock-toast-region { top: max(64px, calc(env(safe-area-inset-top) + 8px)); }
+    .sale-stock-toast { max-height: calc(100vh - 74px); grid-template-columns: 28px minmax(0, 1fr) 32px; padding: 13px 10px 13px 12px; }
+    .sale-stock-toast__content { max-height: calc(100vh - 102px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sale-stock-toast { animation: none; }
+}

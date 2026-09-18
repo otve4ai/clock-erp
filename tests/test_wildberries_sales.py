@@ -160,6 +160,13 @@ class WildberriesSalesTest(unittest.TestCase):
             response = client.post('/order/wildberries/123/conduct-sale', headers={'Accept': 'application/json'}, data={'original_price_0': 1, 'commission': '50'})
             self.assertEqual(response.status_code, 200)
             again = client.post('/order/wildberries/123/conduct-sale', headers={'Accept': 'application/json'})
+        self.assertEqual(
+            response.json['stock_notification']['items'][0]['stock_before'], 3,
+        )
+        self.assertEqual(
+            response.json['stock_notification']['items'][0]['stock_after'], 2,
+        )
+        self.assertIsNone(again.json['stock_notification'])
         self.assertEqual(again.json['sale_id'], response.json['sale_id'])
         self.assertIn('уже проведён', again.json['message'])
         self.assertEqual(self.stock(), 2)

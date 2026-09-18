@@ -1031,8 +1031,134 @@ class OrderTictactoySaleTest(unittest.TestCase):
         second = self.conduct()
         self.assertEqual(urlsplit(first.location).path, "/sales")
         self.assertIn("уже проведена", parse_qs(urlsplit(second.location).query)["message"][0])
+        self.assertNotIn("stock_notice", parse_qs(urlsplit(second.location).query))
         self.assertEqual(len({row["id"] for row in self.inventory.list_sales()}), 1)
         self.assertEqual(ExcelProductCatalog(self.database).get_product(self.watch["id"])["stock"], 3)
+
+    def sale_stock_notification(self, response):
+        token = parse_qs(urlsplit(response.location).query).get(
+            "stock_notice", [""]
+        )[0]
+        self.assertTrue(token)
+        with web.app.test_request_context("/sales?stock_notice=" + token):
+            return web.automatic_sale_stock_notification_from_request()
+
+    def conduct_products(self, products):
+        order = {**self.order, "products": []}
+        mappings = {}
+        for index, (catalog_product, quantity) in enumerate(products):
+            line_id = "stock-line-{}".format(index)
+            order["products"].append({
+                "id": line_id,
+                "product_id": "bitrix-{}".format(line_id),
+                "name": (
+                    catalog_product.get("name")
+                    or catalog_product.get("excel_name_raw")
+                    or "Товар"
+                ),
+                "quantity": quantity,
+                "price": 1000,
+            })
+            mappings["line:" + line_id] = {
+                "product_id": str(catalog_product["id"])
+            }
+        return self.conduct(order=order, mappings=mappings)
+
+    def test_sale_stock_notification_shows_factual_7_to_6(self):
+        product = ExcelProductCatalog(self.database).create_product(
+            name="Daniel Wellington Classic", article="DW-7", brand="DW",
+            category="Часы", stock=7,
+        )
+        response = self.conduct_products([(product, 1)])
+        payload = self.sale_stock_notification(response)
+        self.assertEqual(payload["order_number"], "18593")
+        self.assertEqual(payload["items"], [{
+            "product_id": str(product["id"]),
+            "name": "Daniel Wellington Classic",
+            "image_url": "",
+            "stock_before": 7.0,
+            "stock_after": 6.0,
+        }])
+
+    def test_sale_stock_notification_shows_factual_1_to_0(self):
+        product = ExcelProductCatalog(self.database).create_product(
+            name="Diloy Essential Black", article="DILOY-1", brand="Diloy",
+            category="Ремешки", stock=1,
+        )
+        payload = self.sale_stock_notification(
+            self.conduct_products([(product, 1)])
+        )
+        self.assertEqual(payload["items"][0]["stock_before"], 1.0)
+        self.assertEqual(payload["items"][0]["stock_after"], 0.0)
+
+    def test_sale_stock_notification_combines_multiple_nonzero_products(self):
+        first = ExcelProductCatalog(self.database).create_product(
+            name="Товар A", article="MULTI-A", brand="Test",
+            category="Часы", stock=7,
+        )
+        second = ExcelProductCatalog(self.database).create_product(
+            name="Товар B", article="MULTI-B", brand="Test",
+            category="Часы", stock=4,
+        )
+        payload = self.sale_stock_notification(
+            self.conduct_products([(first, 1), (second, 1)])
+        )
+        self.assertEqual(
+            [(item["stock_before"], item["stock_after"]) for item in payload["items"]],
+            [(7.0, 6.0), (4.0, 3.0)],
+        )
+
+    def test_sale_stock_notification_marks_each_product_that_reaches_zero(self):
+        first = ExcelProductCatalog(self.database).create_product(
+            name="Товар A", article="ZERO-A", brand="Test",
+            category="Часы", stock=1,
+        )
+        second = ExcelProductCatalog(self.database).create_product(
+            name="Товар B", article="ZERO-B", brand="Test",
+            category="Часы", stock=3,
+        )
+        third = ExcelProductCatalog(self.database).create_product(
+            name="Товар C", article="ZERO-C", brand="Test",
+            category="Часы", stock=1,
+        )
+        payload = self.sale_stock_notification(
+            self.conduct_products([(first, 1), (second, 1), (third, 1)])
+        )
+        self.assertEqual(
+            [item["name"] for item in payload["items"] if item["stock_after"] == 0],
+            ["Товар A", "Товар C"],
+        )
+
+    def test_failed_and_rolled_back_sales_have_no_stock_notification(self):
+        insufficient = {**self.order, "products": [{
+            **self.order["products"][0], "quantity": 99,
+        }]}
+        failed = self.conduct(
+            order=insufficient,
+            mappings={"line:line-1": self.mappings["line:line-1"]},
+        )
+        self.assertNotIn("stock_notice", parse_qs(urlsplit(failed.location).query))
+
+        patches = self.patches()
+        with (
+            patches[0], patches[1], patches[2], patches[3], patches[4], patches[5],
+            mock.patch.object(
+                web.OrderStatusService,
+                "change",
+                side_effect=RuntimeError("rollback probe"),
+            ),
+        ):
+            rolled_back = self.client.post(
+                "/order/18593/stock-writeoff",
+                data={"csrf_token": "test-token"},
+            )
+        self.assertNotIn(
+            "stock_notice", parse_qs(urlsplit(rolled_back.location).query)
+        )
+        self.assertEqual(
+            ExcelProductCatalog(self.database).get_product(self.watch["id"])["stock"],
+            5,
+        )
 
     def test_assembled_order_without_sale_can_be_recovered_atomically(self):
         order = {**self.order, "status": "D"}
