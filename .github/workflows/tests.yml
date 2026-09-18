@@ -13,8 +13,52 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Classify changed files
+    runs-on: ubuntu-latest
+    outputs:
+      css_only: ${{ steps.classify.outputs.css_only }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect CSS-only change
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          css_only=false
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            mapfile -t changed_files < <(git diff --name-only "origin/$BASE_REF...HEAD")
+          elif [[ "$EVENT_NAME" == "push" ]] && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            mapfile -t changed_files < <(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA")
+          else
+            # New branches and manual runs take the safe full-check path because
+            # they do not provide a trustworthy comparison range.
+            changed_files=()
+          fi
+
+          if (( ${#changed_files[@]} > 0 )); then
+            css_only=true
+            for file in "${changed_files[@]}"; do
+              [[ "$file" == *.css ]] || css_only=false
+            done
+          fi
+
+          printf 'Changed files:\n'
+          printf ' - %s\n' "${changed_files[@]}"
+          printf 'css_only=%s\n' "$css_only" | tee -a "$GITHUB_OUTPUT"
+
   tests:
     name: Python 3.10 safety checks
+    needs: changes
+    if: needs.changes.outputs.css_only != 'true'
     runs-on: ubuntu-latest
     # The complete Python suite includes real headless-browser regressions and
     # now exceeds ten minutes on shared runners while completing locally.
@@ -75,6 +119,7 @@ jobs:
 
   frontend:
     name: Frontend safety checks
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -115,18 +160,23 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck application
+        if: needs.changes.outputs.css_only != 'true'
         run: pnpm run typecheck
 
       - name: Typecheck unit tests
+        if: needs.changes.outputs.css_only != 'true'
         run: pnpm run typecheck:unit
 
       - name: Typecheck Playwright E2E
+        if: needs.changes.outputs.css_only != 'true'
         run: pnpm run typecheck:e2e
 
       - name: Lint
+        if: needs.changes.outputs.css_only != 'true'
         run: pnpm run lint
 
       - name: Unit tests
+        if: needs.changes.outputs.css_only != 'true'
         run: pnpm run test
 
       - name: Production build
@@ -136,24 +186,30 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Orders UX Playwright regression
+        if: needs.changes.outputs.css_only != 'true'
         run: pnpm exec playwright test --config playwright.orders.config.ts
 
       - name: Orders navigation concurrency regression
+        if: needs.changes.outputs.css_only != 'true'
         env:
           ERP_TEST_MODE: "1"
           ERP_AUTH_ENABLED: "0"
         run: pnpm exec playwright test e2e/orders-navigation.spec.ts --project desktop-1440
 
       - name: Local supplies Playwright regression
+        if: needs.changes.outputs.css_only != 'true'
         run: pnpm exec playwright test --config playwright.supplies.config.ts
 
       - name: Product lifecycle Playwright regression
+        if: needs.changes.outputs.css_only != 'true'
         run: pnpm run test:e2e:products
 
       - name: Repair guided workflow Playwright regression
+        if: needs.changes.outputs.css_only != 'true'
         run: pnpm exec playwright test --config playwright.repairs.config.ts
 
       - name: SMS responsive Playwright smoke
+        if: needs.changes.outputs.css_only != 'true'
         env:
           ERP_TEST_MODE: "1"
           ERP_AUTH_ENABLED: "0"
@@ -162,6 +218,7 @@ jobs:
         run: pnpm exec playwright test e2e/sms.spec.ts --project=desktop-1440
 
       - name: Write-off desktop and mobile workflow
+        if: needs.changes.outputs.css_only != 'true'
         env:
           ERP_TEST_MODE: "1"
           ERP_AUTH_ENABLED: "0"
