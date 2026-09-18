@@ -180,9 +180,11 @@ class WildberriesReadOnlyClient:
         return self._read_json("GET", service, path, params=params)
 
     def _read_json(self, method, service, path, params=None, body=None):
-        if method != "GET" and (method, service, path) != (
-            "POST", "marketplace", "/api/v3/orders/status"
-        ):
+        read_only_posts = {
+            ("POST", "marketplace", "/api/v3/orders/status"),
+            ("POST", "content", "/content/v2/get/cards/list"),
+        }
+        if method != "GET" and (method, service, path) not in read_only_posts:
             raise WildberriesReadOnlyError("Запрос запрещён", "WB_READ_ONLY_GUARANTEE")
         url = self.origins[service] + path
         headers = self._headers()
@@ -391,6 +393,38 @@ class WildberriesReadOnlyClient:
                 result[str(row["id"])] = row
         return result
 
+    def get_content_card(self, nm_id):
+        """Return one seller card by nmID through WB's read-only content API."""
+        value = str(nm_id or "").strip()
+        if not value.isdigit() or int(value) <= 0:
+            raise WildberriesReadOnlyError(
+                "Некорректный nmID Wildberries", "WB_INVALID_NM_ID"
+            )
+        payload = self._read_json(
+            "POST",
+            "content",
+            "/content/v2/get/cards/list",
+            body={
+                "settings": {
+                    "cursor": {"limit": 100},
+                    "filter": {"withPhoto": -1, "textSearch": value},
+                }
+            },
+        )
+        cards = payload.get("cards") if isinstance(payload, dict) else None
+        if not isinstance(cards, list):
+            raise WildberriesReadOnlyError(
+                "Wildberries вернул некорректный список карточек",
+                "WB_INVALID_RESPONSE",
+            )
+        for card in cards:
+            if (
+                isinstance(card, dict)
+                and str(card.get("nmID") or card.get("nmId") or "") == value
+            ):
+                return card
+        return None
+
     def get_warehouses(self):
         payload = self.request_json("GET", "marketplace", "/api/v3/warehouses")
         if not isinstance(payload, list):
@@ -436,13 +470,6 @@ class WildberriesReadOnlyClient:
                 "Wildberries вернул некорректный ответ", "WB_INVALID_RESPONSE"
             )
         return [row for row in rows if isinstance(row, dict)]
-
-    @staticmethod
-    def content_cards_unavailable():
-        raise WildberriesReadOnlyError(
-            "Карточки WB доступны только через POST и отключены политикой GET-only",
-            "WB_POST_READ_BLOCKED",
-        )
 
     @staticmethod
     def marketplace_stocks_unavailable():
