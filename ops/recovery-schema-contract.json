@@ -5,7 +5,10 @@
     "catalog.db": ["catalog_excel_products", "catalog_stock_movements", "erp_sales", "erp_receipts"],
     "customers.db": ["customers", "registry_meta"],
     "mail.db": ["mail_messages", "mail_threads"],
-    "orders.db": ["orders_snapshot", "orders_snapshot_meta"],
+    "orders.db": [
+      "orders_snapshot",
+      "orders_snapshot_meta"
+    ],
     "purchases.db": ["purchase_requests", "supplier_orders"],
     "services.db": ["services", "service_accounts"],
     "sms.db": ["sms_messages", "sms_meta"],
