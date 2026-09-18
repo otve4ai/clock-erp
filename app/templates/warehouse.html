@@ -851,6 +851,7 @@
         .warehouse-compact-summary strong { color: #172033; font-size: 15px; }
         .warehouse-compact-summary-divider { color: #cbd5e1; }
         .warehouse-ellipsis { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .warehouse-product-legacy-category { display: block; color: var(--text-muted); font-size: 11px; }
 
         .warehouse-products-table .warehouse-col-photo { width: 64px; }
         .warehouse-products-table .warehouse-col-name { width: 256px; }
@@ -5019,7 +5020,16 @@
 
                                     <td data-column-key="brand"><span class="warehouse-ellipsis" title="{{ (item.brand or 'Без бренда')|e }}">{{ item.brand or "Без бренда" }}</span></td>
 
-                                    <td data-column-key="category"><span class="warehouse-ellipsis" title="{{ (item.category or 'Без категории')|e }}">{{ item.category or "Без категории" }}</span></td>
+                                    <td data-column-key="category">
+                                        {% if item.category %}
+                                            <span class="warehouse-ellipsis" title="{{ item.category|e }}">{{ item.category }}</span>
+                                        {% elif item.category_is_legacy %}
+                                            <span class="warehouse-ellipsis" title="Legacy-значение; категория ERP не назначена">{{ item.legacy_category }}</span>
+                                            <small class="warehouse-product-legacy-category">legacy · не назначена</small>
+                                        {% else %}
+                                            <span class="warehouse-ellipsis" title="Без категории">Без категории</span>
+                                        {% endif %}
+                                    </td>
 
                                     <td data-column-key="stock" class="{% if item.stock <= 0 %}stock-zero{% else %}stock-good{% endif %}">
                                         {{ item.stock_display }}

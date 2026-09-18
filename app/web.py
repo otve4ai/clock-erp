@@ -4586,10 +4586,18 @@ def build_excel_warehouse_items(products):
             "barcode": product.get("bitrix_barcode") or "",
             "moysklad_product_id": product.get("moysklad_product_id") or "",
             "brand": product.get("excel_brand") or "",
-            "category": (
+            "category": product.get("category_name") or "",
+            "legacy_category": (
                 product.get("excel_category")
-                or product.get("category_name")
+                or product.get("bitrix_category")
                 or ""
+            ),
+            "category_is_legacy": bool(
+                not product.get("category_id")
+                and (
+                    product.get("excel_category")
+                    or product.get("bitrix_category")
+                )
             ),
             "brand_id": product.get("brand_id"),
             "category_id": product.get("category_id"),
@@ -5276,7 +5284,9 @@ def warehouse_page():
         ), None)
         if selected_brand_match:
             selected_brand_id = str(selected_brand_match["id"])
-    if selected_brand_id:
+    if selected_brand_id == "0":
+        selected_brand = "Без бренда"
+    elif selected_brand_id:
         selected_brand_match = next(
             (
                 item
@@ -5300,7 +5310,9 @@ def warehouse_page():
         ), None)
         if selected_category_match:
             selected_category_id = str(selected_category_match["id"])
-    if selected_category_id:
+    if selected_category_id == "0":
+        selected_category = "Без категории"
+    elif selected_category_id:
         selected_category_match = next(
             (
                 item
@@ -5323,7 +5335,7 @@ def warehouse_page():
             selected_category = ""
             selected_model_id = ""
             selected_model = ""
-    if not selected_brand_id:
+    if not selected_brand_id and selected_category_id != "0":
         selected_category_id = ""
         selected_category = ""
         selected_model_id = ""
