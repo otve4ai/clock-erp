@@ -85,6 +85,30 @@ class OrderLifecycleTests(unittest.TestCase):
         self.assertEqual(timeline["events"][0]["action"], "created")
         self.assertEqual(timeline["events"][0]["date_display"], "31.08.2026")
 
+    def test_localized_creation_precedes_newer_iso_transition(self):
+        with self.database.transaction() as connection:
+            connection.execute(
+                "INSERT INTO erp_audit_events (entity_type,entity_id,action,"
+                "actor_type,actor_display_name_snapshot,occurred_at,"
+                "object_label_snapshot,changes_json,metadata_json,search_text) "
+                "VALUES ('order','21129','created','external','Bitrix',"
+                "'31.08.2026 20:43:11','Заказ №21129','{}','{}','21129')"
+            )
+            AuditJournal(self.database).record(
+                "order", "21129", "status_changed", "Заказ №21129",
+                before={"status": "unconfirmed"},
+                after={"status": "confirmed"},
+                occurred_at="2026-09-01T10:00:00+00:00",
+                connection=connection,
+            )
+
+        timeline = OrderLifecycle(self.database).timeline("21129")
+
+        self.assertEqual(
+            [event["action"] for event in timeline["events"]],
+            ["created", "status_changed"],
+        )
+
     def test_two_users_and_system_are_attributed_distinctly(self):
         self.statuses.ingest("42", "N")
         self.statuses.record_synced_change("42", ERP_CONFIRMED, {

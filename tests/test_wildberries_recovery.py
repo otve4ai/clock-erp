@@ -95,6 +95,10 @@ class WildberriesRecoveryTest(unittest.TestCase):
         with self.catalog_db.connect() as connection:
             self.assertEqual(connection.execute('SELECT COUNT(*) FROM erp_order_product_mappings WHERE product_id=?', (self.product['id'],)).fetchone()[0], 8)
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM erp_audit_events WHERE entity_type='order'").fetchone()[0], 8)
+            event = connection.execute(
+                "SELECT occurred_at FROM erp_audit_events WHERE entity_id='wb:101'"
+            ).fetchone()
+            self.assertEqual(event['occurred_at'], '2026-09-06T10:00:00+00:00')
 
     def test_retries_and_concurrency_do_not_duplicate_orders_or_journal(self):
         report = self.preview()

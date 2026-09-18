@@ -183,7 +183,8 @@ class WildberriesRecovery:
                         AuditJournal().record('order', inserted['id'], 'system_created',
                             'Заказ WB №' + row['wb_order_id'], source='wildberries', actor_type='system',
                             actor_name=actor, metadata={'text_snapshot': notice, 'external_order_id': row['wb_order_id'],
-                                                       'supply_id': row['supply_id']}, connection=target)
+                                                       'supply_id': row['supply_id']},
+                            occurred_at=order['created_at'], connection=target)
                     outcome = store.upsert_wildberries([order], only_missing=True, connection=connection, on_insert=journal)
                 result['imported'] += outcome['added']
                 result['skipped'] += int(not outcome['added'])
