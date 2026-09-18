@@ -119,15 +119,15 @@ class WildberriesTransportTest(unittest.TestCase):
                 self.assertEqual(raised.exception.code, "WB_READ_ONLY_GUARANTEE")
         session.get.assert_not_called()
 
-    def test_post_only_content_and_stock_reads_are_explicitly_blocked(self):
-        client = self.client()
-        for callback in (
-            client.content_cards_unavailable,
-            client.marketplace_stocks_unavailable,
-        ):
-            with self.assertRaises(WildberriesReadOnlyError) as raised:
-                callback()
-            self.assertEqual(raised.exception.code, "WB_POST_READ_BLOCKED")
+    def test_content_card_post_is_allowlisted_but_stock_post_stays_blocked(self):
+        session = mock.Mock()
+        session.post.return_value = Response(200, {"cards": [{"nmID": 42}]})
+        client = self.client(session=session)
+        self.assertEqual(client.get_content_card(42)["nmID"], 42)
+        self.assertEqual(client.request_audit[0]["method"], "POST")
+        with self.assertRaises(WildberriesReadOnlyError) as raised:
+            client.marketplace_stocks_unavailable()
+        self.assertEqual(raised.exception.code, "WB_POST_READ_BLOCKED")
 
     def test_redirects_are_disabled_and_origin_is_exact(self):
         session = mock.Mock()
