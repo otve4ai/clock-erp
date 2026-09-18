@@ -158,23 +158,16 @@ class RecoveryV2Test(unittest.TestCase):
         connection.close()
         return value
 
-    def test_successful_data_restore_uses_verified_safety_and_staging(self):
+    def test_successful_data_restore_uses_verified_staging_and_atomic_swap(self):
         backup = self._make_backup()
         result = self._engine().run(self._operation(backup=backup)["id"])
         self.assertEqual(result["status"], "completed")
         self.assertEqual(self._payload(), "backup")
-        self.assertTrue(result["safety_backup_id"])
-        safety = self.service.resolve_backup(result["safety_backup_id"])
-        safety_metadata = json.loads(
-            self.service._metadata_path(safety["backup_id"]).read_text(encoding="utf-8")
-        )
-        self.assertEqual(safety_metadata["type"], "pre_restore")
-        self.assertEqual(safety_metadata["operation_id"], result["id"])
-        self.assertEqual(safety_metadata["integrity_status"], "verified")
+        self.assertNotIn("safety_backup_id", result)
         self.assertFalse(self.maintenance.exists())
         self.assertEqual(
             [item["stage"] for item in result["progress"]],
-            ["pending", "preflight", "safety_backup", "safety_check", "staging_restore",
+            ["pending", "preflight", "staging_restore",
              "staging_check", "maintenance", "production_restore", "service_restart",
              "health_check", "completed"],
         )
@@ -221,32 +214,6 @@ class RecoveryV2Test(unittest.TestCase):
         with mock.patch("app.services.recovery_v2.shutil.disk_usage", return_value=usage):
             result = self._engine().run(self._operation(backup=backup)["id"])
         self.assertEqual(result["error_code"], "INSUFFICIENT_SPACE")
-
-    def test_safety_backup_failure_prevents_restore(self):
-        backup = self._make_backup()
-        class Engine(RecoveryEngine):
-            def _create_safety_backup(self, operation, contract):
-                raise RecoveryError("SAFETY_BACKUP_FAILED", "Safety backup failed")
-        result = self._engine(cls=Engine).run(self._operation(backup=backup)["id"])
-        self.assertEqual(result["error_code"], "SAFETY_BACKUP_FAILED")
-        self.assertEqual(self._payload(), "current")
-
-    def test_failed_safety_archive_check_is_never_marked_verified(self):
-        backup = self._make_backup()
-
-        class Engine(RecoveryEngine):
-            def _create_safety_backup(self, operation, contract):
-                path, metadata = super()._create_safety_backup(operation, contract)
-                path.write_bytes(b"broken safety archive")
-                return path, metadata
-
-        result = self._engine(cls=Engine).run(self._operation(backup=backup)["id"])
-        metadata = json.loads(
-            self.service._metadata_path(result["safety_backup_id"]).read_text(encoding="utf-8")
-        )
-        self.assertEqual(result["status"], "failed")
-        self.assertNotEqual(metadata["integrity_status"], "verified")
-        self.assertEqual(self._payload(), "current")
 
     def test_staging_sqlite_failure_prevents_restore(self):
         backup = self._make_backup()

@@ -5,7 +5,6 @@ validated operation record; this module performs all filesystem, Git and
 service work from fixed server-side roots.
 """
 
-import datetime as dt
 import fcntl
 import hashlib
 import json
@@ -37,15 +36,12 @@ IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{8,96}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 KINDS = ("data_restore", "code_rollback", "full_restore")
 ACTIVE_STAGES = (
-    "pending", "preflight", "safety_backup", "safety_check",
-    "staging_restore", "staging_check", "maintenance",
+    "pending", "preflight", "staging_restore", "staging_check", "maintenance",
     "production_restore", "service_restart", "health_check",
 )
 STAGE_LABELS = {
     "pending": "Ожидает запуска",
     "preflight": "Предварительная проверка",
-    "safety_backup": "Safety backup",
-    "safety_check": "Проверка safety backup",
     "staging_restore": "Распаковка в staging",
     "staging_check": "Проверка staging",
     "maintenance": "Режим обслуживания",
@@ -172,25 +168,6 @@ def inspect_file_manifest(instance_root):
     return result
 
 
-def copy_sqlite(source, destination):
-    with sqlite3.connect("file:{}?mode=ro".format(source), uri=True) as source_connection:
-        backup = getattr(source_connection, "backup", None)
-        if callable(backup):
-            with sqlite3.connect(str(destination)) as destination_connection:
-                backup(destination_connection)
-            return
-    sqlite_binary = shutil.which("sqlite3")
-    if not sqlite_binary:
-        raise RecoveryError("SQLITE_BACKUP_UNAVAILABLE", "SQLite backup API/CLI недоступен")
-    quoted = str(destination).replace("'", "''")
-    result = subprocess.run(
-        [sqlite_binary, str(source), ".backup '{}'".format(quoted)],
-        check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
-    if result.returncode != 0:
-        raise RecoveryError("SQLITE_BACKUP_FAILED", "Не удалось создать SQLite safety backup")
-
-
 class RecoveryEngine:
     """Runs one recovery operation while holding both recovery and backup locks."""
 
@@ -215,7 +192,6 @@ class RecoveryEngine:
         self.operations_root = self.backup_root / "recovery" / "operations"
         self.logs_root = self.backup_root / "recovery" / "logs"
         self.staging_root = self.backup_root / "recovery" / "staging"
-        self.safety_root = self.backup_root / "safety"
         self.operation_path = self.backup_root / ".backup-admin-operation.json"
         self.operation_lock = self.backup_root / ".backup-admin-operation.lock"
         self.retention_lock = self.backup_root / ".retention.lock"
@@ -425,10 +401,10 @@ class RecoveryEngine:
                 fields = line.split(None, 4)
                 if len(fields) >= 4 and fields[3].isdigit():
                     release_size += int(fields[3])
-        required_space = current_size + (target_size * 2) + release_size
+        required_space = current_size + target_size + release_size
         free = min(free_values)
         if any(value <= required_space for value in free_values):
-            raise RecoveryError("INSUFFICIENT_SPACE", "Недостаточно места для staging и safety backup")
+            raise RecoveryError("INSUFFICIENT_SPACE", "Недостаточно места для staging восстановления")
         operation["space_required"] = required_space
         operation["space_free"] = free
 
@@ -502,74 +478,6 @@ class RecoveryEngine:
             shutil.rmtree(str(destination), ignore_errors=True)
             raise RecoveryError("ARCHIVE_LAYOUT_INVALID", "В архиве отсутствует instance")
         return instance
-
-    def _create_safety_backup(self, operation, contract):
-        self.safety_root.mkdir(parents=True, exist_ok=True)
-        os.chmod(str(self.safety_root), 0o700)
-        timestamp = dt.datetime.now().astimezone()
-        filename = "clock-erp-safety-{}-{}.tar.gz".format(
-            timestamp.strftime("%Y%m%d-%H%M%S"), operation["id"]
-        )
-        target = self.safety_root / filename
-        staging = Path(tempfile.mkdtemp(prefix=".safety-" + operation["id"] + "-", dir=str(self.backup_root)))
-        completed = False
-        metadata_path = None
-        try:
-            staged_instance = staging / "instance"
-            staged_instance.mkdir()
-            source_instance = self.project_root / "instance"
-            for source in source_instance.iterdir():
-                if source.is_symlink():
-                    raise RecoveryError("UNSAFE_PERSISTENT_FILE", "Persistent data содержит symlink")
-                destination = staged_instance / source.name
-                if source.is_dir():
-                    shutil.copytree(str(source), str(destination), symlinks=False)
-                elif source.name.endswith(("-wal", "-shm", "-journal")):
-                    continue
-                elif source.suffix == ".db":
-                    copy_sqlite(source, destination)
-                elif source.is_file():
-                    shutil.copy2(str(source), str(destination))
-            with tarfile.open(str(target), "w:gz") as archive:
-                archive.add(str(staged_instance), arcname="instance", recursive=True)
-            os.chmod(str(target), 0o600)
-            relative = str(target.relative_to(self.backup_root))
-            backup_id = self.backups._backup_id(relative)
-            parsed_timestamp = self.backups._parse_backup_timestamp(
-                timestamp.strftime("%Y%m%d"), timestamp.strftime("%H%M%S")
-            )
-            manifest = inspect_instance(staged_instance, contract)
-            contract_hash, _ = _json_hash(self.contract_path)
-            git = self.backups.git_status(history_limit=1)
-            metadata = {
-                "metadata_version": 2, "backup_id": backup_id,
-                "timestamp": parsed_timestamp, "type": "pre_restore",
-                "size": target.stat().st_size,
-                "git_commit": operation.get("source_commit"), "git_branch": git.get("branch"),
-                "schema_versions": dict((name, value["user_version"]) for name, value in manifest.items()),
-                "database_manifest": manifest, "recovery_contract": contract_hash,
-                "file_manifest": inspect_file_manifest(staged_instance),
-                "integrity_status": "not_checked", "operation_id": operation["id"],
-            }
-            metadata_path = self.backups._metadata_path(backup_id)
-            _atomic_json_write(metadata_path, metadata)
-            operation["safety_backup_id"] = backup_id
-            operation["safety_backup_path"] = relative
-            self._write_operation(operation)
-            completed = True
-            return target, metadata
-        finally:
-            shutil.rmtree(str(staging), ignore_errors=True)
-            if not completed:
-                try:
-                    target.unlink()
-                except OSError:
-                    pass
-                if metadata_path is not None:
-                    try:
-                        metadata_path.unlink()
-                    except OSError:
-                        pass
 
     def _stage_backup(self, operation, backup, metadata, contract):
         target = self.staging_root / operation["id"]
@@ -833,28 +741,9 @@ class RecoveryEngine:
             heartbeat_thread.daemon = True
             heartbeat_thread.start()
             self._stage(operation, "preflight")
-            backup, metadata, safety_contract, runtime_contract = self._preflight(operation)
+            backup, metadata, _current_contract, runtime_contract = self._preflight(operation)
             staged_instance = None
             if operation["kind"] in ("data_restore", "full_restore"):
-                self._stage(operation, "safety_backup")
-                safety_path, safety_metadata = self._create_safety_backup(operation, safety_contract)
-                self._inject("after_safety_backup")
-                self._stage(operation, "safety_check")
-                safety_staging = self.staging_root / (operation["id"] + "-safety-check")
-                try:
-                    self._safe_extract(safety_path, safety_staging)
-                    safety_manifest = inspect_instance(safety_staging / "instance", safety_contract)
-                    if not self._manifest_compatible(safety_manifest, safety_metadata["database_manifest"]):
-                        raise RecoveryError("SAFETY_CHECK_FAILED", "Safety backup не прошёл проверку")
-                    if inspect_file_manifest(safety_staging / "instance") != safety_metadata["file_manifest"]:
-                        raise RecoveryError("SAFETY_CHECK_FAILED", "Состав safety backup не подтверждён")
-                    safety_metadata["integrity_status"] = "verified"
-                    _atomic_json_write(
-                        self.backups._metadata_path(operation["safety_backup_id"]),
-                        safety_metadata,
-                    )
-                finally:
-                    shutil.rmtree(str(safety_staging), ignore_errors=True)
                 self._stage(operation, "staging_restore")
                 _staging, staged_instance = self._stage_backup(operation, backup, metadata, runtime_contract)
                 self._inject("after_staging")

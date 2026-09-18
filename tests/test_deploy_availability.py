@@ -63,17 +63,13 @@ class DeployAvailabilityTest(unittest.TestCase):
         self.assertIn("scripts/migration_preflight.py", script)
         self.assertNotIn("scripts/consolidate_global_categories.py", script)
 
-    def test_daily_backup_and_disk_guard_run_before_code_update(self):
+    def test_deploy_does_not_create_backups_and_keeps_disk_guard(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
-        backup_stage = script.index("BACKUP: retention, disk guard, daily backup")
-        retention = script.index('--backup-root "$BACKUP_DIR"', backup_stage)
-        disk_guard = script.index("check_backup_disk_usage", backup_stage)
-        daily_backup = script.index("--create-daily", backup_stage)
-        self.assertLess(retention, disk_guard)
-        self.assertLess(disk_guard, daily_backup)
         self.assertIn('readonly MAX_BACKUP_DISK_USAGE=85', script)
-        self.assertGreaterEqual(script.count("check_backup_disk_usage"), 3)
-        self.assertNotIn('BACKUP_PATH="$BACKUP_DIR/clock-erp-', script)
+        self.assertIn("check_backup_disk_usage", script)
+        self.assertNotIn("--create-daily", script)
+        self.assertNotIn("--create-temporary", script)
+        self.assertNotIn('$BACKUP_DIR/temporary', script)
 
     def test_failed_preflight_stops_before_application_update_and_restart(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
@@ -130,33 +126,27 @@ class DeployAvailabilityTest(unittest.TestCase):
 
     def test_services_vault_preflight_is_fail_closed_before_code_update(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
-        backup = script.index('create-temporary "pre-services-vault-')
         vault_preflight = script.index("SERVICES VAULT PREFLIGHT: protected key")
         application_update = script.index("APPLICATION UPDATE: fast-forward")
         smoke = script.index("scripts/services_production_smoke.py")
-        self.assertLess(backup, vault_preflight)
         self.assertLess(vault_preflight, application_update)
         self.assertLess(application_update, smoke)
         self.assertIn("scripts/service_vault_preflight.py", script)
         self.assertIn('systemctl show "$SERVICE_NAME" -p EnvironmentFiles', script)
-        self.assertIn("services-before.db", script)
-        self.assertIn("clock-erp.env-before", script)
+        self.assertIn('--database "$PROJECT_DIR/instance/services.db"', script)
         self.assertIn("SERVICE_VAULT_PROCESS_KEY_OK", script)
         self.assertNotIn("os.urandom", script)
         self.assertNotIn("SERVICE_VAULT_KEY_CREATED", script)
         self.assertNotIn("printf '%s' \"$SERVICE_VAULT_KEY\"", script)
 
-    def test_backup_uses_the_fetched_release_tool_before_code_update(self):
+    def test_deploy_uses_run_scoped_workdir_and_removes_it(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
-        fetched_tool = script.index(
-            'git show "${FETCHED_COMMIT}:scripts/retain_erp_backups.py"'
-        )
-        backup = script.index("BACKUP: retention, disk guard, daily backup")
-        application_update = script.index("APPLICATION UPDATE: fast-forward")
-        self.assertLess(fetched_tool, backup)
-        self.assertLess(backup, application_update)
-        self.assertIn('python3 "$BACKUP_TOOL_SOURCE" --backup-root', script)
-        self.assertIn('python3 -m py_compile "$BACKUP_TOOL_SOURCE"', script)
+        self.assertIn('mktemp -d /run/clock-erp-deploy.XXXXXX', script)
+        self.assertIn('cleanup_workdir', script)
+        self.assertIn('rm -rf -- "$DEPLOY_WORKDIR"', script)
+        self.assertNotIn('BACKUP_TOOL_SOURCE', script)
+        self.assertNotIn('deploy-safety-', script)
+        self.assertNotIn('production-migration-XXXXXX', script)
 
     def test_services_smoke_covers_credentials_cleanup_and_data_guard(self):
         script = DEPLOY_SCRIPT.read_text(encoding="utf-8")

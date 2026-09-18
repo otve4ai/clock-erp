@@ -1914,7 +1914,7 @@ def wildberries_recovery_import():
 WB_SYNC_STAGE_NAMES = {
     "new_orders": "новые заказы",
     "order_statuses": "статусы заказов",
-    "orders_history": "история заказов за 60 дней",
+    "orders_history": "история заказов за 90 дней",
     "full_recovery": "глубокая сверка",
     "supply_order_ids": "состав поставок",
     "recovery_order_statuses": "статусы глубокой сверки",
@@ -2454,6 +2454,10 @@ def render_orders_page(
         ),
         last_sync_at=ORDERS_CACHE.get("loaded_at") or None,
         selected_customer_id=(selected_order or {}).get("customer_id"),
+        sale_stock_notification=(
+            automatic_sale_stock_notification_from_request()
+            if request.headers.get("X-Order-Detail") != "1" else None
+        ),
         orders_query_args={
             key: value for key, value in request.args.items()
             if key != "selected_id"
@@ -3172,6 +3176,159 @@ def resolve_wildberries_sale_products(order):
     return [get_order_product_mapping(context, product) for product in products]
 
 
+SALE_STOCK_NOTIFICATION_SALT = "automatic-sale-stock-notification"
+
+
+def automatic_sale_stock_snapshot(inventory, product_ids):
+    """Read factual catalog stocks without participating in a sale write."""
+    ids = []
+    for value in product_ids:
+        try:
+            ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    ids = list(dict.fromkeys(ids))
+    if not ids:
+        return {}
+    inventory.initialize()
+    placeholders = ",".join("?" for _ in ids)
+    with inventory.database.connect() as connection:
+        rows = connection.execute(
+            "SELECT id,stock,excel_name_raw AS name,local_image_path,"
+            "bitrix_thumbnail_url,bitrix_primary_image_url "
+            "FROM catalog_excel_products WHERE active=1 AND id IN ({})".format(
+                placeholders
+            ),
+            ids,
+        ).fetchall()
+    result = {}
+    for row in rows:
+        local_image_path = str(row["local_image_path"] or "").strip()
+        result[str(row["id"])] = {
+            "product_id": str(row["id"]),
+            "name": str(row["name"] or "Товар"),
+            "image_url": (
+                url_for(
+                    "product_image_file",
+                    filename=Path(local_image_path).name,
+                )
+                if local_image_path else str(
+                    row["bitrix_thumbnail_url"]
+                    or row["bitrix_primary_image_url"]
+                    or ""
+                )
+            ),
+            "stock": float(row["stock"] or 0),
+        }
+    return result
+
+
+def safe_automatic_sale_stock_snapshot(inventory, product_ids, order_id):
+    try:
+        return automatic_sale_stock_snapshot(inventory, product_ids)
+    except Exception:
+        app.logger.exception(
+            "Automatic sale stock notification snapshot failed order_id=%s",
+            order_id,
+        )
+        return {}
+
+
+def committed_sale_stock_before(inventory, sale_id, captured_before):
+    """Use the transaction's persisted factual pre-write stock when available."""
+    if not sale_id or not captured_before:
+        return captured_before
+    try:
+        inventory.initialize()
+        with inventory.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT product_id,stock_before FROM catalog_stock_movements "
+                "WHERE sale_id=? ORDER BY rowid",
+                (str(sale_id),),
+            ).fetchall()
+    except Exception:
+        app.logger.exception(
+            "Automatic sale committed stock snapshot failed sale_id=%s",
+            sale_id,
+        )
+        return captured_before
+    result = {key: dict(value) for key, value in captured_before.items()}
+    seen = set()
+    for row in rows:
+        product_id = str(row["product_id"])
+        if product_id in seen or product_id not in result:
+            continue
+        seen.add(product_id)
+        result[product_id]["stock"] = float(row["stock_before"] or 0)
+    return result
+
+
+def build_automatic_sale_stock_notification(
+    order_number, sale_id, before, after
+):
+    items = []
+    for product_id, old_item in before.items():
+        new_item = after.get(product_id)
+        if new_item is None:
+            continue
+        stock_before = float(old_item["stock"])
+        stock_after = float(new_item["stock"])
+        if stock_before == stock_after:
+            continue
+        items.append({
+            "product_id": str(product_id),
+            "name": old_item.get("name") or new_item.get("name") or "Товар",
+            "image_url": old_item.get("image_url") or new_item.get("image_url") or "",
+            "stock_before": stock_before,
+            "stock_after": stock_after,
+        })
+    if not items:
+        return None
+    return {
+        "sale_id": str(sale_id or ""),
+        "order_number": str(order_number or ""),
+        "items": items,
+    }
+
+
+def automatic_sale_stock_notification_token(payload):
+    if not payload:
+        return ""
+    try:
+        return URLSafeTimedSerializer(
+            app.secret_key, salt=SALE_STOCK_NOTIFICATION_SALT
+        ).dumps(payload)
+    except Exception:
+        app.logger.exception("Automatic sale stock notification token failed")
+        return ""
+
+
+def automatic_sale_stock_notification_from_request():
+    token = str(request.args.get("stock_notice") or "").strip()
+    if not token:
+        return None
+    try:
+        payload = URLSafeTimedSerializer(
+            app.secret_key, salt=SALE_STOCK_NOTIFICATION_SALT
+        ).loads(token, max_age=120)
+    except BadSignature:
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        return None
+    return payload if 0 < len(payload["items"]) <= 200 else None
+
+
+def automatic_sale_touched_product_ids(prepared_items, replacement=None):
+    product_ids = [item.get("product_id") for item in prepared_items]
+    replacement = replacement or {}
+    product_ids.extend([
+        replacement.get("base_product_id"),
+        replacement.get("installed_strap_product_id"),
+        replacement.get("removed_strap_product_id"),
+    ])
+    return [value for value in product_ids if value not in (None, "")]
+
+
 @app.post("/order/wildberries/<wb_order_id>/conduct-sale")
 def wildberries_conduct_sale(wb_order_id):
     if auth_is_enabled() and (
@@ -3181,22 +3338,61 @@ def wildberries_conduct_sale(wb_order_id):
     wants_json = request.accept_mimetypes.best == "application/json"
     try:
         order = OrdersSnapshotStore().get("wb:" + str(wb_order_id))
-        service = WildberriesSales(SalesInventory(), resolve_wildberries_sale_products)
+        inventory = SalesInventory()
+        service = WildberriesSales(inventory, resolve_wildberries_sale_products)
         existing = service.find_sale(wb_order_id)
         replacement = None
         if request.form.get("operation_mode") == "strap_replacement":
             replacement = order_strap_replacement_form(request.form, request.form.get("strap_line_index"))
+        mappings = (
+            resolve_wildberries_sale_products(order)
+            if not existing and order and order.get("source") == "wildberries"
+            else []
+        )
+        product_ids = automatic_sale_touched_product_ids(
+            [
+                {"product_id": (mapping.get("product") or {}).get("id")}
+                for mapping in mappings
+                if mapping.get("state") == "mapped"
+            ],
+            replacement,
+        )
+        stock_before = (
+            safe_automatic_sale_stock_snapshot(inventory, product_ids, wb_order_id)
+            if not existing else {}
+        )
         sale = existing or service.conduct(
             order, current_sales_user_name(), current_audit_actor(), replacement
         )
+        stock_notification = None
+        if not existing:
+            stock_notification = build_automatic_sale_stock_notification(
+                wb_order_id,
+                sale.get("id"),
+                committed_sale_stock_before(
+                    inventory, sale.get("id"), stock_before
+                ),
+                safe_automatic_sale_stock_snapshot(
+                    inventory, product_ids, wb_order_id
+                ),
+            )
         WAREHOUSE_CACHE["items"] = []
         WAREHOUSE_CACHE["loaded_at"] = 0
         _cached_api_sales_records.cache_clear()
         message = "Заказ Wildberries уже проведён" if existing else "Заказ Wildberries проведён в продажу"
         if wants_json:
-            return jsonify(ok=True, message=message, sale_id=sale["id"])
+            return jsonify(
+                ok=True,
+                message=message,
+                sale_id=sale["id"],
+                stock_notification=stock_notification,
+            )
+        redirect_arguments = {"notice": "success", "message": message}
+        stock_token = automatic_sale_stock_notification_token(stock_notification)
+        if stock_token:
+            redirect_arguments["stock_notice"] = stock_token
         return redirect(url_for("wildberries_order_page", wb_order_id=wb_order_id,
-                                notice="success", message=message))
+                                **redirect_arguments))
     except PotentialStrapDuplicateError as error:
         if wants_json:
             return jsonify(ok=False, message=str(error), duplicate_matches=error.matches), 400
@@ -3537,6 +3733,17 @@ def _conduct_order_sale(order_id):
         "order_status": "completed",
     }
 
+    replacement = (
+        order_strap_replacement_form(request.form, strap_line_index)
+        if strap_replacement_requested else None
+    )
+    stock_product_ids = automatic_sale_touched_product_ids(
+        prepared_items, replacement
+    )
+    stock_before = safe_automatic_sale_stock_snapshot(
+        inventory, stock_product_ids, order_id
+    )
+
     try:
         create_arguments = {
             "user_name": actor,
@@ -3553,7 +3760,6 @@ def _conduct_order_sale(order_id):
             "audit_actor": current_audit_actor(),
         }
         if strap_replacement_requested:
-            replacement = order_strap_replacement_form(request.form, strap_line_index)
             sale = inventory.create_order_strap_replacement_sale(
                 payload, prepared_items, replacement, **create_arguments
             )
@@ -3567,20 +3773,39 @@ def _conduct_order_sale(order_id):
         WAREHOUSE_CACHE["items"] = []
         WAREHOUSE_CACHE["loaded_at"] = 0
         _cached_api_sales_records.cache_clear()
-        return redirect("/sales?" + urlencode({
+        success_message = (
+            f"Заказ №{order_number} проведён в продажу"
+            + (
+                ""
+                if status_synced
+                else "; статус ожидает синхронизации с Bitrix"
+            )
+        )
+        stock_notification = None
+        if str(sale.get("id") or "") == payload["id"]:
+            stock_notification = build_automatic_sale_stock_notification(
+                order_number,
+                sale.get("id"),
+                committed_sale_stock_before(
+                    inventory, sale.get("id"), stock_before
+                ),
+                safe_automatic_sale_stock_snapshot(
+                    inventory, stock_product_ids, order_id
+                ),
+            )
+        redirect_arguments = {
             "source": "tictactoy",
             "notice": "success",
-            "message": (
-                f"Заказ №{order_number} проведён в продажу"
-                + (
-                    ""
-                    if status_synced
-                    else "; статус ожидает синхронизации с Bitrix"
-                )
-            ),
+            "message": success_message,
             "sale_id": str(sale.get("id") or ""),
             "order_number": str(order_number),
-        }))
+        }
+        stock_token = automatic_sale_stock_notification_token(
+            stock_notification
+        )
+        if stock_token:
+            redirect_arguments["stock_notice"] = stock_token
+        return redirect("/sales?" + urlencode(redirect_arguments))
     except PotentialStrapDuplicateError as error:
         record_order_sale_attempt(
             inventory, order_id, "strap_duplicate_confirmation_required",
@@ -13766,6 +13991,7 @@ def sales_page():
             category_groups=category_groups,
         ),
         sales_product_images=sales_product_images,
+        sale_stock_notification=automatic_sale_stock_notification_from_request(),
         notice=(request.args.get("notice") or "").strip(),
         message=(request.args.get("message") or "").strip(),
         pagination_e2e=(

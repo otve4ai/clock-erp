@@ -1712,6 +1712,8 @@
         <script defer src="{{ url_for('static', filename='js/datetime-cell-e2e.js') }}"></script>
     {% endif %}
     <noscript><style>.sales-table-card-initializing { visibility: visible !important; }</style></noscript>
+    <link rel="stylesheet" href="{{ static_asset_url('css/sale-stock-notification.css') }}">
+    <script defer src="{{ static_asset_url('js/sale-stock-notification.js') }}"></script>
 </head>
 
 <body class="sales-page sales-list-page">
@@ -1759,9 +1761,10 @@
         }
     </script>
     {% include "_sidebar.html" %}
+    {% include "_sale_stock_notification.html" %}
 
     <main class="main" id="main-content" tabindex="-1">
-        {% if message %}
+        {% if message and not sale_stock_notification %}
             <div class="notice notice-{{ notice or 'success' }}" data-erp-notification-source>
                 {{ message }}
             </div>
@@ -5794,10 +5797,22 @@
             settingsPopover.close({returnFocus});
         }
 
-        const view = window.salesInitialTableLayoutView
+        const hasInitialTableLayout = Boolean(
+            window.salesInitialTableLayoutView
+        );
+        const view = hasInitialTableLayout
             ? normalizeView(window.salesInitialTableLayoutView)
             : readView();
-        applyView();
+        if (hasInitialTableLayout) {
+            // The parser-time layout already put every cell in the saved
+            // order. Re-appending the same cells after a delayed asset can
+            // produce a visible browser layout shift even though their final
+            // order is unchanged. Only refresh widths here; later user
+            // changes still use applyView() and reorder normally.
+            applyVisibilityAndWidths(true);
+        } else {
+            applyView();
+        }
         saveView();
         renderSettingsList();
 
