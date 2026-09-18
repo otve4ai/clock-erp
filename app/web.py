@@ -5333,7 +5333,10 @@ def warehouse_page():
             (
                 item
                 for item in shared_brands
-                if str(item.get("id") or "") == selected_brand_id
+                if str(
+                    item.get("id")
+                    if item.get("id") is not None else ""
+                ) == selected_brand_id
             ),
             None,
         )
@@ -5352,7 +5355,9 @@ def warehouse_page():
         ), None)
         if selected_category_match:
             selected_category_id = str(selected_category_match["id"])
-    if selected_category_id:
+    if selected_category_id == "0" and not selected_brand_id:
+        selected_category = "Без категории"
+    elif selected_category_id:
         selected_category_match = next(
             (
                 item
@@ -5362,7 +5367,10 @@ def warehouse_page():
                     only_used_by_brand=True,
                 )
                 if selected_category_id in {
-                    str(item.get("id") or ""),
+                    str(
+                        item.get("id")
+                        if item.get("id") is not None else ""
+                    ),
                     *(str(value) for value in item.get("category_ids", [])),
                 }
             ),
@@ -5376,8 +5384,9 @@ def warehouse_page():
             selected_model_id = ""
             selected_model = ""
     if not selected_brand_id:
-        selected_category_id = ""
-        selected_category = ""
+        if selected_category_id != "0":
+            selected_category_id = ""
+            selected_category = ""
         selected_model_id = ""
         selected_model = ""
     if (selected_model_id or selected_model) and selected_brand_id and selected_category_id:
