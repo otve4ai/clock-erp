@@ -194,7 +194,8 @@ class BackupAdminServiceTest(unittest.TestCase):
         connection.close()
         with mock.patch.object(self.service, "storage_status", return_value={"free": 10 ** 9}), \
              mock.patch.object(self.service, "_cached_du", return_value=4096):
-            self.service.start_manual_backup({"id": 1, "email": "owner@example.com"})
+            operation = self.service.start_manual_backup({"id": 1, "email": "owner@example.com"})
+        self.assertRegex(operation["id"], r"^[0-9a-f]{32}$")
         deadline = time.time() + 3
         status = self.service.operation_status()
         while status.get("active") and time.time() < deadline:
