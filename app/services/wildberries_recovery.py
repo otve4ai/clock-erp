@@ -51,9 +51,18 @@ class WildberriesRecovery:
         self.now = int(time.time() if now is None else now)
 
     def recent_orders(self, days=14):
-        if not 1 <= int(days) <= 30:
-            raise ValueError("Период проверки должен составлять 1–30 дней")
-        return self.client.get_orders(self.now - int(days) * 86400, self.now)
+        if not 1 <= int(days) <= 90:
+            raise ValueError("Период проверки должен составлять 1–90 дней")
+        rows = {}
+        date_to = self.now
+        date_from = self.now - int(days) * 86400
+        while date_to > date_from:
+            window_from = max(date_from, date_to - 30 * 86400)
+            for row in self.client.get_orders(window_from, date_to):
+                if isinstance(row, dict) and row.get('id'):
+                    rows[str(row['id'])] = row
+            date_to = window_from
+        return list(rows.values())
 
     def classify(self, order_ids, raw_orders, supply_id="", statuses=None, status_error=""):
         rows = []
