@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import sys
+import traceback
 from pathlib import Path
 
 
@@ -28,6 +29,13 @@ def build_engine():
     backup_script = (
         Path("/usr/local/sbin/clock-erp-backup-retention")
         if production else SOURCE_ROOT / "scripts" / "retain_erp_backups.py"
+    )
+    failure = os.environ.get("ERP_RECOVERY_TEST_FAILURE") if not production else None
+    return RecoveryEngine(
+        SOURCE_ROOT, backup_root, backup_script,
+        (Path("/opt/clock-erp-current") if production else SOURCE_ROOT)
+        / "ops" / "recovery-schema-contract.json",
+        test_mode=not production and bool(failure), failure_stage=failure,
     )
 
 
@@ -61,13 +69,6 @@ def create_console_operation(engine, kind, backup_id, target_commit, idempotency
         )
     finally:
         guard.close()
-    failure = os.environ.get("ERP_RECOVERY_TEST_FAILURE") if not production else None
-    return RecoveryEngine(
-        SOURCE_ROOT, backup_root, backup_script,
-        (Path("/opt/clock-erp-current") if production else SOURCE_ROOT)
-        / "ops" / "recovery-schema-contract.json",
-        test_mode=not production and bool(failure), failure_stage=failure,
-    )
 
 
 def main():
@@ -129,5 +130,6 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as error:
+        traceback.print_exc()
         print("RECOVERY_HELPER_FAILED:{}".format(type(error).__name__), file=sys.stderr)
         sys.exit(1)

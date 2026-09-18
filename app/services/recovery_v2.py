@@ -16,6 +16,7 @@ import sqlite3
 import subprocess
 import tarfile
 import tempfile
+import threading
 import time
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -223,6 +224,25 @@ class RecoveryEngine:
             service_name=self.service_name, remote_check=False,
         )
         self._writer_guards = []
+
+    def _heartbeat_path(self, operation_id):
+        return self.operations_root / (operation_id + ".heartbeat.json")
+
+    def _write_heartbeat(self, operation_id):
+        _atomic_json_write(self._heartbeat_path(operation_id), {
+            "operation_id": operation_id,
+            "pid": os.getpid(),
+            "updated_at": _utc_now(),
+            "updated_epoch": time.time(),
+        })
+
+    def _heartbeat_worker(self, operation_id, stopped):
+        while not stopped.is_set():
+            try:
+                self._write_heartbeat(operation_id)
+            except OSError:
+                pass
+            stopped.wait(5)
 
     def _run(self, args, cwd=None, timeout=None, input_data=None):
         return subprocess.run(
@@ -794,13 +814,24 @@ class RecoveryEngine:
         retention_guard = self.retention_lock.open("a+")
         production_changed = False
         maintenance = False
+        heartbeat_stopped = threading.Event()
+        heartbeat_thread = None
         try:
             try:
                 fcntl.flock(operation_guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 fcntl.flock(retention_guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 raise BackupBusyError("Другая backup/recovery операция уже выполняется")
+            operation["worker_pid"] = os.getpid()
             operation["started_at"] = _utc_now()
+            self._write_operation(operation)
+            heartbeat_thread = threading.Thread(
+                target=self._heartbeat_worker,
+                args=(operation_id, heartbeat_stopped),
+                name="erp-recovery-heartbeat-" + operation_id[:8],
+            )
+            heartbeat_thread.daemon = True
+            heartbeat_thread.start()
             self._stage(operation, "preflight")
             backup, metadata, safety_contract, runtime_contract = self._preflight(operation)
             staged_instance = None
@@ -937,6 +968,9 @@ class RecoveryEngine:
             )
             return operation
         finally:
+            heartbeat_stopped.set()
+            if heartbeat_thread is not None:
+                heartbeat_thread.join(timeout=6)
             retention_guard.close()
             operation_guard.close()
 
@@ -965,6 +999,7 @@ def create_operation_record(root, kind, actor, backup_id=None, target_commit=Non
         "owner": str(actor.get("email") or "unknown")[:160],
         "backup_id": backup_id, "target_commit": target_commit,
         "created_at": _utc_now(), "started_at": None,
+        "updated_at": _utc_now(), "updated_epoch": time.time(),
         "progress": [{"stage": "pending", "label": STAGE_LABELS["pending"], "at": _utc_now()}],
     }
     _atomic_json_write(operations_root / (operation_id + ".json"), operation)
