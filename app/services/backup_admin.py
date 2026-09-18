@@ -120,7 +120,9 @@ class BackupAdminService:
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            universal_newlines=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             env=environment,
         )
 
