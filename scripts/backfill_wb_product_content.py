@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sqlite3
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -89,13 +90,19 @@ def sqlite_backup(source_path, backup_dir):
     directory.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     target = directory / "orders-before-wb-content-{}.db".format(stamp)
-    source = sqlite3.connect(str(Path(source_path).resolve()))
-    destination = sqlite3.connect(str(target))
+    source = str(Path(source_path).resolve())
+    subprocess.run(
+        ["sqlite3", source, ".backup {}".format(target)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    connection = sqlite3.connect(str(target))
     try:
-        source.backup(destination)
+        if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise RuntimeError("WB backfill backup failed integrity check")
     finally:
-        destination.close()
-        source.close()
+        connection.close()
     return target
 
 
