@@ -109,10 +109,12 @@ class WildberriesSyncTest(unittest.TestCase):
         self.assertEqual(self.store.get('wb:101')['wb_status'], 'canceled_by_client')
         self.assertEqual(self.effects()[0], 0)
 
-    def test_full_recovery_uses_maximum_supported_30_day_history(self):
+    def test_full_recovery_reads_60_days_in_two_supported_30_day_windows(self):
         self.sync('full')
-        date_from, date_to = self.client.order_windows[-1]
-        self.assertEqual(date_to - date_from, 30 * 86400)
+        self.assertEqual(len(self.client.order_windows), 2)
+        self.assertTrue(all(date_to - date_from == 30 * 86400
+                            for date_from, date_to in self.client.order_windows))
+        self.assertEqual(self.client.order_windows[0][0], self.client.order_windows[1][1])
 
     def test_full_rotation_not_limited_to_recent_creation(self):
         rows = []
