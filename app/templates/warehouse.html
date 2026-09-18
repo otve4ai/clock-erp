@@ -6776,7 +6776,7 @@
                     applySavedInlineProduct(form, payload.data);
                 }
                 stockHistoryCache.delete(String(productId));
-                await renderStockHistory(productId);
+                renderStockHistory(productId);
                 resetDetailPhotoChanges(false);
                 document.getElementById("detailPhotoEditor").hidden = true;
                 form.classList.remove("is-editing");

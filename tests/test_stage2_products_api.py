@@ -205,7 +205,8 @@ class Stage2ProductsApiTest(unittest.TestCase):
             page,
         )
         self.assertIn("stockHistoryCache.delete(String(productId));", page)
-        self.assertIn("await renderStockHistory(productId);", page)
+        self.assertIn("renderStockHistory(productId);", page)
+        self.assertNotIn("await renderStockHistory(productId);", page)
         self.assertIn('cache: "no-store"', page)
         self.assertIn("historyList.dataset.productId !== cacheKey", page)
 
