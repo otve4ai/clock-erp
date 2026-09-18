@@ -5797,10 +5797,22 @@
             settingsPopover.close({returnFocus});
         }
 
-        const view = window.salesInitialTableLayoutView
+        const hasInitialTableLayout = Boolean(
+            window.salesInitialTableLayoutView
+        );
+        const view = hasInitialTableLayout
             ? normalizeView(window.salesInitialTableLayoutView)
             : readView();
-        applyView();
+        if (hasInitialTableLayout) {
+            // The parser-time layout already put every cell in the saved
+            // order. Re-appending the same cells after a delayed asset can
+            // produce a visible browser layout shift even though their final
+            // order is unchanged. Only refresh widths here; later user
+            // changes still use applyView() and reorder normally.
+            applyVisibilityAndWidths(true);
+        } else {
+            applyView();
+        }
         saveView();
         renderSettingsList();
 
