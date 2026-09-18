@@ -5602,24 +5602,34 @@
             }
 
             const cacheKey = String(productId || "");
+            historyList.dataset.productId = cacheKey;
             historyList.textContent = "Загружаем историю…";
             let productOperations = stockHistoryCache.get(cacheKey);
             if (!productOperations) {
                 try {
                     const response = await fetch(
                         `/api/v1/products/${encodeURIComponent(cacheKey)}/movements?limit=10`,
-                        {headers: {Accept: "application/json"}}
+                        {
+                            cache: "no-store",
+                            headers: {Accept: "application/json"},
+                        }
                     );
                     const payload = await response.json();
-                    if (!response.ok || !payload.ok || !Array.isArray(payload.data)) {
+                    if (!response.ok || !Array.isArray(payload.data)) {
                         throw new Error("history_unavailable");
                     }
                     productOperations = payload.data;
                     stockHistoryCache.set(cacheKey, productOperations);
                 } catch (error) {
-                    historyList.textContent = "Не удалось загрузить историю. Повторите позже.";
+                    if (historyList.dataset.productId === cacheKey) {
+                        historyList.textContent = "Не удалось загрузить историю. Повторите позже.";
+                    }
                     return;
                 }
+            }
+
+            if (historyList.dataset.productId !== cacheKey) {
+                return;
             }
 
             if (!productOperations.length) {
@@ -6765,6 +6775,8 @@
                 if (payload.data) {
                     applySavedInlineProduct(form, payload.data);
                 }
+                stockHistoryCache.delete(String(productId));
+                renderStockHistory(productId);
                 resetDetailPhotoChanges(false);
                 document.getElementById("detailPhotoEditor").hidden = true;
                 form.classList.remove("is-editing");
