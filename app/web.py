@@ -940,6 +940,54 @@ def get_order_geography(order):
     return result
 
 
+def normalize_order_geography_for_catalog(geography):
+    """Return only selector-backed values; complete an unambiguous city path."""
+    result = {
+        field: str((geography or {}).get(field) or "").strip()
+        for field in ("country", "region", "city")
+    }
+    catalog = get_tictactoy_location_catalog()
+    country_lookup = {name.casefold(): name for name in catalog}
+    country = country_lookup.get(result["country"].casefold())
+    if not country:
+        return {"country": "", "region": "", "city": ""}
+    result["country"] = country
+
+    region_lookup = {
+        name.casefold(): name for name in catalog.get(country, {})
+    }
+    region = region_lookup.get(result["region"].casefold())
+    if region:
+        result["region"] = region
+    else:
+        result["region"] = ""
+
+    if not region and result["city"]:
+        city_matches = [
+            (candidate_region, candidate_city)
+            for candidate_region, cities in catalog.get(country, {}).items()
+            for candidate_city in cities
+            if candidate_city.casefold() == result["city"].casefold()
+        ]
+        if len(city_matches) == 1:
+            result["region"], result["city"] = city_matches[0]
+            region = result["region"]
+
+    if region:
+        city_lookup = {
+            name.casefold(): name
+            for name in catalog.get(country, {}).get(region, [])
+        }
+        city = city_lookup.get(result["city"].casefold())
+        if city:
+            result["city"] = city
+        else:
+            result["city"] = ""
+    else:
+        result["city"] = ""
+    return result
+
+
 def get_order_tracking(order):
     """Resolve an existing shipment identifier from the source order."""
     value = first_order_text(order, ORDER_TRACKING_KEYS)
@@ -2278,6 +2326,7 @@ def render_orders_page(
         else {"events": [], "total_display": "", "has_multiple_days": False}
     )
 
+    order_geography = get_order_geography(selected_order or {})
     response = make_response(render_template(
         "orders.html",
         order_detail_only=request.headers.get("X-Order-Detail") == "1",
@@ -2289,7 +2338,10 @@ def render_orders_page(
         ),
         order_product_mappings=order_mappings,
         order_sale_state=sale_state,
-        order_geography=get_order_geography(selected_order or {}),
+        order_geography=order_geography,
+        order_sale_geography=normalize_order_geography_for_catalog(
+            order_geography
+        ),
         order_country_options=build_sale_combobox_options(
             TICTACTOY_SALE_COUNTRIES
         ),

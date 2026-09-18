@@ -118,6 +118,52 @@ class OrdersSnapshotStoreTest(unittest.TestCase):
         self.assertEqual(stored["customer"], "Обновлён Bitrix")
         self.assertEqual(stored["erp_private_note"], "Сохранить")
 
+    def test_new_bitrix_order_stores_normalized_geography(self):
+        incoming = dict(
+            self.orders[0], id="39999", number="ORDER-NEW",
+            country="Россия", region="Москва", city="Москва"
+        )
+
+        self.store.replace([incoming], 1002)
+
+        stored = self.store.get(incoming["id"])
+        self.assertEqual(
+            (stored["country"], stored["region"], stored["city"]),
+            ("Россия", "Москва", "Москва"),
+        )
+
+    def test_nonempty_bitrix_geography_fills_existing_empty_fields(self):
+        incoming = dict(
+            self.orders[0], country="Россия", region="Москва", city="Москва"
+        )
+
+        self.store.replace([incoming], 1002)
+
+        stored = self.store.get(incoming["id"])
+        self.assertEqual(
+            (stored["country"], stored["region"], stored["city"]),
+            ("Россия", "Москва", "Москва"),
+        )
+
+    def test_empty_bitrix_geography_does_not_erase_existing_values(self):
+        existing = dict(
+            self.orders[0], country="Россия", region="Ленинградская область",
+            city="Санкт-Петербург", location_id="107",
+        )
+        self.store.replace([existing], 1001)
+
+        incoming = dict(
+            self.orders[0], country=None, region="", city=None, location_id=""
+        )
+        self.store.replace([incoming], 1002)
+
+        stored = self.store.get(existing["id"])
+        self.assertEqual(
+            (stored["country"], stored["region"], stored["city"]),
+            ("Россия", "Ленинградская область", "Санкт-Петербург"),
+        )
+        self.assertEqual(stored["location_id"], "107")
+
     def test_search_includes_product_model_article_and_source(self):
         detailed = dict(self.orders[0])
         detailed.update(source="tictactoy", source_name="Сайт")
