@@ -76,11 +76,16 @@ class OrderLifecycle:
                 )
                 parameters.extend(sale_ids)
             rows = connection.execute(
-                "SELECT * FROM erp_audit_events WHERE {} "
-                "ORDER BY occurred_at, id".format(" OR ".join(conditions)),
+                "SELECT * FROM erp_audit_events WHERE {}".format(
+                    " OR ".join(conditions)
+                ),
                 parameters,
             ).fetchall()
-        return [AuditJournal._deserialize(row) for row in rows]
+        records = [AuditJournal._deserialize(row) for row in rows]
+        return sorted(
+            records,
+            key=lambda event: (_parse_timestamp(event["occurred_at"]), event["id"]),
+        )
 
     @staticmethod
     def _present(event):
