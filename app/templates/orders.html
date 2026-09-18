@@ -219,12 +219,12 @@
                                 {% set line = product.get('line_total') if product.get('line_total') is not none else (unit|float * qty|float if unit is not none else none) %}
                                 <article class="product-row" data-order-item-row data-order-id="{{ detail_id }}" data-order-item-id="{{ order_line_id }}">
                                     <div class="line-main">
-                                        {% set photo = (mapped.image_url if mapped else '') or product.get('image_url') %}
+                                        {% set photo = (product.get('image_url') or (mapped.image_url if mapped else '')) if is_wb else ((mapped.image_url if mapped else '') or product.get('image_url')) %}
                                         {% if photo %}<img class="product-photo" src="{{ photo }}" alt="Фото товара">{% else %}<div class="product-photo" role="img" aria-label="Нет фото">Нет фото</div>{% endif %}
                                         <div class="product-copy">
-                                            <div class="product-name">{{ (mapped.name if mapped else '') or product.get('name') or product.get('NAME') or 'Товар без названия' }}</div>
+                                            <div class="product-name">{{ (product.get('name') or (mapped.name if mapped else '')) if is_wb else ((mapped.name if mapped else '') or product.get('name') or product.get('NAME')) or 'Товар без названия' }}</div>
                                             <div class="product-note">{% if is_wb %}{{ qty }} шт.{% else %}{{ product.get('brand') or (mapped.brand if mapped else 'Бренд не указан') }} · {{ product.get('category') or (mapped.category if mapped else 'Категория не указана') }} · {{ qty }} шт.{% endif %}</div>
-                                            <div class="product-note">Артикул: {{ product.get('sku') or product.get('SKU') or product.get('article') or product.get('ARTICLE') or (mapped.article if mapped else '') or '—' }}</div>
+                                            <div class="product-note">Артикул: {{ (product.get('display_article') or product.get('article') or product.get('vendor_code')) if is_wb else (product.get('sku') or product.get('SKU') or product.get('article') or product.get('ARTICLE') or (mapped.article if mapped else '')) or '—' }}</div>
                                             <div class="mapping" data-order-mapping{% if mapped and mapping.state == 'mapped' and mapping.mapping_method != 'manual' %} hidden{% endif %}>
                                                 <span class="map-state bad" data-order-mapping-state{% if mapped and mapping.state == 'mapped' %} hidden{% endif %}>{{ mapping.state_label if mapping and mapping.state not in ['unmapped', 'missing_external_id'] else 'Не удалось определить товар ERP' }}</span>
                                                 <div data-order-mapping-summary hidden><div class="mapping-card"><div class="mapping-copy"><strong data-mapping-product-name></strong><span data-mapping-product-meta></span></div></div></div>

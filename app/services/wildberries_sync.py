@@ -125,6 +125,7 @@ def run_sync(client, store, catalog_path, mode='fast', locked=False):
         try:
             result.update(synchronize_wildberries_orders(client, store))
             completed += 1
+            failures.extend(result.get('content_errors') or [])
             if result['errors']:
                 failures.append({'error': 'Некорректные данные новых WB-заказов',
                                  'stage': 'new_orders'})
