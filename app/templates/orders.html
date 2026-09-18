@@ -12,6 +12,8 @@
     <link rel="stylesheet" href="{{ static_asset_url('css/catalog-combobox.css') }}">
     <script defer src="{{ static_asset_url('js/catalog-combobox.js') }}"></script>
     <link rel="stylesheet" href="{{ static_asset_url('css/orders.css') }}">
+    <link rel="stylesheet" href="{{ static_asset_url('css/sale-stock-notification.css') }}">
+    <script defer src="{{ static_asset_url('js/sale-stock-notification.js') }}"></script>
 </head>
 <body class="orders-page" data-has-selected-order="{{ 1 if selected_order_explicit|default(false) else 0 }}">
 {% endif %}
@@ -49,6 +51,7 @@
 {% if not order_detail_only %}
 <div class="app">
     {% include "_sidebar.html" %}
+    {% include "_sale_stock_notification.html" %}
     <main class="main" id="main-content" tabindex="-1">
         {% set selected_sync = selected_order.get('sync_state') if selected_order else '' %}
         {% set sync_class = 'error' if sync_error or selected_sync == 'error' else 'partial' if selected_sync == 'partial' else '' %}
@@ -797,7 +800,8 @@
             const event=document.createElement('p');event.textContent='Продажа проведена';document.querySelector('.order-wb-history')?.append(event);
             document.querySelector('[data-order-readiness-warning]')?.remove();
             document.getElementById('saleBlockReason')?.remove();
-            window.VechasuNotify?.success(payload.message);
+            if(payload.stock_notification)window.VechasuSaleStockNotification?.show(payload.stock_notification);
+            else window.VechasuNotify?.success(payload.message);
         }catch(error){errorBox.textContent=error.message;errorBox.hidden=false;window.VechasuNotify?.error(error.message);wbSalePending=false;strapSubmit.disabled=false;}
     }
     function handleOrderSaleSubmit(event){if(saleForm.hasAttribute('data-wb-sale-form')){event.preventDefault();conductWildberriesSale();return;}if(operationMode.value==='strap_replacement'){const base=saleForm.elements.namedItem('strap_base_product_id').value;const installed=saleForm.elements.namedItem('installed_strap_product_id').value;const removedMode=saleForm.elements.namedItem('removed_strap_mode').value;const removed=saleForm.elements.namedItem('removed_strap_product_id').value;if(!base||!installed||(removedMode==='existing'&&!removed)||(removedMode==='created'&&(!saleForm.elements.namedItem('new_removed_strap_brand').value.trim()||!saleForm.elements.namedItem('new_removed_strap_name').value.trim()))){event.preventDefault();window.VechasuNotify?.error('Заполните обязательные поля замены ремешка');return;}saveStrapDraft();if(!setPending(event.currentTarget,'Заменяем и проводим…'))event.preventDefault();}else{try{sessionStorage.removeItem(strapStorageKey);}catch(error){}if(!setPending(event.currentTarget,'Проводим…'))event.preventDefault();}}
