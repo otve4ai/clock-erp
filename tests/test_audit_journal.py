@@ -222,6 +222,41 @@ class AuditJournalTest(unittest.TestCase):
         self.assertFalse(hasattr(self.journal, "update_event"))
         self.assertFalse(hasattr(self.journal, "delete_event"))
 
+    def test_legacy_bitrix_timestamp_is_canonicalized_and_sorted_by_real_date(self):
+        self.journal.record(
+            "order", "old", "created", "Заказ №old",
+            occurred_at="31.08.2026 20:43:11",
+        )
+        self.journal.record(
+            "order", "new", "created", "Заказ №new",
+            occurred_at="2026-09-18T11:00:00+00:00",
+        )
+
+        events = self.journal.list_events(entity_type="order", limit=10)["events"]
+
+        self.assertEqual([event["entity_id"] for event in events], ["new", "old"])
+        self.assertRegex(events[1]["occurred_at"], r"^2026-08-31T")
+
+    def test_preexisting_legacy_timestamp_does_not_float_to_top(self):
+        with self.database.transaction() as connection:
+            connection.execute(
+                "INSERT INTO erp_audit_events (entity_type,entity_id,action,"
+                "actor_type,actor_display_name_snapshot,occurred_at,"
+                "object_label_snapshot,changes_json,metadata_json,search_text) "
+                "VALUES ('order','legacy','created','external','Bitrix',"
+                "'31.08.2026 20:43:11','Заказ №legacy','{}','{}','legacy')"
+            )
+        self.journal.record(
+            "order", "current", "created", "Заказ №current",
+            occurred_at="2026-09-18T11:00:00+00:00",
+        )
+
+        events = self.journal.list_events(entity_type="order", limit=10)["events"]
+
+        self.assertEqual([event["entity_id"] for event in events], ["current", "legacy"])
+        rendered = web.serialize_journal_event(events[1])
+        self.assertEqual(rendered["timestamp_display"], "31.08.2026 20:43:11")
+
     def test_brand_and_category_feed_context_uses_immutable_snapshots(self):
         brand = self.catalog.create_brand("Casio", actor_name="Максим")
         brand_created = web.serialize_journal_event(

@@ -5,6 +5,7 @@ import json
 from datetime import datetime, time as datetime_time, timedelta, timezone
 
 from app.catalog_db import CatalogDatabase
+from app.time_ranking import parse_erp_datetime
 
 
 ENTITY_TYPES = {
@@ -71,6 +72,30 @@ SENSITIVE_MARKERS = {
 
 def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def canonical_audit_timestamp(value):
+    """Store sortable UTC timestamps while accepting legacy ERP date formats."""
+    parsed_value = parse_erp_datetime(value)
+    if parsed_value is None:
+        return str(value or utc_now())
+    parsed = parsed_value[0]
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+# Old Bitrix events may contain ``DD.MM.YYYY HH:MM:SS``.  Normalize those rows
+# inside read queries so they neither float above current ISO events nor break
+# date filters and keyset pagination. New writes are canonicalized above.
+OCCURRED_AT_SORT_SQL = (
+    "CASE WHEN occurred_at GLOB "
+    "'[0-9][0-9].[0-9][0-9].[0-9][0-9][0-9][0-9] "
+    "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]*' "
+    "THEN substr(occurred_at,7,4)||'-'||substr(occurred_at,4,2)||'-'||"
+    "substr(occurred_at,1,2)||'T'||substr(occurred_at,12) "
+    "ELSE occurred_at END"
+)
 
 
 def _safe_key(key):
@@ -167,7 +192,7 @@ class AuditJournal:
         actor_id, actor_type, actor_name = actor_snapshot(
             actor_id, actor_name, actor_type
         )
-        occurred_at = str(occurred_at or utc_now())
+        occurred_at = canonical_audit_timestamp(occurred_at)
         secondary = str(object_secondary or "")[:500]
         status = str(status or "")[:120]
         source = str(source or "")[:120]
@@ -293,33 +318,47 @@ class AuditJournal:
         except (TypeError, ValueError):
             parsed_to = None
         if parsed_from:
-            conditions.append("occurred_at >= ?")
+            conditions.append("{} >= ?".format(OCCURRED_AT_SORT_SQL))
             local_timezone = datetime.now().astimezone().tzinfo
             parameters.append(datetime.combine(
                 parsed_from, datetime_time.min, tzinfo=local_timezone
             ).astimezone(timezone.utc).isoformat())
         if parsed_to:
             end = parsed_to + timedelta(days=1)
-            conditions.append("occurred_at < ?")
+            conditions.append("{} < ?".format(OCCURRED_AT_SORT_SQL))
             local_timezone = datetime.now().astimezone().tzinfo
             parameters.append(datetime.combine(
                 end, datetime_time.min, tzinfo=local_timezone
             ).astimezone(timezone.utc).isoformat())
         decoded = self.decode_cursor(cursor)
         if decoded:
-            conditions.append("(occurred_at < ? OR (occurred_at = ? AND id < ?))")
+            conditions.append(
+                "({0} < ? OR ({0} = ? AND id < ?))".format(
+                    OCCURRED_AT_SORT_SQL
+                )
+            )
             parameters.extend([decoded[0], decoded[0], decoded[1]])
         limit = min(100, max(1, int(limit)))
-        sql = "SELECT * FROM erp_audit_events"
+        sql = "SELECT *, {} AS _occurred_at_sort FROM erp_audit_events".format(
+            OCCURRED_AT_SORT_SQL
+        )
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
-        sql += " ORDER BY occurred_at DESC, id DESC LIMIT ?"
+        sql += " ORDER BY _occurred_at_sort DESC, id DESC LIMIT ?"
         parameters.append(limit + 1)
         with self.database.connect() as connection:
             rows = connection.execute(sql, parameters).fetchall()
         has_more = len(rows) > limit
-        events = [self._deserialize(row) for row in rows[:limit]]
-        next_cursor = self.encode_cursor(events[-1]) if has_more and events else ""
+        visible_rows = rows[:limit]
+        events = [self._deserialize(row) for row in visible_rows]
+        if has_more and visible_rows:
+            cursor_event = {
+                "occurred_at": visible_rows[-1]["_occurred_at_sort"],
+                "id": visible_rows[-1]["id"],
+            }
+            next_cursor = self.encode_cursor(cursor_event)
+        else:
+            next_cursor = ""
         return {"events": events, "next_cursor": next_cursor, "has_more": has_more}
 
     def get_event(self, event_id):
@@ -365,6 +404,7 @@ class AuditJournal:
     @staticmethod
     def _deserialize(row):
         event = dict(row)
+        event.pop("_occurred_at_sort", None)
         for key in ("changes_json", "metadata_json"):
             try:
                 event[key[:-5]] = json.loads(event.pop(key) or "{}")
