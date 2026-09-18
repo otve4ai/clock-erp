@@ -12,7 +12,6 @@ from unittest import mock
 from scripts.retain_erp_backups import (
     _backup_sqlite_database,
     apply_plan,
-    archive_runtime_backups,
     create_backup,
     discover_backups,
     retention_plan,
@@ -57,67 +56,26 @@ class BackupRetentionTest(unittest.TestCase):
         self.assertEqual(by_path[within_window], "KEEP")
         self.assertEqual(by_path[expired], "DELETE")
 
-    def test_temporary_policy_expires_after_exactly_three_days(self):
-        now = dt.datetime(2026, 8, 21, 16, 0, 0)
-        temporary = self.root / "temporary"
-        recent = self.full_backup(
-            dt.datetime(2026, 8, 18, 16, 0, 0), temporary, "clock-erp-temp"
+    def test_manual_backups_are_never_rotated(self):
+        manual = self.root / "manual"
+        backup = self.full_backup(
+            dt.datetime(2020, 1, 1, 12, 0, 0), manual, "clock-erp-manual"
         )
-        recent_target = temporary / "clock-erp-temp-20260818-160000-import.tar.gz"
-        recent.rename(recent_target)
-        recent = recent_target
-        expired = self.full_backup(
-            dt.datetime(2026, 8, 18, 15, 59, 59), temporary, "clock-erp-temp"
+        target = manual / (
+            "clock-erp-manual-20200101-120000-"
+            "0123456789abcdef0123456789abcdef.tar.gz"
         )
-        expired_target = temporary / "clock-erp-temp-20260818-155959-sync.tar.gz"
-        expired.rename(expired_target)
-        expired = expired_target
+        backup.rename(target)
 
         actions = retention_plan(
-            discover_backups(self.root)["temporary"], now, policy="temporary"
+            discover_backups(self.root)["manual"],
+            dt.datetime(2026, 8, 21, 16, 0, 0),
+            policy="manual",
         )
-        by_path = {path: action for action, _timestamp, path in actions}
-        self.assertEqual(by_path[recent], "KEEP")
-        self.assertEqual(by_path[expired], "DELETE")
 
-    def test_nested_inventory_snapshot_uses_temporary_retention(self):
-        directory = self.root / "temporary" / "inventory-scope-migrations"
-        directory.mkdir(parents=True)
-        snapshot = directory / (
-            "catalog-before-inventory-scopes-20260818-155959-644266.db"
-        )
-        with sqlite3.connect(str(snapshot)) as connection:
-            connection.execute("CREATE TABLE inventory (id INTEGER)")
-
-        temporary = discover_backups(self.root)["temporary"]
-
-        self.assertEqual(len(temporary), 1)
-        self.assertEqual(temporary[0][0], dt.datetime(2026, 8, 18, 15, 59, 59))
-        self.assertEqual(temporary[0][1], snapshot)
-        self.assertTrue(temporary[0][2])
-
-    def test_operational_policy_expires_after_thirty_days(self):
-        now = dt.datetime(2026, 8, 21, 16, 0, 0)
-        operational = self.root / "model-backfill"
-        operational.mkdir()
-        recent = operational / "catalog.db-models-20260722-160000-new.bak"
-        expired = operational / "catalog.db-models-20260722-155959-old.bak"
-        for path in (recent, expired):
-            with sqlite3.connect(str(path)) as connection:
-                connection.execute("CREATE TABLE products (id INTEGER)")
-
-        actions = retention_plan(
-            discover_backups(self.root)["operational"],
-            now,
-            policy="operational",
-        )
-        by_path = {path: action for action, _timestamp, path in actions}
-        self.assertEqual(by_path[recent], "KEEP")
-        self.assertEqual(by_path[expired], "DELETE")
-
+        self.assertEqual(actions[0][0], "KEEP")
         apply_plan(actions, self.root, apply_changes=True)
-        self.assertTrue(recent.is_file())
-        self.assertFalse(expired.exists())
+        self.assertTrue(target.is_file())
 
     def test_unknown_and_invalid_files_are_never_delete_candidates(self):
         unknown = self.root / "site-backup-20260821.tar.gz"
@@ -202,29 +160,21 @@ class BackupRetentionTest(unittest.TestCase):
             for name in names
         ))
 
-    def test_runtime_backups_are_moved_to_managed_archive(self):
-        project = Path(self.temp.name) / "project"
+    def test_manual_creation_uses_dedicated_directory(self):
+        project = Path(self.temp.name) / "manual-project"
         instance = project / "instance"
-        nested = instance / "backups" / "old"
-        nested.mkdir(parents=True)
-        with sqlite3.connect(str(nested / "catalog.db")) as connection:
+        instance.mkdir(parents=True)
+        with sqlite3.connect(str(instance / "catalog.db")) as connection:
             connection.execute("CREATE TABLE products (id INTEGER)")
-        strap = instance / "catalog.db.backup-strap-20260723"
-        with sqlite3.connect(str(strap)) as connection:
-            connection.execute("CREATE TABLE products (id INTEGER)")
-        now = dt.datetime(2026, 8, 21, 3, 17, 0)
 
-        target = archive_runtime_backups(
-            project, self.root, now, apply_changes=True
+        target = create_backup(
+            project, self.root, dt.datetime(2026, 8, 21, 12, 0, 0),
+            "manual", operation_id="0123456789abcdef0123456789abcdef",
+            apply_changes=True,
         )
 
-        self.assertFalse((instance / "backups").exists())
-        self.assertFalse(strap.exists())
-        self.assertTrue((target / "backups" / "old" / "catalog.db").is_file())
-        self.assertTrue((target / strap.name).is_file())
-        operational = discover_backups(self.root)["operational"]
-        self.assertEqual(operational[0][1], target)
-        self.assertTrue(operational[0][2])
+        self.assertEqual(target.parent, self.root / "manual")
+        self.assertEqual(len(discover_backups(self.root)["manual"]), 1)
 
     def test_legacy_python_uses_sqlite_cli_backup(self):
         class LegacyConnection:
