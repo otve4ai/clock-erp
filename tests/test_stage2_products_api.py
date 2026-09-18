@@ -164,6 +164,51 @@ class Stage2ProductsApiTest(unittest.TestCase):
             404,
         )
 
+    def test_product_history_returns_existing_and_new_stock_changes(self):
+        product_id = ExcelProductCatalog(CatalogDatabase(self.database_path)).create_product(
+            name="History Watch", article="HISTORY-1", brand="Alpha",
+            category="Часы", stock=3,
+        )["id"]
+
+        for stock in (2, 3):
+            response = self.client.patch(
+                "/api/products/{}".format(product_id),
+                json={"stock": stock, "stock_reason": "History regression"},
+            )
+            self.assertEqual(response.status_code, 200)
+
+        response = self.client.get(
+            "/api/v1/products/{}/movements?limit=10".format(product_id)
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertNotIn("ok", payload)
+        self.assertIsNone(payload["error"])
+        changes = {
+            (movement["stock_before"], movement["stock_after"])
+            for movement in payload["data"]
+        }
+        self.assertIn((3, 2), changes)
+        self.assertIn((2, 3), changes)
+
+    def test_product_history_ui_uses_api_envelope_and_refreshes_after_save(self):
+        page = (Path(web.app.root_path) / "templates" / "warehouse.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "if (!response.ok || !Array.isArray(payload.data))",
+            page,
+        )
+        self.assertNotIn(
+            "!response.ok || !payload.ok || !Array.isArray(payload.data)",
+            page,
+        )
+        self.assertIn("stockHistoryCache.delete(String(productId));", page)
+        self.assertIn("await renderStockHistory(productId);", page)
+        self.assertIn('cache: "no-store"', page)
+        self.assertIn("historyList.dataset.productId !== cacheKey", page)
+
     def test_product_price_can_be_missing_zero_added_and_cleared(self):
         page = (Path(web.app.root_path) / "templates" / "warehouse.html").read_text(
             encoding="utf-8"
