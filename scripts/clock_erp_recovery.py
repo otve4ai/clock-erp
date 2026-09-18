@@ -126,7 +126,6 @@ def main():
     safe.pop("previous_instance", None)
     safe.pop("previous_release", None)
     safe.pop("staging_path", None)
-    safe.pop("safety_backup_path", None)
     print(serialize_result(safe))
     return 0 if result.get("status") not in ("failed", "critical") else 1
 

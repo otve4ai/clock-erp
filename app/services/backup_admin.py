@@ -19,25 +19,10 @@ from pathlib import Path
 
 DAILY_RE = re.compile(r"^clock-erp-daily-(\d{8})-(\d{6})\.tar\.gz$")
 LEGACY_DAILY_RE = re.compile(r"^clock-erp-(\d{8})-(\d{6})\.tar\.gz$")
-TEMP_RE = re.compile(
-    r"^clock-erp-temp-(\d{8})-(\d{6})-([A-Za-z0-9_.-]+)\.tar\.gz$"
+MANUAL_RE = re.compile(
+    r"^clock-erp-manual-(\d{8})-(\d{6})-([0-9a-f]{32})\.tar\.gz$"
 )
-LEGACY_PRE_DEPLOY_RE = re.compile(
-    r"^clock-erp-pre-deploy-pr\d+-(\d{8})-(\d{6})\.tar\.gz$"
-)
-LEGACY_PRE_PRODUCT_RE = re.compile(
-    r"^clock-erp-pre-product-analytics-(\d{8})-(\d{6})\.tar\.gz$"
-)
-LEGACY_P0_RE = re.compile(
-    r"^clock-erp-p0-(\d{8})-(\d{6})-[0-9a-f]+\.tar\.gz$"
-)
-SAFETY_RE = re.compile(
-    r"^clock-erp-safety-(\d{8})-(\d{6})-([0-9a-f]{32})\.tar\.gz$"
-)
-PRESERVED_ORDERS_DIR_RE = re.compile(r"^preserved-orders-\d+$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
-MANUAL_LABEL = "manual"
-PREFLIGHT_LABEL = "pre-restore"
 
 
 class BackupAdminError(RuntimeError):
@@ -165,26 +150,8 @@ class BackupAdminService:
         candidates = []
         locations = (
             (self.backup_root / "daily", "automatic", (DAILY_RE,)),
-            (
-                self.backup_root,
-                "automatic",
-                (DAILY_RE, LEGACY_DAILY_RE, LEGACY_PRE_DEPLOY_RE,
-                 LEGACY_PRE_PRODUCT_RE),
-            ),
-            (self.backup_root / "temporary", "temporary", (TEMP_RE, LEGACY_P0_RE)),
-            (self.backup_root / "safety", "pre_restore", (SAFETY_RE,)),
-        )
-        try:
-            preserved_directories = [
-                path for path in self.backup_root.iterdir()
-                if path.is_dir() and not path.is_symlink()
-                and PRESERVED_ORDERS_DIR_RE.match(path.name)
-            ]
-        except OSError:
-            preserved_directories = []
-        locations += tuple(
-            (directory, "automatic", (DAILY_RE,))
-            for directory in preserved_directories
+            (self.backup_root, "automatic", (LEGACY_DAILY_RE,)),
+            (self.backup_root / "manual", "manual", (MANUAL_RE,)),
         )
         for directory, default_type, patterns in locations:
             try:
@@ -200,21 +167,8 @@ class BackupAdminService:
                     if match is not None:
                         break
                 backup_type = default_type
-                label = ""
                 if match is None:
                     continue
-                if (LEGACY_PRE_DEPLOY_RE.match(path.name)
-                        or LEGACY_PRE_PRODUCT_RE.match(path.name)):
-                    backup_type = "temporary"
-                temporary_match = TEMP_RE.match(path.name)
-                if temporary_match is not None:
-                    match = temporary_match
-                    label = match.group(3)
-                    backup_type = (
-                        "pre_restore" if label.startswith(PREFLIGHT_LABEL)
-                        else "manual" if label.startswith(MANUAL_LABEL)
-                        else "temporary"
-                    )
                 try:
                     relative = str(path.relative_to(self.backup_root))
                     timestamp = self._parse_backup_timestamp(match.group(1), match.group(2))
@@ -227,7 +181,7 @@ class BackupAdminService:
                     metadata.get("backup_id") == backup_id
                     and metadata.get("timestamp") == timestamp
                     and metadata.get("size") == stat.st_size
-                    and metadata.get("type") in ("automatic", "manual", "pre_restore")
+                    and metadata.get("type") in ("automatic", "manual")
                     and metadata.get("integrity_status") in ("verified", "failed", "not_checked")
                     and isinstance(metadata.get("schema_versions"), dict)
                     and (
@@ -663,7 +617,7 @@ class BackupAdminService:
             except OSError:
                 pass
         for internal_key in (
-            "safety_backup_path", "staging_path", "previous_instance",
+            "staging_path", "previous_instance",
             "previous_release", "target_release", "current_manifest",
             "worker_pid",
         ):
@@ -866,7 +820,7 @@ class BackupAdminService:
             result = self._run([
                 str(self.backup_script), "--backup-root", str(self.backup_root),
                 "--project-root", str(self.project_root),
-                "--create-temporary", MANUAL_LABEL + "-" + operation_id,
+                "--create-manual", operation_id,
                 "--apply",
             ], cwd=self.project_root, timeout=1800)
             if result.returncode != 0:

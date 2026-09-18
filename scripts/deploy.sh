@@ -38,7 +38,6 @@ readonly REMOTE_NAME="origin"
 readonly PROJECT_DIR="/opt/clock-erp"
 readonly SERVICE_NAME="clock-erp"
 readonly BACKUP_DIR="/opt/clock-erp-backups"
-readonly REHEARSAL_ROOT="$BACKUP_DIR/migration-rehearsals"
 readonly RETENTION_TOOL="/usr/local/sbin/clock-erp-backup-retention"
 readonly RETENTION_CRON="/etc/cron.d/clock-erp-backup-retention"
 readonly RETENTION_LOGROTATE="/etc/logrotate.d/clock-erp-backup-retention"
@@ -71,8 +70,9 @@ PREVIOUS_COMMIT=""
 CURRENT_COMMIT=""
 FETCHED_COMMIT=""
 PRODUCTION_SQLITE_VERSION=""
+DEPLOY_WORKDIR=""
+REHEARSAL_ROOT=""
 RELEASE_DIR=""
-BACKUP_TOOL_SOURCE=""
 SERVICE_STOPPED=0
 DEPLOY_UPDATED=0
 CATALOG_MIGRATION_REQUIRED=0
@@ -103,7 +103,8 @@ SMS_ROLLBACK_BACKUP=""
 SMS_DATABASE_EXISTED=0
 SERVICES_ROLLBACK_BACKUP=""
 SERVICES_DATABASE_EXISTED=0
-DEPLOY_SAFETY_DIR=""
+DEPLOY_CHECK_DIR=""
+MIGRATION_ROLLBACK_DIR=""
 MAIL_ROLLBACK_BACKUP=""
 MAIL_DATABASE_EXISTED=0
 DATA_SNAPSHOT_BEFORE=""
@@ -120,14 +121,10 @@ BITRIX_ORDERS_EXPORT_TARGET_EXISTED=0
 PREVIOUS_RELEASE=""
 RELEASE_SWITCHED=0
 
-cleanup_release() {
-    if [[ -n "$RELEASE_DIR" && "$RELEASE_DIR" == "$BACKUP_DIR/temporary/release-"* ]]; then
-        rm -rf -- "$RELEASE_DIR"
-        RELEASE_DIR=""
-    fi
-    if [[ -n "$BACKUP_TOOL_SOURCE" && "$BACKUP_TOOL_SOURCE" == "$BACKUP_DIR/temporary/retention-"*.py ]]; then
-        rm -f -- "$BACKUP_TOOL_SOURCE"
-        BACKUP_TOOL_SOURCE=""
+cleanup_workdir() {
+    if [[ -n "$DEPLOY_WORKDIR" && "$DEPLOY_WORKDIR" == /run/clock-erp-deploy.* ]]; then
+        rm -rf -- "$DEPLOY_WORKDIR"
+        DEPLOY_WORKDIR=""
     fi
 }
 
@@ -260,7 +257,7 @@ rollback() {
     fi
     systemctl is-active --quiet "$SERVICE_NAME" \
         && printf 'ROLLBACK_OK: service active\n' >&2
-    cleanup_release
+    cleanup_workdir
     exit "$exit_code"
 }
 trap rollback ERR
@@ -293,16 +290,18 @@ server_source_status="$(
     || { printf 'Server source tree is dirty; deployment stopped\n' >&2; false; }
 systemctl is-active --quiet "$SERVICE_NAME"
 PREVIOUS_COMMIT="$(git rev-parse HEAD)"
-mkdir -p "$BACKUP_DIR" "$BACKUP_DIR/temporary" "$REHEARSAL_ROOT"
-chmod 700 "$BACKUP_DIR" "$BACKUP_DIR/temporary" "$REHEARSAL_ROOT"
+mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
 check_backup_disk_usage
+DEPLOY_WORKDIR="$(mktemp -d /run/clock-erp-deploy.XXXXXX)"
+chmod 700 "$DEPLOY_WORKDIR"
+REHEARSAL_ROOT="$DEPLOY_WORKDIR/rehearsals"
+DEPLOY_CHECK_DIR="$DEPLOY_WORKDIR/checks"
+mkdir -p "$REHEARSAL_ROOT" "$DEPLOY_CHECK_DIR"
+chmod 700 "$REHEARSAL_ROOT" "$DEPLOY_CHECK_DIR"
 
 git fetch "$REMOTE_NAME"
 FETCHED_COMMIT="$(git rev-parse "$REMOTE_NAME/$EXPECTED_BRANCH")"
-BACKUP_TOOL_SOURCE="$(mktemp "$BACKUP_DIR/temporary/retention-XXXXXX.py")"
-git show "${FETCHED_COMMIT}:scripts/retain_erp_backups.py" > "$BACKUP_TOOL_SOURCE"
-chmod 700 "$BACKUP_TOOL_SOURCE"
-python3 -m py_compile "$BACKUP_TOOL_SOURCE"
 changed_files="$(git diff --name-only "$PREVIOUS_COMMIT" "$FETCHED_COMMIT")"
 if printf '%s\n' "$changed_files" | grep -Eq \
     '^(app/(catalog_db|catalog_migration_steps|schema_migrations)\.py|app/catalog_schema_manifest\.json|scripts/migration_preflight\.py)$'; then
@@ -368,27 +367,18 @@ if [[ -f instance/catalog.db ]]; then
     fi
 fi
 
-printf 'BACKUP: retention, disk guard, daily backup\n'
-FAILURE_STAGE="BACKUP"
-python3 "$BACKUP_TOOL_SOURCE" --backup-root "$BACKUP_DIR" --apply
-
-check_backup_disk_usage
-python3 "$BACKUP_TOOL_SOURCE" --backup-root "$BACKUP_DIR" \
-    --project-root "$PROJECT_DIR" --create-daily --apply
 if [[ -x venv/bin/python ]]; then
     PYTHON_BIN="$PROJECT_DIR/venv/bin/python"
 else
     PYTHON_BIN="python3"
 fi
-python3 "$BACKUP_TOOL_SOURCE" --backup-root "$BACKUP_DIR" \
-    --project-root "$PROJECT_DIR" \
-    --create-temporary "pre-services-vault-${FETCHED_COMMIT:0:12}" --apply
 DATA_SNAPSHOT_BEFORE="$(stable_data_snapshot)"
 printf 'DATA_BEFORE=%s\n' "$DATA_SNAPSHOT_BEFORE"
 
 printf 'MIGRATION PREFLIGHT: stage release and rehearse exact runtime\n'
 FAILURE_STAGE="MIGRATION PREFLIGHT"
-RELEASE_DIR="$(mktemp -d "$BACKUP_DIR/temporary/release-XXXXXX")"
+RELEASE_DIR="$DEPLOY_WORKDIR/release"
+mkdir "$RELEASE_DIR"
 chmod 700 "$RELEASE_DIR"
 git archive "$FETCHED_COMMIT" | tar -x -C "$RELEASE_DIR"
 PRODUCTION_SQLITE_VERSION="$(
@@ -415,22 +405,16 @@ FAILURE_STAGE="SERVICES VAULT PREFLIGHT"
     || { printf 'SERVICE_VAULT_PREFLIGHT_FAILED: protected EnvironmentFile is missing\n' >&2; false; }
 [[ "$(systemctl show "$SERVICE_NAME" -p EnvironmentFiles | sed 's/^[^=]*=//')" == *"$SERVICE_ENV_FILE"* ]] \
     || { printf 'SERVICE_VAULT_PREFLIGHT_FAILED: systemd does not load the protected EnvironmentFile\n' >&2; false; }
-DEPLOY_SAFETY_DIR="$(mktemp -d "$BACKUP_DIR/deploy-safety-XXXXXX")"
-chmod 700 "$DEPLOY_SAFETY_DIR"
-cp -p "$SERVICE_ENV_FILE" "$DEPLOY_SAFETY_DIR/clock-erp.env-before"
-chmod 600 "$DEPLOY_SAFETY_DIR/clock-erp.env-before"
 if [[ -f instance/services.db ]]; then
-    sqlite3 instance/services.db ".backup '$DEPLOY_SAFETY_DIR/services-before.db'"
-    chmod 600 "$DEPLOY_SAFETY_DIR/services-before.db"
-    sqlite3 "$DEPLOY_SAFETY_DIR/services-before.db" "PRAGMA quick_check;" | grep -qx "ok"
+    sqlite3 instance/services.db "PRAGMA quick_check;" | grep -qx "ok"
 else
     printf 'SERVICE_VAULT_PREFLIGHT_FAILED: Services database is missing\n' >&2
     false
 fi
 PYTHONPATH="$RELEASE_DIR" "$PYTHON_BIN" "$RELEASE_DIR/scripts/service_vault_preflight.py" \
     --environment-file "$SERVICE_ENV_FILE" \
-    --database "$DEPLOY_SAFETY_DIR/services-before.db" \
-    --report "$DEPLOY_SAFETY_DIR/services-preflight.json"
+    --database "$PROJECT_DIR/instance/services.db" \
+    --report "$DEPLOY_CHECK_DIR/services-preflight.json"
 SERVICE_VAULT_KEY="$(PYTHONPATH="$RELEASE_DIR" "$PYTHON_BIN" - "$SERVICE_ENV_FILE" <<'PYTHON_KEY'
 import sys
 from scripts.service_vault_preflight import load_key
@@ -556,7 +540,7 @@ install -o root -g root -m 0644 deploy/systemd/vechasu-wb-full-sync.service /etc
 
 if [[ -f "$BITRIX_ENDPOINT_SOURCE" && -f "$BITRIX_ENDPOINT_TARGET" ]]; then
     /opt/php81/bin/php -l "$BITRIX_ENDPOINT_SOURCE" >/dev/null
-    BITRIX_ENDPOINT_BACKUP="$BACKUP_DIR/bitrix-catalog-$(date +%Y%m%d-%H%M%S).php"
+    BITRIX_ENDPOINT_BACKUP="$DEPLOY_CHECK_DIR/bitrix-catalog-before.php"
     cp -p "$BITRIX_ENDPOINT_TARGET" "$BITRIX_ENDPOINT_BACKUP"
     chmod 600 "$BITRIX_ENDPOINT_BACKUP"
     install -o admin -g admin -m 0640 \
@@ -567,7 +551,7 @@ if [[ -f "$BITRIX_COMMENT_ENDPOINT_SOURCE" ]]; then
     /opt/php81/bin/php -l "$BITRIX_COMMENT_ENDPOINT_SOURCE" >/dev/null
     if [[ -f "$BITRIX_COMMENT_ENDPOINT_TARGET" ]]; then
         BITRIX_COMMENT_TARGET_EXISTED=1
-        BITRIX_COMMENT_ENDPOINT_BACKUP="$BACKUP_DIR/bitrix-comments-$(date +%Y%m%d-%H%M%S).php"
+        BITRIX_COMMENT_ENDPOINT_BACKUP="$DEPLOY_CHECK_DIR/bitrix-comments-before.php"
         cp -p "$BITRIX_COMMENT_ENDPOINT_TARGET" "$BITRIX_COMMENT_ENDPOINT_BACKUP"
         chmod 600 "$BITRIX_COMMENT_ENDPOINT_BACKUP"
     fi
@@ -579,7 +563,7 @@ if [[ -f "$BITRIX_ORDERS_EXPORT_SOURCE" ]]; then
     /opt/php81/bin/php -l "$BITRIX_ORDERS_EXPORT_SOURCE" >/dev/null
     if [[ -f "$BITRIX_ORDERS_EXPORT_TARGET" ]]; then
         BITRIX_ORDERS_EXPORT_TARGET_EXISTED=1
-        BITRIX_ORDERS_EXPORT_BACKUP="$BACKUP_DIR/bitrix-orders-export-$(date +%Y%m%d-%H%M%S).php"
+        BITRIX_ORDERS_EXPORT_BACKUP="$DEPLOY_CHECK_DIR/bitrix-orders-export-before.php"
         cp -p "$BITRIX_ORDERS_EXPORT_TARGET" "$BITRIX_ORDERS_EXPORT_BACKUP"
         chmod 600 "$BITRIX_ORDERS_EXPORT_BACKUP"
     fi
@@ -589,7 +573,7 @@ if [[ -f "$BITRIX_ORDERS_EXPORT_SOURCE" ]]; then
 fi
 
 if [[ "$CATALOG_MIGRATION_REQUIRED" == "1" || "$DOMAIN_MIGRATION_REQUIRED" == "1" || "$PURCHASES_MIGRATION_REQUIRED" == "1" || "$CUSTOMERS_MIGRATION_REQUIRED" == "1" || "$SMS_MIGRATION_REQUIRED" == "1" || "$SERVICES_MIGRATION_REQUIRED" == "1" || "$MAIL_MIGRATION_REQUIRED" == "1" ]]; then
-    printf 'PRODUCTION MIGRATION: stop service, backup, apply verified migrations\n'
+    printf 'PRODUCTION MIGRATION: stop service, apply verified migrations\n'
     FAILURE_STAGE="PRODUCTION MIGRATION"
     systemctl stop "$SERVICE_NAME"
     SERVICE_STOPPED=1
@@ -597,8 +581,10 @@ if [[ "$CATALOG_MIGRATION_REQUIRED" == "1" || "$DOMAIN_MIGRATION_REQUIRED" == "1
         printf 'Service did not stop before production migration\n' >&2
         false
     fi
-    rollback_directory="$(mktemp -d "$BACKUP_DIR/production-migration-XXXXXX")"
-    chmod 700 "$rollback_directory"
+    MIGRATION_ROLLBACK_DIR="$DEPLOY_WORKDIR/migration-rollback"
+    mkdir "$MIGRATION_ROLLBACK_DIR"
+    chmod 700 "$MIGRATION_ROLLBACK_DIR"
+    rollback_directory="$MIGRATION_ROLLBACK_DIR"
     if [[ "$CATALOG_MIGRATION_REQUIRED" == "1" ]]; then
         CATALOG_ROLLBACK_BACKUP="$rollback_directory/catalog-before.db"
         sqlite3 instance/catalog.db ".backup '$CATALOG_ROLLBACK_BACKUP'"
@@ -742,7 +728,7 @@ if [[ -d "$APPLICATION_RELEASE" ]] && {
 }; then
     [[ "$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)" != "$APPLICATION_RELEASE" ]] \
         || { printf 'RELEASE_RUNTIME_FAILED: active release has invalid runtime links\n' >&2; false; }
-    incomplete_release="$BACKUP_DIR/temporary/incomplete-release-${CURRENT_COMMIT}-$(date +%Y%m%d-%H%M%S)"
+    incomplete_release="$DEPLOY_WORKDIR/incomplete-release-${CURRENT_COMMIT}"
     mv "$APPLICATION_RELEASE" "$incomplete_release"
     printf 'RELEASE_RUNTIME_QUARANTINED=%s\n' "$incomplete_release"
 fi
@@ -873,7 +859,7 @@ PYTHONPATH="$PROJECT_DIR" ERP_PRODUCTION_SERVICES_SMOKE=confirmed \
     scripts/services_production_smoke.py
 PYTHONPATH="$PROJECT_DIR" "$PYTHON_BIN" scripts/wb_readonly_smoke.py \
     --production --catalog instance/catalog.db \
-    --matching-report "$DEPLOY_SAFETY_DIR/wb-matching.json"
+    --matching-report "$DEPLOY_CHECK_DIR/wb-matching.json"
 PYTHONPATH="$PROJECT_DIR" ERP_PRODUCTION_JOURNAL_SMOKE=confirmed \
     LC_ALL=en_US.utf8 LANG=en_US.utf8 "$PYTHON_BIN" \
     scripts/journal_production_smoke.py
@@ -897,7 +883,7 @@ if journalctl -u "$SERVICE_NAME" --since "-2 minutes" \
 fi
 [[ -z "$(git status --porcelain --untracked-files=normal | awk 'substr($0, 4, 9) != "instance/" { print }')" ]]
 
-cleanup_release
+cleanup_workdir
 trap - ERR
 printf 'DEPLOY_COMMIT=%s\n' "$CURRENT_COMMIT"
 printf 'DEPLOY_OK\n'
