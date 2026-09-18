@@ -23,6 +23,11 @@ from app.services.recovery_v2 import (  # noqa: E402
 )
 
 
+def serialize_result(value):
+    """Keep CLI JSON writable even when the server locale is ASCII."""
+    return json.dumps(value, ensure_ascii=True, sort_keys=True)
+
+
 def build_engine():
     production = SOURCE_ROOT == Path("/opt/clock-erp")
     backup_root = Path("/opt/clock-erp-backups") if production else SOURCE_ROOT / "instance" / "backups"
@@ -122,7 +127,7 @@ def main():
     safe.pop("previous_release", None)
     safe.pop("staging_path", None)
     safe.pop("safety_backup_path", None)
-    print(json.dumps(safe, ensure_ascii=False, sort_keys=True))
+    print(serialize_result(safe))
     return 0 if result.get("status") not in ("failed", "critical") else 1
 
 

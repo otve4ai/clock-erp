@@ -410,6 +410,14 @@ class RecoveryV2Test(unittest.TestCase):
         self.assertEqual(engine.backup_root, (self.project / "instance" / "backups").resolve())
         self.assertEqual(engine.failure_stage, "preflight")
 
+    def test_helper_result_is_safe_for_ascii_server_locale(self):
+        payload = recovery_helper.serialize_result({"message": "Восстановление завершено"})
+        payload.encode("ascii")
+        self.assertEqual(
+            json.loads(payload)["message"],
+            "Восстановление завершено",
+        )
+
     def test_new_operation_has_fresh_persistent_timestamp(self):
         operation = self._operation()
         status = self.service.operation_status()
