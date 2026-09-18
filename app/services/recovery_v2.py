@@ -68,10 +68,11 @@ WRITER_LOCKS = (
 
 
 class RecoveryError(BackupAdminError):
-    def __init__(self, code, message, production_changed=False):
+    def __init__(self, code, message, production_changed=False, failure=None):
         super().__init__(message)
         self.code = str(code)
         self.production_changed = bool(production_changed)
+        self.failure = dict(failure or {})
 
 
 def _json_hash(path):
@@ -224,6 +225,7 @@ class RecoveryEngine:
             service_name=self.service_name, remote_check=False,
         )
         self._writer_guards = []
+        self._service_stopped = False
 
     def _heartbeat_path(self, operation_id):
         return self.operations_root / (operation_id + ".heartbeat.json")
@@ -585,36 +587,165 @@ class RecoveryEngine:
         self._write_operation(operation)
         return target, instance
 
-    def _maintenance_on(self, operation):
+    @staticmethod
+    def _command_text(value):
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", "replace")
+        return str(value or "").strip()[:500]
+
+    def _command_failure(self, code, message, component, command, result):
+        return RecoveryError(code, message, failure={
+            "component": component,
+            "call": " ".join(command),
+            "return_code": getattr(result, "returncode", None),
+            "stdout": self._command_text(getattr(result, "stdout", "")),
+            "stderr": self._command_text(getattr(result, "stderr", "")),
+        })
+
+    @staticmethod
+    def _lock_holders(lock_path):
+        """Return processes with an fd for a locked inode without external tools."""
+        try:
+            lock_stat = os.stat(lock_path)
+        except OSError:
+            return []
+        holders = []
+        proc = Path("/proc")
+        if not proc.is_dir():
+            return holders
+        for entry in proc.iterdir():
+            if not entry.name.isdigit():
+                continue
+            fd_root = entry / "fd"
+            try:
+                matches = any(
+                    os.stat(str(fd)).st_ino == lock_stat.st_ino
+                    and os.stat(str(fd)).st_dev == lock_stat.st_dev
+                    for fd in fd_root.iterdir()
+                )
+            except OSError:
+                continue
+            if not matches:
+                continue
+            try:
+                command = (entry / "comm").read_text(encoding="utf-8").strip()
+            except OSError:
+                command = ""
+            holders.append({"pid": int(entry.name), "command": command[:80]})
+        return sorted(holders, key=lambda item: item["pid"])
+
+    def _acquire_writer_guards(self):
+        deadline = time.monotonic() + self.command_timeout
+        for lock_path in WRITER_LOCKS:
+            guard = open(lock_path, "a+")
+            while True:
+                try:
+                    fcntl.flock(guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self._writer_guards.append(guard)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        guard.close()
+                        holders = self._lock_holders(lock_path)
+                        holder_text = ", ".join(
+                            "PID {} ({})".format(
+                                item["pid"], item["command"] or "unknown command"
+                            ) for item in holders
+                        ) or "владелец не определён"
+                        raise RecoveryError(
+                            "WRITER_BUSY",
+                            "Фоновая запись не остановлена: {} занят — {}".format(
+                                Path(lock_path).name, holder_text
+                            ),
+                            failure={
+                                "component": Path(lock_path).name,
+                                "call": "fcntl.flock(LOCK_EX|LOCK_NB)",
+                                "return_code": None,
+                                "stdout": "",
+                                "stderr": "lock timeout; {}".format(holder_text),
+                            },
+                        )
+                    time.sleep(0.1)
+
+    def _stop_writer_units(self):
+        for unit in WRITER_UNITS:
+            command = ["systemctl", "stop", unit]
+            result = self._run(command, cwd="/")
+            if result.returncode != 0:
+                raise self._command_failure(
+                    "WRITER_STOP_FAILED",
+                    "Не удалось остановить фоновый writer {}".format(unit),
+                    unit, command, result,
+                )
+
+    def _stop_service(self):
+        command = ["systemctl", "stop", self.service_name]
+        result = self._run(command, cwd="/")
+        if result.returncode != 0:
+            raise self._command_failure(
+                "SERVICE_STOP_FAILED", "Не удалось остановить ERP",
+                self.service_name, command, result,
+            )
+        self._service_stopped = True
+
+    def _verify_write_barrier(self, contract):
+        for unit in WRITER_UNITS + (self.service_name,):
+            command = ["systemctl", "is-active", unit]
+            result = self._run(command, cwd="/")
+            state = self._command_text(result.stdout)
+            if state not in ("inactive", "failed", "unknown"):
+                raise self._command_failure(
+                    "WRITER_STILL_ACTIVE",
+                    "Writer {} остался активен".format(unit),
+                    unit, command, result,
+                )
+        for database_name in sorted((contract.get("databases") or {}).keys()):
+            path = self.project_root / "instance" / database_name
+            try:
+                connection = sqlite3.connect(str(path), timeout=0)
+                try:
+                    connection.execute("PRAGMA busy_timeout=0")
+                    mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+                    if str(mode).lower() == "wal":
+                        checkpoint = connection.execute("PRAGMA wal_checkpoint(FULL)").fetchone()
+                        if checkpoint and int(checkpoint[0]) != 0:
+                            raise sqlite3.OperationalError("wal checkpoint busy")
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.rollback()
+                finally:
+                    connection.close()
+            except sqlite3.Error as error:
+                raise RecoveryError(
+                    "DATABASE_WRITER_ACTIVE",
+                    "База {} не достигла безопасного write barrier".format(database_name),
+                    failure={
+                        "component": database_name,
+                        "call": "SQLite WAL checkpoint(FULL) + BEGIN IMMEDIATE",
+                        "return_code": None,
+                        "stdout": "",
+                        "stderr": type(error).__name__ + ": " + str(error)[:300],
+                    },
+                )
+
+    def _maintenance_on(self, operation, contract):
         self.maintenance_path.parent.mkdir(parents=True, exist_ok=True)
         _atomic_json_write(self.maintenance_path, {
             "operation_id": operation["id"], "started_at": _utc_now(),
             "message": "ERP временно недоступна — выполняется восстановление.",
         })
         if self.system_actions:
-            deadline = time.monotonic() + 30
-            for lock_path in WRITER_LOCKS:
-                guard = open(lock_path, "a+")
-                while True:
-                    try:
-                        fcntl.flock(guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        self._writer_guards.append(guard)
-                        break
-                    except OSError:
-                        if time.monotonic() >= deadline:
-                            guard.close()
-                            raise RecoveryError("WRITER_BUSY", "Не удалось остановить фоновую запись")
-                        time.sleep(0.1)
-            for unit in WRITER_UNITS:
-                result = self._run(["systemctl", "stop", unit], cwd="/")
-                if result.returncode != 0:
-                    raise RecoveryError("WRITER_STOP_FAILED", "Не удалось остановить фоновый writer")
-            result = self._run(["systemctl", "stop", self.service_name], cwd="/")
-            if result.returncode != 0:
-                raise RecoveryError("SERVICE_STOP_FAILED", "Не удалось остановить ERP")
+            self._stop_writer_units()
+            self._acquire_writer_guards()
+            self._stop_service()
+            self._verify_write_barrier(contract)
 
     def _maintenance_off(self):
         writers_started = True
+        if self.system_actions and self._service_stopped:
+            try:
+                self._restart_service()
+            except RecoveryError:
+                writers_started = False
         if self.system_actions:
             for unit in ("vechasu-wb-sync.timer", "vechasu-wb-full-sync.timer"):
                 result = self._run(["systemctl", "start", unit], cwd="/")
@@ -775,12 +906,19 @@ class RecoveryEngine:
 
     def _restart_service(self):
         if self.system_actions:
+            if not self._service_stopped:
+                active = self._run(["systemctl", "is-active", "--quiet", self.service_name], cwd="/")
+                if active.returncode == 0:
+                    return
+            health_since_epoch = time.time()
             result = self._run(["systemctl", "restart", self.service_name], cwd="/")
             if result.returncode != 0:
                 raise RecoveryError("SERVICE_RESTART_FAILED", "Не удалось перезапустить ERP", True)
             active = self._run(["systemctl", "is-active", "--quiet", self.service_name], cwd="/")
             if active.returncode != 0:
                 raise RecoveryError("SERVICE_INACTIVE", "ERP не запущена после восстановления", True)
+            self._service_stopped = False
+            self._health_since_epoch = health_since_epoch
 
     def _health(self, contract, operation=None):
         inspect_instance(self.project_root / "instance", contract)
@@ -794,10 +932,8 @@ class RecoveryEngine:
                 raise
             except Exception:
                 raise RecoveryError("HTTP_HEALTH_FAILED", "HTTP health-check ERP не пройден", True)
-            since = (operation or {}).get("_health_since") or next((
-                item.get("at") for item in reversed((operation or {}).get("progress") or [])
-                if item.get("stage") == "service_restart" and item.get("at")
-            ), "-2 minutes")
+            since_epoch = getattr(self, "_health_since_epoch", None)
+            since = "@{}".format(int(since_epoch)) if since_epoch else "-2 minutes"
             journal = self._run([
                 "journalctl", "-u", self.service_name, "--since", since,
                 "--priority=err", "--no-pager", "--quiet",
@@ -861,7 +997,7 @@ class RecoveryEngine:
                 self._stage(operation, "staging_check")
             self._stage(operation, "maintenance")
             maintenance = True
-            self._maintenance_on(operation)
+            self._maintenance_on(operation, runtime_contract)
             self._stage(operation, "production_restore")
             if operation["kind"] in ("data_restore", "full_restore"):
                 self._swap_instance(operation, staged_instance)
@@ -875,14 +1011,14 @@ class RecoveryEngine:
             self._inject("after_restart")
             self._stage(operation, "health_check")
             self._health(runtime_contract, operation)
-            self._stage(operation, "completed", "Восстановление успешно завершено")
-            operation["finished_at"] = _utc_now()
-            self._write_operation(operation)
             if not self._maintenance_off():
                 raise RecoveryError(
                     "WRITER_START_FAILED", "Не удалось возобновить фоновые процессы", True
                 )
             maintenance = False
+            self._stage(operation, "completed", "Восстановление успешно завершено")
+            operation["finished_at"] = _utc_now()
+            self._write_operation(operation)
             self.backups._audit(
                 {"id": operation.get("owner_id"), "email": operation.get("owner")},
                 operation["kind"], "success", backup_id=operation.get("backup_id"),
@@ -920,15 +1056,16 @@ class RecoveryEngine:
                         self._health(_json_hash(self.contract_path)[1], operation)
                     except Exception:
                         rollback_ok = False
-            elif maintenance:
+            elif maintenance and self._service_stopped:
                 try:
-                    operation["_health_since"] = _utc_now()
                     self._restart_service()
                     self._health(_json_hash(self.contract_path)[1], operation)
                 except Exception:
                     rollback_ok = False
-            operation.pop("_health_since", None)
-            if maintenance and rollback_ok and not self._maintenance_off():
+            cleanup_ok = True
+            if maintenance:
+                cleanup_ok = self._maintenance_off()
+            if maintenance and not cleanup_ok:
                 rollback_ok = False
                 recovery_error = RecoveryError(
                     "WRITER_START_FAILED", "Не удалось возобновить фоновые процессы", True
@@ -942,6 +1079,7 @@ class RecoveryEngine:
                 "status": "failed" if rollback_ok else "critical",
                 "message": str(recovery_error),
                 "error_code": recovery_error.code,
+                "failure": recovery_error.failure or None,
                 "automatic_rollback": {
                     "attempted": rollback_attempted,
                     "result": "completed" if rollback_attempted and rollback_ok else "failed" if rollback_attempted else "not_needed",
