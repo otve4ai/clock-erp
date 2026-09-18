@@ -2,7 +2,12 @@
   "contract_version": 2,
   "databases": {
     "auth.db": ["users", "auth_sessions"],
-    "catalog.db": ["catalog_excel_products", "catalog_stock_movements", "erp_sales", "erp_receipts"],
+    "catalog.db": [
+      "catalog_excel_products",
+      "catalog_stock_movements",
+      "erp_sales",
+      "erp_receipts"
+    ],
     "customers.db": ["customers", "registry_meta"],
     "mail.db": ["mail_messages", "mail_threads"],
     "orders.db": [
