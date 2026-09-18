@@ -3390,7 +3390,7 @@ def wildberries_conduct_sale(wb_order_id):
         redirect_arguments = {"notice": "success", "message": message}
         stock_token = automatic_sale_stock_notification_token(stock_notification)
         if stock_token:
-            redirect_arguments = {"stock_notice": stock_token}
+            redirect_arguments["stock_notice"] = stock_token
         return redirect(url_for("wildberries_order_page", wb_order_id=wb_order_id,
                                 **redirect_arguments))
     except PotentialStrapDuplicateError as error:
@@ -3795,6 +3795,8 @@ def _conduct_order_sale(order_id):
             )
         redirect_arguments = {
             "source": "tictactoy",
+            "notice": "success",
+            "message": success_message,
             "sale_id": str(sale.get("id") or ""),
             "order_number": str(order_number),
         }
@@ -3803,11 +3805,6 @@ def _conduct_order_sale(order_id):
         )
         if stock_token:
             redirect_arguments["stock_notice"] = stock_token
-        else:
-            redirect_arguments.update({
-                "notice": "success",
-                "message": success_message,
-            })
         return redirect("/sales?" + urlencode(redirect_arguments))
     except PotentialStrapDuplicateError as error:
         record_order_sale_attempt(

@@ -74,7 +74,7 @@
         {% include "_orders_sync.html" %}
         </section>
 
-        {% if request.args.get('notice') and request.args.get('message') %}
+        {% if request.args.get('notice') and request.args.get('message') and not sale_stock_notification %}
             <div class="notice notice-{{ request.args.get('notice') }}" role="{{ 'alert' if request.args.get('notice') in ['error', 'danger'] else 'status' }}" data-erp-notification-source>{{ request.args.get('message') }}</div>
         {% endif %}
 

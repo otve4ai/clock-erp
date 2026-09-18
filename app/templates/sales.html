@@ -1764,7 +1764,7 @@
     {% include "_sale_stock_notification.html" %}
 
     <main class="main" id="main-content" tabindex="-1">
-        {% if message %}
+        {% if message and not sale_stock_notification %}
             <div class="notice notice-{{ notice or 'success' }}" data-erp-notification-source>
                 {{ message }}
             </div>
