@@ -149,6 +149,30 @@ class WildberriesClientTest(unittest.TestCase):
         self.assertEqual(error.detail, "token category denied")
         self.assertNotIn("secret", str(error))
 
+    def test_content_card_read_uses_exact_nm_id(self):
+        session = mock.Mock()
+        session.post.return_value = FakeResponse(200, {"cards": [{
+            "nmID": 243438885,
+            "vendorCode": "NAVAbelt_double",
+            "title": "Ремень двухсторонний ручной работы NAVA Double Face (Италия)",
+            "photos": [{"c516x688": "https://basket-16.wbbasket.ru/item.webp"}],
+        }]})
+        client = WildberriesOrdersReadOnlyClient("secret", session=session)
+
+        card = client.get_content_card(243438885)
+
+        self.assertEqual(card["vendorCode"], "NAVAbelt_double")
+        session.post.assert_called_once_with(
+            "https://content-api.wildberries.ru/content/v2/get/cards/list",
+            headers={"Authorization": "secret", "Accept": "application/json"},
+            json={"settings": {
+                "cursor": {"limit": 100},
+                "filter": {"withPhoto": -1, "textSearch": "243438885"},
+            }},
+            timeout=(3.05, 15),
+            allow_redirects=False,
+        )
+
 
 class WildberriesStorageTest(unittest.TestCase):
     def setUp(self):
@@ -273,6 +297,28 @@ class WildberriesStorageTest(unittest.TestCase):
         state = web.build_order_sale_state(order, {})
         self.assertTrue(state["can_create_sale"])
 
+    def test_content_card_keeps_vendor_article_separate_from_wb_barcode(self):
+        raw = raw_order(5804550831, article="NAVAbelt_double")
+        raw.update(nmId=243438885, chrtId=382046196, skus=["2040651296931"])
+        card = {
+            "nmID": 243438885,
+            "vendorCode": "NAVAbelt_double",
+            "title": "Ремень двухсторонний ручной работы NAVA Double Face (Италия)",
+            "photos": [{
+                "c516x688": "https://basket-16.wbbasket.ru/vol2434/item.webp",
+            }],
+        }
+
+        product = normalize_wildberries_order(raw, content_card=card)["products"][0]
+
+        self.assertEqual(product["name"], card["title"])
+        self.assertEqual(product["display_article"], "NAVAbelt_double")
+        self.assertEqual(product["barcode"], "2040651296931")
+        self.assertEqual(
+            product["image_url"],
+            "https://basket-16.wbbasket.ru/vol2434/item.webp",
+        )
+
 
 class WildberriesRoutesTest(unittest.TestCase):
     def setUp(self):
@@ -328,6 +374,42 @@ class WildberriesRoutesTest(unittest.TestCase):
             self.assertIn(value, html)
         self.assertIn("Провести продажу", html)
         self.assertNotIn("Открыть в Bitrix", html)
+
+    def test_wb_card_renders_content_title_vendor_article_photo_and_fallback(self):
+        raw = raw_order(5804550831, article="NAVAbelt_double")
+        raw.update(nmId=243438885, chrtId=382046196, skus=["2040651296931"])
+        title = "Ремень двухсторонний ручной работы NAVA Double Face (Италия)"
+        photo = "https://basket-16.wbbasket.ru/vol2434/item.webp"
+        enriched = normalize_wildberries_order(raw, content_card={
+            "nmID": 243438885,
+            "vendorCode": "NAVAbelt_double",
+            "title": title,
+            "photos": [{"c516x688": photo}],
+        })
+        fallback = normalize_wildberries_order(raw_order(5804550832))
+        store = OrdersSnapshotStore(self.path)
+        store.upsert_wildberries([enriched, fallback])
+        catalog_path = Path(self.temporary.name) / "catalog.db"
+        with (
+            mock.patch.dict("os.environ", {
+                "ORDERS_DATABASE_PATH": str(self.path),
+                "CATALOG_DATABASE_PATH": str(catalog_path),
+            }, clear=False),
+            mock.patch.object(web, "get_orders", return_value=[]),
+            mock.patch.object(web, "schedule_orders_refresh"),
+            mock.patch.object(web, "schedule_order_item_unit_backfill"),
+        ):
+            response = self.client.get("/order/wildberries/5804550831?source=wildberries")
+            fallback_response = self.client.get("/order/wildberries/5804550832?source=wildberries")
+        html = response.get_data(as_text=True)
+        fallback_html = fallback_response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(title, html)
+        self.assertIn("Артикул: NAVAbelt_double", html)
+        self.assertNotIn("Артикул: 2040651296931", html)
+        self.assertIn(photo, html)
+        self.assertIn('class="product-row"', html)
+        self.assertIn("Нет фото", fallback_html)
 
     def test_sales_assembly_workspace_lists_wb_order_and_opens_card(self):
         store = OrdersSnapshotStore(self.path)

@@ -2175,7 +2175,11 @@ def enrich_orders_list_rows(rows, database=None):
         order.update({key: value for key, value in metadata.get(order_id, {}).items()
                       if key not in {"status", "status_name", "erp_status"}})
         mapping = previews.get("line:preview:" + order_id) or {}
-        if mapping.get("state") == "mapped" and mapping.get("product"):
+        if (
+            order.get("source") != "wildberries"
+            and mapping.get("state") == "mapped"
+            and mapping.get("product")
+        ):
             order["product_preview"] = mapping["product"]
     return prepared
 
@@ -2569,10 +2573,16 @@ def build_order_sale_dialog_summary(products, mapping_context=None,
 
         mapping = get_order_product_mapping(mapping_context, product)
         mapped_product = mapping.get("product") or {}
-        article = first_order_product_value(
-            product, "sku", "SKU", "article", "ARTICLE",
-            "vendorCode", "vendor_code",
-        ) or mapped_product.get("article") or ""
+        if str(product.get("source") or "").casefold() == "wildberries":
+            article = first_order_product_value(
+                product, "display_article", "article", "vendor_code",
+                "vendorCode",
+            )
+        else:
+            article = first_order_product_value(
+                product, "sku", "SKU", "article", "ARTICLE",
+                "vendorCode", "vendor_code",
+            ) or mapped_product.get("article") or ""
 
         lines.append({
             "name": str(first_order_product_value(
