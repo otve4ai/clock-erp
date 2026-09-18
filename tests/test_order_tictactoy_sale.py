@@ -588,6 +588,34 @@ class OrderTictactoySaleTest(unittest.TestCase):
             },
         )
 
+    def test_partial_and_unknown_geography_are_completed_only_when_unambiguous(self):
+        cases = (
+            (
+                {"country": "Россия", "city": "Санкт-Петербург"},
+                {"country": "Россия", "region": "Санкт-Петербург", "city": "Санкт-Петербург"},
+            ),
+            (
+                {"country": "Россия"},
+                {"country": "Россия", "region": "", "city": ""},
+            ),
+            (
+                {},
+                {"country": "", "region": "", "city": ""},
+            ),
+            (
+                {"country": "Атлантида", "region": "Центр", "city": "Посейдонис"},
+                {"country": "", "region": "", "city": ""},
+            ),
+        )
+        for order, expected in cases:
+            with self.subTest(order=order):
+                self.assertEqual(
+                    web.normalize_order_geography_for_catalog(
+                        web.get_order_geography(order)
+                    ),
+                    expected,
+                )
+
     def test_international_address_is_parsed_only_when_components_are_explicit(self):
         self.assertEqual(
             web.get_order_geography({
