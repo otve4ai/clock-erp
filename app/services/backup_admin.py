@@ -912,7 +912,7 @@ class BackupAdminService:
             if backup_free <= required:
                 raise BackupAdminError("Недостаточно свободного места для безопасного бэкапа")
             operation = {
-                "id": hashlib.sha256(os.urandom(32)).hexdigest()[:16],
+                "id": hashlib.sha256(os.urandom(32)).hexdigest()[:32],
                 "kind": "manual_backup", "active": True, "status": "queued",
                 "message": "Бэкап ожидает запуска", "started_at": _utc_now(),
             }
