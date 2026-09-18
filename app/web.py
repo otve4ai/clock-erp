@@ -1914,7 +1914,7 @@ def wildberries_recovery_import():
 WB_SYNC_STAGE_NAMES = {
     "new_orders": "новые заказы",
     "order_statuses": "статусы заказов",
-    "orders_history": "история заказов за 60 дней",
+    "orders_history": "история заказов за 90 дней",
     "full_recovery": "глубокая сверка",
     "supply_order_ids": "состав поставок",
     "recovery_order_statuses": "статусы глубокой сверки",

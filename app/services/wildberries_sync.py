@@ -150,7 +150,7 @@ def run_sync(client, store, catalog_path, mode='fast', locked=False):
                     break
         if mode == 'full':
             try:
-                recovery = WildberriesRecovery(client, store.path, catalog_path).reconcile(store, days=60)
+                recovery = WildberriesRecovery(client, store.path, catalog_path).reconcile(store, days=90)
                 info.update(recovery)
                 result['recovered'] = recovery['recovered']
                 result['statuses_updated'] += recovery.get('statuses_updated', 0)
