@@ -636,6 +636,55 @@ class SalesInventoryTest(unittest.TestCase):
         self.assertEqual(self.stock(old_product["id"]), 2)
         self.assertEqual(self.stock(new_product["id"]), 5)
 
+    def test_wildberries_refusal_keeps_local_stock(self):
+        for source in ("wildberries", "Wildberries", " WILDBERRIES "):
+            with self.subTest(source=source):
+                product = self.create_product(stock=7, article=source)
+                payload = self.payload(product, sale_id="sale-" + source.strip())
+                payload["source"] = source
+                self.inventory.create_sale(payload, product["id"], 2, 1000)
+                stock_before = self.stock(product["id"])
+                cancelled = self.inventory.cancel_sale(
+                    payload["id"], reason="customer_refused",
+                )
+                self.assertEqual(self.stock(product["id"]), stock_before)
+                self.assertEqual(cancelled["order_status"], "cancelled")
+                self.assertEqual(cancelled["cancellation_reason"], "customer_refused")
+                self.assertFalse(cancelled["deleted_at"])
+                self.assertFalse(any(
+                    movement["type"] == "cancellation"
+                    for movement in self.inventory.list_movements(product["id"])
+                ))
+                with self.database.connect() as connection:
+                    self.assertEqual(connection.execute(
+                        "SELECT COUNT(*) FROM erp_receipts WHERE id = ?",
+                        ("sale-cancellation:" + payload["id"],),
+                    ).fetchone()[0], 0)
+
+    def test_non_wildberries_cancellation_restores_local_stock(self):
+        for source in ("Tictactoy", "Amazon", "manual", "other"):
+            with self.subTest(source=source):
+                product = self.create_product(stock=7, article=source)
+                payload = self.payload(product, sale_id="sale-" + source)
+                payload["source"] = source
+                self.inventory.create_sale(payload, product["id"], 2, 1000)
+                self.assertEqual(self.stock(product["id"]), 5)
+                self.inventory.cancel_sale(payload["id"], reason="customer_refused")
+                self.assertEqual(self.stock(product["id"]), 7)
+
+    def test_repeated_wildberries_refusal_keeps_local_stock(self):
+        product = self.create_product(stock=7)
+        payload = self.payload(product)
+        payload["source"] = "wildberries"
+        self.inventory.create_sale(payload, product["id"], 2, 1000)
+        stock_before = self.stock(product["id"])
+        first = self.inventory.cancel_sale("sale-1", reason="customer_refused")
+        second = self.inventory.cancel_sale(
+            "sale-1", reason="customer_refused", idempotency_key="retry-refusal",
+        )
+        self.assertEqual(self.stock(product["id"]), stock_before)
+        self.assertEqual(first["cancelled_at"], second["cancelled_at"])
+
     def test_cancel_restores_stock_then_soft_delete_does_not_change_it(self):
         product = self.create_product(stock=3)
         self.inventory.create_sale(
@@ -1915,7 +1964,8 @@ class SalesInventoryWebTest(SalesInventoryTest):
                 response.get_json()["message"],
                 "Продажа отменена. Товар возвращён на склад, приход создан",
             )
-            self.assertEqual(self.stock(self.product["id"]), stock_before + 1)
+            restored_quantity = 0 if source == "Wildberries" else 1
+            self.assertEqual(self.stock(self.product["id"]), stock_before + restored_quantity)
             self.assertEqual(
                 self.inventory.get_sale(sale["id"])["order_status"],
                 "cancelled",
