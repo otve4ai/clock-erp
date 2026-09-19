@@ -84,7 +84,7 @@ class BackupAdminServiceTest(unittest.TestCase):
         self.assertEqual(status["restore_points"], [])
         self.assertEqual(status["overall"], "critical")
 
-    def test_explicit_production_legacy_layouts_are_discovered(self):
+    def test_only_daily_and_manual_layouts_are_discovered(self):
         self.archive("clock-erp-daily-20260915-031701.tar.gz")
         self.archive_at(
             self.backups,
@@ -107,17 +107,22 @@ class BackupAdminServiceTest(unittest.TestCase):
             "clock-erp-daily-20260914-031701.tar.gz",
         )
         self.archive_at(self.backups, "changed-source.tar.gz")
+        self.archive_at(
+            self.backups / "manual",
+            "clock-erp-manual-20260916-121500-"
+            "0123456789abcdef0123456789abcdef.tar.gz",
+        )
 
         listing = self.service.list_backups()
 
-        self.assertEqual(len(listing), 5)
+        self.assertEqual(len(listing), 2)
         self.assertEqual(
             [item["timestamp"][:10] for item in listing],
-            ["2026-09-15", "2026-09-01", "2026-08-27", "2026-08-25", "2026-08-18"],
+            ["2026-09-16", "2026-09-15"],
         )
         self.assertEqual(
             [item["type"] for item in listing],
-            ["automatic", "automatic", "temporary", "temporary", "temporary"],
+            ["manual", "automatic"],
         )
         self.assertTrue(all(not item["metadata"] for item in listing))
 
@@ -189,7 +194,8 @@ class BackupAdminServiceTest(unittest.TestCase):
         connection.close()
         with mock.patch.object(self.service, "storage_status", return_value={"free": 10 ** 9}), \
              mock.patch.object(self.service, "_cached_du", return_value=4096):
-            self.service.start_manual_backup({"id": 1, "email": "owner@example.com"})
+            operation = self.service.start_manual_backup({"id": 1, "email": "owner@example.com"})
+        self.assertRegex(operation["id"], r"^[0-9a-f]{32}$")
         deadline = time.time() + 3
         status = self.service.operation_status()
         while status.get("active") and time.time() < deadline:
@@ -225,12 +231,19 @@ class BackupAdminServiceTest(unittest.TestCase):
         connection.execute("CREATE TABLE users(id INTEGER PRIMARY KEY)")
         connection.commit()
         connection.close()
-        operation = {"id": "abc123", "active": True, "status": "queued"}
+        operation = {
+            "id": "0123456789abcdef0123456789abcdef",
+            "active": True,
+            "status": "queued",
+        }
 
         def create_archive(*_args, **_kwargs):
-            temporary = self.backups / "temporary"
-            temporary.mkdir()
-            target = temporary / "clock-erp-temp-20260915-121500-manual-abc123.tar.gz"
+            manual = self.backups / "manual"
+            manual.mkdir()
+            target = manual / (
+                "clock-erp-manual-20260915-121500-"
+                "0123456789abcdef0123456789abcdef.tar.gz"
+            )
             with tarfile.open(str(target), "w:gz") as archive:
                 archive.add(str(database), arcname="instance/auth.db")
             return subprocess.CompletedProcess([], 0, "CREATED", "")

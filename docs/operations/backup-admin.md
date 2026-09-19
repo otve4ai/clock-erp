@@ -2,10 +2,11 @@
 
 Production-данные находятся в `/opt/clock-erp/instance`. Штатный инструмент
 `/usr/local/sbin/clock-erp-backup-retention` ежедневно в 03:17 (timezone сервера)
-создаёт архив в `/opt/clock-erp-backups/daily`; retention запускается каждый час
-в :23. Daily хранит один валидный архив в сутки за последние семь календарных
-дней, temporary — три дня, operational — 30 дней. Все потоки используют общий
-`/opt/clock-erp-backups/.retention.lock`.
+создаёт архив в `/opt/clock-erp-backups/daily` и сразу выполняет ротацию. Daily
+хранит один валидный архив в сутки за последние семь календарных дней. Ручные
+архивы создаются только кнопкой ERP в `/opt/clock-erp-backups/manual` и
+автоматически не удаляются. Временных, pre-deploy и pre-restore архивов нет.
+Оба потока используют общий `/opt/clock-erp-backups/.retention.lock`.
 
 Архив содержит `.env` проекта и `instance/`. SQLite снимаются через online backup
 API/CLI и проходят `PRAGMA quick_check`; JSON, локальные изображения и вложения из
@@ -29,14 +30,12 @@ Recovery выполняет только установленный root-owned h
 
 Совместимость определяется на backend по точному Git commit, версии Recovery
 metadata, хешу `ops/recovery-schema-contract.json`, полному file manifest,
-SQLite schema digest и обязательным таблицам. Поэтому legacy-копии остаются
-видимыми бэкапами данных, но автоматическое восстановление для них запрещено.
+SQLite schema digest и обязательным таблицам. В UI доступны только ежедневные и
+ручные архивы; архив без полной metadata не используется для восстановления.
 Откат кода и полный restore также блокируются, если `requirements.txt` выбранной
 версии отличается от декларации зависимостей текущего immutable release.
 
-Перед заменой данных helper создаёт отдельный проверенный архив типа «Перед
-восстановлением» в `/opt/clock-erp-backups/safety`; обычная retention-ротация
-его не удаляет. Выбранный архив безопасно распаковывается в закрытый staging с
+Выбранный архив безопасно распаковывается в закрытый staging с
 запретом traversal, ссылок и special files. После сверки manifests включается
 maintenance marker, останавливаются web service и фоновые writer timers, затем
 `instance` меняется атомарным directory swap. `.env` из архива игнорируется.
@@ -45,9 +44,10 @@ maintenance marker, останавливаются web service и фоновые
 атомарный `/opt/clock-erp-current`. Source checkout `/opt/clock-erp` остаётся на
 чистой `main`, поэтому rollback не использует detached HEAD, `reset --hard` или
 удаление local changes. Full restore объединяет тот же data swap и точный release
-commit из metadata. При ошибке после swap выполняется одна попытка возврата к
-safety state; повторная ошибка переводит операцию в `critical` и сохраняет
-диагностику.
+commit из metadata. Исходный `instance` остаётся частью атомарного swap только
+на время операции и удаляется после успешной проверки; отдельный backup при
+restore не создаётся. При ошибке после swap выполняется одна попытка обратного
+swap; повторная ошибка переводит операцию в `critical` и сохраняет диагностику.
 
 ## ERP работает
 

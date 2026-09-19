@@ -8,7 +8,7 @@
     const q = (selector) => root.querySelector(selector);
     const text = (selector, value) => { const node = q(selector); if (node) node.textContent = value; };
     const unknown = "Не удалось определить";
-    const typeLabels = { automatic: "Автоматический", manual: "Ручной", pre_restore: "Перед восстановлением", temporary: "Временный" };
+    const typeLabels = { automatic: "Автоматический", manual: "Ручной" };
     const statusLabels = { not_checked: "Не проверен", verified: "Проверен", error: "Повреждён", creating: "Создаётся", verifying: "Проверяется" };
     let watchedOperationId = bootstrap.status && bootstrap.status.operation && bootstrap.status.operation.active
         ? bootstrap.status.operation.id
@@ -17,7 +17,6 @@
     let pendingRecovery = null;
     const stageLabels = {
         pending: "Ожидает", preflight: "Предварительная проверка",
-        safety_backup: "Safety backup", safety_check: "Проверка backup",
         staging_restore: "Staging", staging_check: "Проверка staging",
         maintenance: "Режим обслуживания", production_restore: "Восстановление",
         service_restart: "Перезапуск", health_check: "Проверка ERP",
