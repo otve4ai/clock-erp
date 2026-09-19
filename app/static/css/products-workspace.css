@@ -428,6 +428,29 @@
     background: var(--erp-surface-muted, #f8fafc);
 }
 
+.products-workspace-button.is-report {
+    gap: 7px;
+    border-color: #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.products-workspace-button.is-report:hover,
+.products-workspace-button.is-report:focus-visible {
+    border-color: #93c5fd;
+    background: #dbeafe;
+}
+
+.products-workspace-report-icon {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.5;
+}
+
 .products-workspace-button.is-primary {
     border-color: var(--erp-primary, #174887);
     background: var(--erp-primary, #174887);
