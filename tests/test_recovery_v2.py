@@ -197,8 +197,13 @@ class RecoveryV2Test(unittest.TestCase):
 
     def test_failure_after_service_stop_restarts_current_release(self):
         class Engine(RecoveryEngine):
+            def _maintenance_on(self, operation, contract):
+                super()._maintenance_on(operation, contract)
+                self._service_stopped = True
+
             def _restart_service(self):
                 self.restart_calls = getattr(self, "restart_calls", 0) + 1
+                self._service_stopped = False
 
         backup = self._make_backup()
         engine = self._engine("production_restore", cls=Engine)
@@ -311,6 +316,127 @@ class RecoveryV2Test(unittest.TestCase):
         (self.backups / ".backup-admin-operation.lock").touch()
         result = self._engine().run(self._operation(backup=backup)["id"])
         self.assertEqual(result["status"], "completed")
+
+    def test_writer_successfully_stops(self):
+        engine = self._engine()
+        engine.system_actions = True
+        completed = subprocess.CompletedProcess([], 0, b"", b"")
+        with mock.patch.object(engine, "_run", return_value=completed) as run:
+            engine._stop_writer_units()
+        self.assertEqual(run.call_count, 4)
+        self.assertTrue(all(call.args[0][:2] == ["systemctl", "stop"] for call in run.call_args_list))
+
+    def test_writer_already_stopped_is_idempotent_success(self):
+        engine = self._engine()
+        engine.system_actions = True
+        inactive = subprocess.CompletedProcess([], 0, b"", b"")
+        with mock.patch.object(engine, "_run", return_value=inactive):
+            engine._stop_writer_units()
+
+    def test_writer_stop_timeout_reports_exact_lock_holder(self):
+        lock_path = self.root / "busy-writer.lock"
+        lock_path.touch()
+        engine = RecoveryEngine(
+            self.project, self.backups, "/bin/false", self.contract,
+            release_root=self.release_root, current_link=self.current_link,
+            maintenance_path=self.maintenance, system_actions=True,
+            command_timeout=0,
+        )
+        holder = [{"pid": 26757, "command": "stale lock probe"}]
+        with mock.patch("app.services.recovery_v2.WRITER_LOCKS", (str(lock_path),)), \
+             mock.patch("app.services.recovery_v2.fcntl.flock", side_effect=BlockingIOError), \
+             mock.patch.object(engine, "_lock_holders", return_value=holder):
+            with self.assertRaises(RecoveryError) as raised:
+                engine._acquire_writer_guards()
+        self.assertEqual(raised.exception.code, "WRITER_BUSY")
+        self.assertEqual(raised.exception.failure["component"], lock_path.name)
+        self.assertIn("PID 26757", str(raised.exception))
+
+    def test_writer_refuses_stop_preserves_command_diagnostics(self):
+        engine = self._engine()
+        engine.system_actions = True
+        refused = subprocess.CompletedProcess([], 1, b"unit output", b"access denied")
+        with mock.patch.object(engine, "_run", return_value=refused):
+            with self.assertRaises(RecoveryError) as raised:
+                engine._stop_writer_units()
+        self.assertEqual(raised.exception.code, "WRITER_STOP_FAILED")
+        self.assertEqual(raised.exception.failure["return_code"], 1)
+        self.assertEqual(raised.exception.failure["stderr"], "access denied")
+
+    def test_active_database_writer_blocks_barrier(self):
+        engine = self._engine()
+        engine.system_actions = True
+        inactive = subprocess.CompletedProcess([], 3, b"inactive\n", b"")
+        writer = sqlite3.connect(str(self.instance / "catalog.db"))
+        writer.execute("BEGIN IMMEDIATE")
+        try:
+            with mock.patch.object(engine, "_run", return_value=inactive):
+                with self.assertRaises(RecoveryError) as raised:
+                    engine._verify_write_barrier(CONTRACT)
+        finally:
+            writer.rollback()
+            writer.close()
+        self.assertEqual(raised.exception.code, "DATABASE_WRITER_ACTIVE")
+
+    def test_recovery_does_not_swap_if_writer_remains_active(self):
+        class Engine(RecoveryEngine):
+            def _maintenance_on(self, operation, contract):
+                super()._maintenance_on(operation, contract)
+                raise RecoveryError("WRITER_STILL_ACTIVE", "writer active")
+
+            def _swap_instance(self, operation, staged_instance):
+                self.swap_called = True
+                return super()._swap_instance(operation, staged_instance)
+
+        backup = self._make_backup()
+        engine = self._engine(cls=Engine)
+        result = engine.run(self._operation(backup=backup)["id"])
+        self.assertEqual(result["error_code"], "WRITER_STILL_ACTIVE")
+        self.assertFalse(getattr(engine, "swap_called", False))
+        self.assertEqual(self._payload(), "current")
+
+    def test_writer_resumes_and_maintenance_clears_after_failed_recovery(self):
+        class Engine(RecoveryEngine):
+            def _maintenance_on(self, operation, contract):
+                super()._maintenance_on(operation, contract)
+                raise RecoveryError("WRITER_BUSY", "busy")
+
+            def _maintenance_off(self):
+                self.resume_calls = getattr(self, "resume_calls", 0) + 1
+                return super()._maintenance_off()
+
+        backup = self._make_backup()
+        engine = self._engine(cls=Engine)
+        result = engine.run(self._operation(backup=backup)["id"])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(engine.resume_calls, 1)
+        self.assertFalse(self.maintenance.exists())
+
+    def test_writer_resumes_before_success_is_persisted(self):
+        class Engine(RecoveryEngine):
+            def _maintenance_off(self):
+                self.resume_calls = getattr(self, "resume_calls", 0) + 1
+                return super()._maintenance_off()
+
+        backup = self._make_backup()
+        engine = self._engine(cls=Engine)
+        result = engine.run(self._operation(backup=backup)["id"])
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(engine.resume_calls, 1)
+        self.assertFalse(self.maintenance.exists())
+
+    def test_health_journal_uses_legacy_systemd_compatible_epoch(self):
+        engine = self._engine()
+        engine.system_actions = True
+        engine._health_since_epoch = 1234.9
+        response = mock.MagicMock()
+        response.__enter__.return_value.getcode.return_value = 200
+        response.__exit__.return_value = False
+        completed = subprocess.CompletedProcess([], 0, b"", b"")
+        with mock.patch("app.services.recovery_v2.urlopen", return_value=response), \
+             mock.patch.object(engine, "_run", return_value=completed) as run:
+            engine._health(CONTRACT)
+        self.assertIn("@1234", run.call_args.args[0])
 
     def test_release_replaces_tracked_instance_directory_with_runtime_link(self):
         bootstrap = self.instance / "navigation_settings.json"
