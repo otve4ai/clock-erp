@@ -397,6 +397,49 @@ class SalesInventoryTest(unittest.TestCase):
         self.assertEqual(len(self.inventory.list_movements(watch["id"])), 1)
         self.assertEqual(len(self.inventory.list_movements(strap["id"])), 1)
 
+    def test_order_refusal_returns_only_items_owned_by_that_order(self):
+        linked = self.create_product(stock=5, name="Linked", article="OWN-1")
+        foreign = self.create_product(stock=4, name="Foreign", article="OWN-2")
+        sale = self.inventory.create_sale_batch(
+            {
+                "source": "tictactoy",
+                "order_number": "21131",
+                "external_order_id": "21131",
+            },
+            [
+                {
+                    "product_id": linked["id"],
+                    "quantity": 2,
+                    "unit_price": 100,
+                    "order_id": "21131",
+                },
+                {
+                    "product_id": foreign["id"],
+                    "quantity": 1,
+                    "unit_price": 200,
+                    "order_id": "other-order",
+                },
+            ],
+            enforce_external_unique=True,
+        )
+
+        refused = self.inventory.cancel_sale(
+            sale["id"],
+            reason="Клиент отказался",
+            order_id="21131",
+            idempotency_key="order-refusal:21131",
+        )
+
+        self.assertEqual(self.stock(linked["id"]), 5)
+        self.assertEqual(self.stock(foreign["id"]), 3)
+        rows = self.inventory.list_sales(sale["id"])
+        linked_row = next(row for row in rows if row["product_id"] == str(linked["id"]))
+        foreign_row = next(row for row in rows if row["product_id"] == str(foreign["id"]))
+        self.assertEqual(linked_row["returned_quantity"], 2)
+        self.assertEqual(foreign_row["returned_quantity"], 0)
+        self.assertEqual(refused["order_status"], "cancelled")
+        self.assertEqual(refused["status"], "partially_returned")
+
     def test_batch_failure_rolls_back_every_item(self):
         watch = self.create_product(stock=5, name="Bradley Steel", article="B-2")
         strap = self.create_product(stock=3, name="Ремешок", article="S-2")
