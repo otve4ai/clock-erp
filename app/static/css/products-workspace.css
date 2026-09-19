@@ -23,8 +23,6 @@
 }
 
 .products-analytics-page .main {
-    min-width: 0;
-    padding: 28px;
     overflow-x: clip;
 }
 
@@ -664,10 +662,6 @@
 }
 
 @media (max-width: 767px) {
-    .products-analytics-page .main {
-        padding: 16px;
-    }
-
     .warehouse-page .warehouse-column-settings {
         display: block !important;
     }
