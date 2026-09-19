@@ -6842,6 +6842,7 @@ select.erp-control {
         .sales-page,
         .brands-page,
         .categories-page,
+        .products-analytics-page,
         .journal-page,
         .repair-page
     )) .main {
@@ -9029,6 +9030,7 @@ select.erp-control {
     .sales-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page,
     .repair-page
 ) {
@@ -9041,6 +9043,7 @@ select.erp-control {
     .sales-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page,
     .repair-page
 ) .app > :is(.main, .journal-main, .repair-main) {
@@ -9062,6 +9065,7 @@ select.erp-control {
     .sales-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page,
     .repair-page
 ) .erp-workspace-header {
@@ -9076,6 +9080,7 @@ select.erp-control {
     .sales-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page,
     .repair-page
 ) .erp-workspace-heading h1 {
@@ -9090,6 +9095,7 @@ select.erp-control {
     .sales-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page,
     .repair-page
 ) .erp-workspace-heading p {
@@ -9103,6 +9109,7 @@ select.erp-control {
     .sales-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page
 ) .erp-section-tabs {
     min-height: 42px;
@@ -9140,6 +9147,7 @@ select.erp-control {
     .warehouse-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page
 ) .erp-section-tabs::-webkit-scrollbar,
 .sales-page .sales-tabs-scroll::-webkit-scrollbar {
@@ -9151,6 +9159,7 @@ select.erp-control {
     .sales-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page
 ) .erp-section-tab {
     position: relative;
@@ -9175,6 +9184,7 @@ select.erp-control {
     .sales-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page
 ) .erp-section-tab::after {
     position: absolute;
@@ -9192,6 +9202,7 @@ select.erp-control {
     .sales-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page
 ) .erp-section-tab:hover {
     background: var(--erp-surface-muted);
@@ -9203,6 +9214,7 @@ select.erp-control {
     .sales-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page
 ) .erp-section-tab:is(.is-active, .active) {
     background: var(--theme-active, #eff6ff);
@@ -9214,6 +9226,7 @@ select.erp-control {
     .sales-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page
 ) .erp-section-tab:is(.is-active, .active)::after {
     background: var(--erp-primary);
@@ -9224,6 +9237,7 @@ select.erp-control {
     .sales-page,
     .brands-page,
     .categories-page,
+    .products-analytics-page,
     .journal-page
 ) .erp-section-tab:focus-visible {
     outline: 2px solid var(--erp-primary);
@@ -9284,6 +9298,7 @@ select.erp-control {
         .sales-page,
         .brands-page,
         .categories-page,
+        .products-analytics-page,
         .journal-page,
         .repair-page
     ) .app > :is(.main, .journal-main, .repair-main) {
@@ -9295,6 +9310,7 @@ select.erp-control {
         .sales-page,
         .brands-page,
         .categories-page,
+        .products-analytics-page,
         .journal-page,
         .repair-page
     ) .erp-workspace-header {
@@ -9307,6 +9323,7 @@ select.erp-control {
         .sales-page,
         .brands-page,
         .categories-page,
+        .products-analytics-page,
         .journal-page,
         .repair-page
     ) .erp-workspace-heading h1 {
@@ -9326,6 +9343,7 @@ select.erp-control {
         .sales-page,
         .brands-page,
         .categories-page,
+        .products-analytics-page,
         .journal-page
     ) .erp-section-tab {
         padding-right: 12px;

@@ -126,6 +126,13 @@ class ProductsRedesignStructureTest(unittest.TestCase):
             "warehouse_brands.html", "warehouse_categories.html",
         ):
             source = self.source(name)
+            self.assertIn(
+                "static_asset_url('css/products-workspace.css')", source
+            )
+            self.assertNotIn(
+                "url_for('static', filename='css/products-workspace.css')",
+                source,
+            )
             self.assertEqual(source.count("js/products-tabs.js"), 1, name)
             self.assertIn(
                 "static_asset_url('js/products-tabs.js')", source
@@ -138,6 +145,35 @@ class ProductsRedesignStructureTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertNotIn("Date.now", versioning)
         self.assertNotIn("random", versioning.lower())
+
+    def test_products_analytics_uses_the_shared_page_chrome(self):
+        components = (
+            ROOT / "app/static/css/erp-components.css"
+        ).read_text(encoding="utf-8")
+        workspace = (
+            ROOT / "app/static/css/products-workspace.css"
+        ).read_text(encoding="utf-8")
+
+        mobile_fallback = components.split("body:not(:is(", 1)[1].split(
+            ")) .main", 1
+        )[0]
+        self.assertIn(".products-analytics-page", mobile_fallback)
+
+        shared_chrome = components.split(
+            "Unified page chrome for products, sales, journal and repairs.",
+            1,
+        )[1]
+        self.assertEqual(
+            shared_chrome.count(".products-analytics-page"),
+            17,
+        )
+
+        analytics_main = workspace.split(
+            ".products-analytics-page .main {", 1
+        )[1].split("}", 1)[0]
+        self.assertIn("overflow-x: clip;", analytics_main)
+        self.assertNotIn("padding", analytics_main)
+        self.assertNotIn("min-width", analytics_main)
 
     def test_products_tab_script_is_idempotent_when_loaded_three_times(self):
         node = shutil.which("node")
