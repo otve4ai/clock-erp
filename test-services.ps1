@@ -13,16 +13,10 @@ if ([string]::IsNullOrWhiteSpace($python)) {
     if (Test-Path -LiteralPath $projectPython) {
         $python = $projectPython
     }
-    else {
-        $command = Get-Command python -ErrorAction SilentlyContinue
-        if ($null -ne $command -and $command.Source -notlike '*\WindowsApps\python.exe') {
-            $python = $command.Source
-        }
-    }
 }
 
 if ([string]::IsNullOrWhiteSpace($python) -or -not (Test-Path -LiteralPath $python)) {
-    Write-Error 'TEST-SERVICES REFUSED: Python was not found. Set ERP_TEST_PYTHON or create the project .venv.'
+    Write-Error 'TEST-SERVICES REFUSED: Project .venv is not configured. Run scripts/setup_dev.ps1 or set ERP_TEST_PYTHON to an explicit test Python.' -ErrorAction Continue
     exit 2
 }
 
@@ -31,5 +25,6 @@ if ($SelfTestFailure) {
     $arguments += '--self-test-failure'
 }
 
+Write-Output "TEST-SERVICES Python: $python"
 & $python @arguments
 exit $LASTEXITCODE
