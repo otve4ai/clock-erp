@@ -1,0 +1,5 @@
+python-dotenv
+requests
+flask
+openpyxl==3.0.10
+cryptography==35.0.0
