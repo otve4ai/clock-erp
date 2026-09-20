@@ -395,6 +395,8 @@ class ServiceVault:
             if icon:
                 icon_sql = ",icon_blob=?,icon_mime=?"
                 parameters.extend(icon)
+            elif payload.get("icon_remove"):
+                icon_sql = ",icon_blob=NULL,icon_mime=NULL"
             parameters.extend([now, int(service_id), expected])
             cursor = connection.execute(
                 "UPDATE services SET name=?,url=?,description=?,category=?,icon=?{}"
