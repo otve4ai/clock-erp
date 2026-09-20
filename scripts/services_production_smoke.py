@@ -51,6 +51,14 @@ def main():
     database = "instance/services.db"
     test_name = "Codex Services smoke {}".format(secrets.token_hex(6))
     before = counts(database)
+    with sqlite3.connect(database) as connection:
+        category_row = connection.execute(
+            "SELECT category_key FROM service_categories ORDER BY position,name LIMIT 1"
+        ).fetchone()
+    if category_row is None:
+        print("SERVICES_SMOKE_FAILED=category-missing", file=sys.stderr)
+        return 1
+    smoke_category = category_row[0]
 
     try:
         from app.auth import get_auth_store
@@ -76,7 +84,7 @@ def main():
                 "login": login_one,
                 "password": password_one,
             }],
-            "category": "infrastructure",
+            "category": smoke_category,
             "description": "Temporary production verification",
             "favorite": False,
             "icon": "lock",

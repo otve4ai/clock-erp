@@ -3,6 +3,7 @@
 import base64
 import binascii
 import os
+import secrets
 import sqlite3
 import time
 from pathlib import Path
@@ -11,7 +12,6 @@ from urllib.parse import urlsplit
 from cryptography.fernet import Fernet, InvalidToken
 
 
-SERVICE_CATEGORIES = {"sites", "sales", "delivery", "infrastructure"}
 BUILTIN_ICONS = {"globe", "cart", "truck", "server", "cloud", "lock"}
 PERMISSIONS = (
     "can_view", "can_open", "can_view_login", "can_copy_login",
@@ -19,7 +19,8 @@ PERMISSIONS = (
     "can_manage_access", "can_archive",
 )
 MAX_ICON_BYTES = 512 * 1024
-MIGRATION_ID = "2026-08-28-services-vault-v1"
+BASE_MIGRATION_ID = "2026-08-28-services-vault-v1"
+MIGRATION_ID = "2026-09-20-service-categories-v2"
 
 
 class ServiceVaultError(ValueError):
@@ -96,11 +97,123 @@ class ServiceVault:
         if not self.path.exists():
             raise ServiceVaultError("Требуется миграция базы сервисов")
         with self.connect() as connection:
-            row = connection.execute(
+            ledger = {row[0] for row in connection.execute(
                 "SELECT migration_id FROM service_schema_migrations"
-            ).fetchone()
-            if row is None or row[0] != MIGRATION_ID:
+            )}
+            if ledger != {BASE_MIGRATION_ID, MIGRATION_ID}:
                 raise ServiceVaultError("Требуется миграция базы сервисов")
+
+    def list_categories(self):
+        with self.connect() as connection:
+            return [dict(row) for row in connection.execute(
+                "SELECT c.category_key AS key,c.name,c.position,COUNT(s.id) service_count "
+                "FROM service_categories c LEFT JOIN services s ON s.category=c.category_key "
+                "GROUP BY c.category_key,c.name,c.position ORDER BY c.position,c.name"
+            ).fetchall()]
+
+    @staticmethod
+    def _category_name(value):
+        name = " ".join(str(value or "").split())
+        if not name or len(name) > 60:
+            raise ServiceVaultError("Название раздела должно содержать от 1 до 60 символов")
+        return name
+
+    def create_category(self, name, user):
+        if not self._is_owner(user):
+            raise ServicePermissionError("Недостаточно прав")
+        name = self._category_name(name)
+        now = int(time.time())
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute(
+                "SELECT 1 FROM service_categories WHERE name=? COLLATE NOCASE", (name,)
+            ).fetchone():
+                raise ServiceConflictError("Раздел с таким названием уже существует")
+            category_key = "custom-" + secrets.token_hex(6)
+            position = connection.execute(
+                "SELECT COALESCE(MAX(position),0)+10 FROM service_categories"
+            ).fetchone()[0]
+            connection.execute(
+                "INSERT INTO service_categories(category_key,name,position,created_at,updated_at) "
+                "VALUES(?,?,?,?,?)", (category_key, name, position, now, now)
+            )
+            connection.commit()
+        return category_key
+
+    def rename_category(self, category_key, name, user):
+        if not self._is_owner(user):
+            raise ServicePermissionError("Недостаточно прав")
+        name = self._category_name(name)
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT category_key FROM service_categories WHERE category_key=?", (category_key,)
+            ).fetchone()
+            if row is None:
+                raise ServiceNotFoundError("Раздел не найден")
+            duplicate = connection.execute(
+                "SELECT 1 FROM service_categories WHERE name=? COLLATE NOCASE AND category_key<>?",
+                (name, category_key),
+            ).fetchone()
+            if duplicate:
+                raise ServiceConflictError("Раздел с таким названием уже существует")
+            connection.execute(
+                "UPDATE service_categories SET name=?,updated_at=? WHERE category_key=?",
+                (name, int(time.time()), category_key),
+            )
+            connection.commit()
+
+    def reorder_categories(self, ordered_keys, user):
+        if not self._is_owner(user):
+            raise ServicePermissionError("Недостаточно прав")
+        ordered_keys = [str(value) for value in ordered_keys]
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = [row[0] for row in connection.execute(
+                "SELECT category_key FROM service_categories ORDER BY position,name"
+            )]
+            if len(ordered_keys) != len(set(ordered_keys)) or set(ordered_keys) != set(existing):
+                raise ServiceVaultError("Некорректный порядок разделов")
+            now = int(time.time())
+            for position, category_key in enumerate(ordered_keys, 1):
+                connection.execute(
+                    "UPDATE service_categories SET position=?,updated_at=? WHERE category_key=?",
+                    (position * 10, now, category_key),
+                )
+            connection.commit()
+
+    def delete_category(self, category_key, replacement_key, user):
+        if not self._is_owner(user):
+            raise ServicePermissionError("Недостаточно прав")
+        replacement_key = str(replacement_key or "")
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            category = connection.execute(
+                "SELECT category_key,name FROM service_categories WHERE category_key=?", (category_key,)
+            ).fetchone()
+            if category is None:
+                raise ServiceNotFoundError("Раздел не найден")
+            if connection.execute("SELECT COUNT(*) FROM service_categories").fetchone()[0] <= 1:
+                raise ServiceVaultError("Нельзя удалить единственный раздел")
+            service_count = connection.execute(
+                "SELECT COUNT(*) FROM services WHERE category=?", (category_key,)
+            ).fetchone()[0]
+            if service_count:
+                if not replacement_key or replacement_key == category_key:
+                    raise ServiceVaultError("Выберите раздел для переноса сервисов")
+                if connection.execute(
+                    "SELECT 1 FROM service_categories WHERE category_key=?", (replacement_key,)
+                ).fetchone() is None:
+                    raise ServiceVaultError("Раздел для переноса не найден")
+                connection.execute(
+                    "UPDATE services SET category=?,updated_at=?,version=version+1 WHERE category=?",
+                    (replacement_key, int(time.time()), category_key),
+                )
+            connection.execute(
+                "DELETE FROM service_categories WHERE category_key=?", (category_key,)
+            )
+            connection.commit()
+            return {"key": category["category_key"], "name": category["name"], "moved": service_count}
 
     def encrypt(self, value):
         value = str(value or "")
@@ -127,7 +240,70 @@ class ServiceVault:
             ),
             (int(service_id), int((user or {}).get("id") or 0)),
         ).fetchone()
-        return {name: bool(row[name]) if row else False for name in PERMISSIONS}
+        rights = {name: bool(row[name]) if row else False for name in PERMISSIONS}
+        # Every more specific permission is subordinate to visibility of the
+        # service itself.  Besides keeping the UI consistent, this closes the
+        # direct credential endpoints when an old or malformed grant contains
+        # (for example) can_view_password=1 and can_view=0.
+        if not rights["can_view"]:
+            return {name: False for name in PERMISSIONS}
+        return rights
+
+    def access_report(self, user_id, actor, target_is_owner=False):
+        """Return services known to a user and credentials worth rotating."""
+        if not self._is_owner(actor):
+            raise ServicePermissionError("Недостаточно прав")
+        user_id = int(user_id)
+        with self.connect() as connection:
+            if target_is_owner:
+                rows = connection.execute(
+                    "SELECT s.id,s.name,1 can_view_password,1 can_copy_password "
+                    "FROM services s ORDER BY s.name,s.id"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT s.id,s.name,p.can_view_password,p.can_copy_password "
+                    "FROM service_permissions p JOIN services s ON s.id=p.service_id "
+                    "WHERE p.user_id=? AND (p.can_view=1 OR p.can_open=1 "
+                    "OR p.can_view_login=1 OR p.can_copy_login=1 "
+                    "OR p.can_view_password=1 OR p.can_copy_password=1 "
+                    "OR p.can_edit=1 OR p.can_manage_access=1 OR p.can_archive=1) "
+                    "ORDER BY s.name,s.id",
+                    (user_id,),
+                ).fetchall()
+            services = []
+            passwords = []
+            for row in rows:
+                item = {"id": int(row["id"]), "name": row["name"]}
+                services.append(item)
+                if row["can_view_password"] or row["can_copy_password"]:
+                    accounts = connection.execute(
+                        "SELECT id,label FROM service_accounts "
+                        "WHERE service_id=? AND password_encrypted IS NOT NULL "
+                        "ORDER BY position,id",
+                        (row["id"],),
+                    ).fetchall()
+                    passwords.extend({
+                        "service_id": int(row["id"]),
+                        "service_name": row["name"],
+                        "account_id": int(account["id"]),
+                        "account_label": account["label"],
+                    } for account in accounts)
+            return {"user_id": user_id, "services": services, "passwords": passwords}
+
+    def revoke_user(self, user_id, actor, target_is_owner=False):
+        """Remove every service grant and preference for one employee."""
+        report = self.access_report(user_id, actor, target_is_owner)
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "DELETE FROM service_permissions WHERE user_id=?", (int(user_id),)
+            )
+            connection.execute(
+                "DELETE FROM service_user_preferences WHERE user_id=?", (int(user_id),)
+            )
+            connection.commit()
+        return report
 
     def require(self, connection, service_id, user, permission, allow_archived=False):
         service = connection.execute(
@@ -237,9 +413,17 @@ class ServiceVault:
         name = str(payload.get("name") or "").strip()
         if not name or len(name) > 160:
             raise ServiceVaultError("Укажите название сервиса")
-        category = str(payload.get("category") or "sites")
-        if category not in SERVICE_CATEGORIES:
-            raise ServiceVaultError("Неизвестная категория")
+        category = str(payload.get("category") or "")
+        with self.connect() as connection:
+            if not category:
+                row = connection.execute(
+                    "SELECT category_key FROM service_categories ORDER BY position,name LIMIT 1"
+                ).fetchone()
+                category = row[0] if row else ""
+            if not category or connection.execute(
+                "SELECT 1 FROM service_categories WHERE category_key=?", (category,)
+            ).fetchone() is None:
+                raise ServiceVaultError("Неизвестный раздел")
         icon = str(payload.get("icon") or "globe")
         if icon not in BUILTIN_ICONS:
             icon = "globe"
@@ -305,10 +489,13 @@ class ServiceVault:
             return
         connection.execute("DELETE FROM service_permissions WHERE service_id=?", (service_id,))
         for item in permissions:
+            if not isinstance(item, dict):
+                raise ServiceVaultError("Некорректные права доступа")
             user_id = int(item.get("user_id") or 0)
             if not user_id:
                 continue
-            values = [int(bool(item.get(name))) for name in PERMISSIONS]
+            can_view = bool(item.get("can_view"))
+            values = [int(can_view and bool(item.get(name))) for name in PERMISSIONS]
             connection.execute(
                 "INSERT INTO service_permissions(service_id,user_id,{}) VALUES(?,?,{})".format(
                     ",".join(PERMISSIONS), ",".join("?" for _ in PERMISSIONS)
@@ -334,6 +521,23 @@ class ServiceVault:
                 (int(time.time()) if archived else None, int(time.time()), int(service_id)),
             )
             connection.commit()
+
+    def delete_archived(self, service_id, user):
+        """Permanently delete an archived service and all related secrets."""
+        if not self._is_owner(user):
+            raise ServicePermissionError("Недостаточно прав")
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            service = connection.execute(
+                "SELECT * FROM services WHERE id=?", (int(service_id),)
+            ).fetchone()
+            if service is None:
+                raise ServiceNotFoundError("Сервис не найден")
+            if not service["archived_at"]:
+                raise ServiceVaultError("Сначала переместите сервис в архив")
+            connection.execute("DELETE FROM services WHERE id=?", (int(service_id),))
+            connection.commit()
+            return dict(service)
 
     def set_favorite(self, service_id, favorite, user):
         now = int(time.time())

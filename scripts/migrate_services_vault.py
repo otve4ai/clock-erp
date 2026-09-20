@@ -5,8 +5,18 @@ import argparse
 import sqlite3
 from pathlib import Path
 
-MIGRATION_ID = "2026-08-28-services-vault-v1"
-TABLES = ("services", "service_accounts", "service_permissions", "service_user_preferences")
+BASE_MIGRATION_ID = "2026-08-28-services-vault-v1"
+MIGRATION_ID = "2026-09-20-service-categories-v2"
+TABLES = (
+    "services", "service_accounts", "service_permissions",
+    "service_user_preferences", "service_categories",
+)
+DEFAULT_CATEGORIES = (
+    ("sites", "Сайты", 10),
+    ("sales", "Продажи", 20),
+    ("delivery", "Доставка", 30),
+    ("infrastructure", "Инфраструктура", 40),
+)
 
 
 def apply(database):
@@ -17,6 +27,10 @@ def apply(database):
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("BEGIN IMMEDIATE")
         connection.execute("CREATE TABLE IF NOT EXISTS service_schema_migrations (migration_id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)")
+        connection.execute("""CREATE TABLE IF NOT EXISTS service_categories (
+            category_key TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            position INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL)""")
         connection.execute("""CREATE TABLE IF NOT EXISTS services (
             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, url TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '', category TEXT NOT NULL, icon TEXT NOT NULL DEFAULT 'globe',
@@ -43,8 +57,32 @@ def apply(database):
         connection.execute("CREATE INDEX IF NOT EXISTS idx_service_accounts_service ON service_accounts(service_id,position,id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_service_permissions_user ON service_permissions(user_id,service_id)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_service_preferences_user ON service_user_preferences(user_id,favorite,sort_order)")
-        if connection.execute("SELECT COUNT(*) FROM service_schema_migrations").fetchone()[0] == 0:
-            connection.execute("INSERT INTO service_schema_migrations(migration_id,applied_at) VALUES(?,strftime('%s','now'))", (MIGRATION_ID,))
+        ledger = {row[0] for row in connection.execute(
+            "SELECT migration_id FROM service_schema_migrations"
+        )}
+        if ledger not in (set(), {BASE_MIGRATION_ID}, {BASE_MIGRATION_ID, MIGRATION_ID}):
+            raise RuntimeError("services migration ledger differs")
+        if MIGRATION_ID not in ledger:
+            for category_key, name, position in DEFAULT_CATEGORIES:
+                if connection.execute(
+                    "SELECT 1 FROM service_categories WHERE category_key=?", (category_key,)
+                ).fetchone() is None:
+                    connection.execute(
+                        "INSERT INTO service_categories(category_key,name,position,created_at,updated_at) "
+                        "VALUES(?,?,?,strftime('%s','now'),strftime('%s','now'))",
+                        (category_key, name, position),
+                    )
+        if not ledger:
+            connection.execute(
+                "INSERT INTO service_schema_migrations(migration_id,applied_at) VALUES(?,strftime('%s','now'))",
+                (BASE_MIGRATION_ID,),
+            )
+            ledger.add(BASE_MIGRATION_ID)
+        if ledger == {BASE_MIGRATION_ID}:
+            connection.execute(
+                "INSERT INTO service_schema_migrations(migration_id,applied_at) VALUES(?,strftime('%s','now'))",
+                (MIGRATION_ID,),
+            )
         connection.commit()
     except Exception:
         connection.rollback()
@@ -61,9 +99,13 @@ def verify(database):
         expected = set(TABLES) | {"service_schema_migrations"}
         if tables != expected:
             raise RuntimeError("services schema differs")
-        row = connection.execute("SELECT migration_id FROM service_schema_migrations").fetchone()
-        if not row or row[0] != MIGRATION_ID:
+        ledger = {row[0] for row in connection.execute(
+            "SELECT migration_id FROM service_schema_migrations"
+        )}
+        if ledger != {BASE_MIGRATION_ID, MIGRATION_ID}:
             raise RuntimeError("services migration ledger differs")
+        if connection.execute("SELECT COUNT(*) FROM service_categories").fetchone()[0] < 1:
+            raise RuntimeError("services categories are missing")
         if [row[0] for row in connection.execute("PRAGMA quick_check")] != ["ok"]:
             raise RuntimeError("services quick_check failed")
         if connection.execute("PRAGMA foreign_key_check").fetchall():
