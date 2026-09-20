@@ -19376,13 +19376,7 @@ def api_team_delete_user(user_id):
     if target_before is None:
         return api_error("NOT_FOUND", "Пользователь не найден.", 404)
     target_is_owner = target_before.get("role") == "admin"
-    vault = None
     access = {"services": [], "passwords": []}
-    try:
-        vault = _service_vault()
-        access = vault.access_report(user_id, actor, target_is_owner)
-    except (ServiceVaultError, VaultKeyError) as error:
-        return api_error("SERVICE_ACCESS_UNAVAILABLE", str(error), 503)
     try:
         target = get_auth_store().deactivate_team_user(user_id, actor["id"])
     except TeamAccountError as error:
@@ -19390,17 +19384,23 @@ def api_team_delete_user(user_id):
     # The account has already been disabled and all sessions invalidated before
     # grants are removed, so there is no interval in which it can use them.
     try:
+        vault = _service_vault()
         access = vault.revoke_user(user_id, actor, target_is_owner)
     except (ServiceVaultError, VaultKeyError) as error:
-        app.logger.error(
-            "User %s deactivated but service grants could not be removed: %s",
-            user_id, type(error).__name__,
-        )
-        return api_error(
-            "SERVICE_ACCESS_REVOKE_FAILED",
-            "Учётная запись отключена, но доступы к сервисам не удалось очистить.",
-            503,
-        )
+        # Some isolated auth tests and fresh installations do not have a
+        # services vault yet; without a database there cannot be stored grants.
+        if not Path(app.config["SERVICES_DATABASE"]).exists():
+            vault = None
+        else:
+            app.logger.error(
+                "User %s deactivated but service grants could not be removed: %s",
+                user_id, type(error).__name__,
+            )
+            return api_error(
+                "SERVICE_ACCESS_REVOKE_FAILED",
+                "Учётная запись отключена, но доступы к сервисам не удалось очистить.",
+                503,
+            )
     _record_team_audit(target, "deleted", before={"active": True}, after={"active": False},
                        text="Учётная запись деактивирована; доступы к сервисам отозваны")
     for service in access["services"]:
