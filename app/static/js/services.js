@@ -207,15 +207,17 @@
     var serviceDropdown = document.getElementById("serviceDropdown");
     function serviceFilterLabel(value) {
         if (value === "all") return "Все";
-        if (value === "favorite") return "Избранные";
+        if (value === "favorite") return "Все";
         return categoryLabel(value);
     }
     function renderCategoryControls() {
         var filters = serviceDropdown.querySelector("[data-category-filters]");
-        var values = [{key:"all",name:"Все"},{key:"favorite",name:"Избранные"}].concat(state.categories);
-        if (!values.some(function(item) { return item.key === state.filter; })) state.filter = "all";
+        var values = [{key:"all",name:"Все"}].concat(state.categories);
+        if (state.filter !== "favorite" && !values.some(function(item) { return item.key === state.filter; })) state.filter = "all";
         filters.innerHTML = values.map(function(item) { var selected = item.key === state.filter; return '<button type="button" class="' + (selected ? 'is-selected' : '') + '" data-filter="' + escapeHtml(item.key) + '">' + escapeHtml(item.name) + '<span>' + (selected ? '✓' : '') + '</span></button>'; }).join("");
         serviceDropdown.querySelector("[data-service-label]").textContent = "Сервисы: " + serviceFilterLabel(state.filter);
+        var favoriteToggle = document.getElementById("favoriteToggle");
+        if (favoriteToggle) favoriteToggle.classList.toggle("is-active", state.filter === "favorite");
         if (form && form.elements.category) {
             var selectedCategory = form.elements.category.value;
             form.elements.category.innerHTML = state.categories.map(function(item) { return '<option value="' + escapeHtml(item.key) + '">' + escapeHtml(item.name) + '</option>'; }).join("");
@@ -223,14 +225,20 @@
         }
     }
     serviceDropdown.querySelector(".services-dropdown-menu").addEventListener("click", function(event) {
-        var manage = event.target.closest("[data-manage-categories]");
-        if (manage) { closeDropdowns(); return openCategoryDialog(); }
         var button = event.target.closest("[data-filter]"); if (!button) return;
         state.filter = button.dataset.filter;
         serviceDropdown.querySelector("[data-service-label]").textContent = "Сервисы: " + serviceFilterLabel(state.filter);
         serviceDropdown.querySelectorAll("[data-filter]").forEach(function(item) { item.classList.toggle("is-selected", item === button); item.querySelector("span").textContent = item === button ? "✓" : ""; });
+        if (favoriteToggle) favoriteToggle.classList.toggle("is-active", state.filter === "favorite");
         closeDropdowns(); render();
     });
+    var favoriteToggle = document.getElementById("favoriteToggle");
+    if (favoriteToggle) favoriteToggle.addEventListener("click", function() {
+        state.filter = state.filter === "favorite" ? "all" : "favorite";
+        renderCategoryControls(); render();
+    });
+    var manageCategories = document.getElementById("manageCategories");
+    if (manageCategories) manageCategories.addEventListener("click", openCategoryDialog);
     var employeeDropdown = document.getElementById("employeeDropdown"), revokeAccess = document.getElementById("revokeAccess");
     if (employeeDropdown) {
         var employeeOptions = employeeDropdown.querySelector("[data-employee-options]");
@@ -364,7 +372,9 @@
         form.reset(); accountFields.innerHTML=""; document.getElementById("serviceId").value=service?service.id:""; document.getElementById("serviceVersion").value=service?service.version:"";
         document.getElementById("serviceDialogTitle").textContent=service?"Изменить сервис":"Добавить сервис";
         renderCategoryControls();
-        if(service){form.elements.name.value=service.name;form.elements.url.value=service.url;form.elements.description.value=service.description;form.elements.category.value=service.category;form.elements.icon.value=service.icon;form.elements.favorite.checked=service.favorite;service.accounts.forEach(addAccountField);}else addAccountField();
+        var iconPreview = form.querySelector("[data-icon-preview]"), iconPreviewImage = form.querySelector("[data-icon-preview-image]"), iconFile = form.elements.icon_file;
+        iconPreview.hidden = true; iconPreviewImage.removeAttribute("src"); iconFile.value = "";
+        if(service){form.elements.name.value=service.name;form.elements.url.value=service.url;form.elements.description.value=service.description;form.elements.category.value=service.category;form.elements.favorite.checked=service.favorite;service.accounts.forEach(addAccountField);if(service.has_custom_icon){iconPreviewImage.src="/api/services/"+service.id+"/icon?v="+encodeURIComponent(service.version||"");iconPreview.hidden=false;}}else addAccountField();
         buildPermissions(service); document.getElementById("serviceFormStatus").textContent=""; dialog.showModal();
     }
     if (dialog) {
@@ -373,9 +383,16 @@
         form.addEventListener("submit",async function(event){event.preventDefault();var status=document.getElementById("serviceFormStatus");status.textContent="";
             var accounts=Array.from(accountFields.children).map(function(row){return {id:Number(row.dataset.id||0),label:row.querySelector('[data-account="label"]').value,login:row.querySelector('[data-account="login"]').value,password:row.querySelector('[data-account="password"]').value};});
             var permissions=document.getElementById("permissionsSection").hidden?null:Array.from(permissionFields.querySelectorAll(".permission-user")).map(function(row){var result={user_id:Number(row.dataset.userId)};row.querySelectorAll("[data-permission]").forEach(function(input){result[input.dataset.permission]=input.checked;});return result;});
-            var payload={name:form.elements.name.value,url:form.elements.url.value,description:form.elements.description.value,category:form.elements.category.value,icon:form.elements.icon.value,favorite:form.elements.favorite.checked,version:Number(document.getElementById("serviceVersion").value||0),accounts:accounts,permissions:permissions};
+            var payload={name:form.elements.name.value,url:form.elements.url.value,description:form.elements.description.value,category:form.elements.category.value,favorite:form.elements.favorite.checked,version:Number(document.getElementById("serviceVersion").value||0),accounts:accounts,permissions:permissions};
             var body=new FormData();body.append("payload",JSON.stringify(payload));if(form.elements.icon_file.files[0])body.append("icon",form.elements.icon_file.files[0]);var id=document.getElementById("serviceId").value;
             try{await api(id?"/api/services/"+id:"/api/services",{method:id?"PUT":"POST",body:body});dialog.close();notify(id?'Сервис «'+payload.name+'» сохранён':'Сервис «'+payload.name+'» добавлен');await refresh();}catch(error){status.textContent=error.message;}
+        });
+        form.elements.icon_file.addEventListener("change", function() {
+            var file = this.files && this.files[0], preview = form.querySelector("[data-icon-preview]"), image = form.querySelector("[data-icon-preview-image]");
+            if (!file) return;
+            var reader = new FileReader();
+            reader.onload = function() { image.src = reader.result; preview.hidden = false; };
+            reader.readAsDataURL(file);
         });
     }
     var archiveToggle=document.getElementById("archiveToggle"); if(archiveToggle)archiveToggle.addEventListener("click",async function(){state.archived=!state.archived;state.filter="all";state.query="";document.getElementById("serviceSearch").value="";this.textContent=state.archived?"Вернуться к сервисам":"Показать архив";try{await refresh();}catch(error){notify(error.message,true);}});

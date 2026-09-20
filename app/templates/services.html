@@ -23,10 +23,11 @@
             <label class="services-search"><span aria-hidden="true">⌕</span><input id="serviceSearch" type="search" placeholder="Найти Bitrix, СДЭК или хостинг…" autocomplete="off"></label>
             <div class="services-filterbar">
                 <div class="services-dropdowns">
-                    {% if is_owner %}<div class="services-dropdown" id="employeeDropdown"><button type="button" class="services-dropdown-toggle" aria-expanded="false"><span aria-hidden="true">◎</span><span data-employee-label>Сотрудники: Все</span><span aria-hidden="true">⌄</span></button><div class="services-dropdown-menu employee-menu" hidden><label class="dropdown-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Найти сотрудника" autocomplete="off"></label><div data-employee-options></div></div></div>{% endif %}
-                    <div class="services-dropdown" id="serviceDropdown"><button type="button" class="services-dropdown-toggle" aria-expanded="false"><span data-service-label>Сервисы: Все</span><span aria-hidden="true">⌄</span></button><div class="services-dropdown-menu" hidden><div data-category-filters></div>{% if is_owner %}<div class="dropdown-separator"></div><button type="button" class="manage-categories-button" data-manage-categories>Управление разделами</button>{% endif %}</div></div>
+                    {% if is_owner %}<div class="services-dropdown" id="employeeDropdown"><button type="button" class="services-dropdown-toggle" aria-expanded="false"><span data-employee-label>Сотрудники: Все</span><span aria-hidden="true">⌄</span></button><div class="services-dropdown-menu employee-menu" hidden><label class="dropdown-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Найти сотрудника" autocomplete="off"></label><div data-employee-options></div></div></div>{% endif %}
+                    <button type="button" class="services-filter-button" id="favoriteToggle">Избранные</button>
+                    <div class="services-dropdown" id="serviceDropdown"><button type="button" class="services-dropdown-toggle" aria-expanded="false"><span data-service-label>Сервисы: Все</span><span aria-hidden="true">⌄</span></button><div class="services-dropdown-menu" hidden><div data-category-filters></div></div></div>
                 </div>
-                <div class="services-filter-actions"><button type="button" class="services-revoke" id="revokeAccess" hidden>Отозвать все доступы</button>{% if is_owner %}<button type="button" class="services-link" id="archiveToggle">Показать архив</button>{% endif %}</div>
+                <div class="services-filter-actions"><button type="button" class="services-revoke" id="revokeAccess" hidden>Отозвать все доступы</button>{% if is_owner %}<button type="button" class="services-link" id="manageCategories">Управление разделами</button><button type="button" class="services-link" id="archiveToggle">Показать архив</button>{% endif %}</div>
             </div>
             <div class="services-result-row"><strong id="serviceCount">0 сервисов</strong><span id="accessSummary"></span></div>
         </section>
@@ -43,8 +44,8 @@
             <input type="hidden" id="serviceId"><input type="hidden" id="serviceVersion">
             <div class="service-fields two"><label>Название сервиса<input name="name" maxlength="160" required></label><label>Ссылка<input name="url" type="url" placeholder="https://example.com" required></label></div>
             <label>Описание<textarea name="description" maxlength="1000" rows="3"></textarea></label>
-            <div class="service-fields two"><label>Раздел<select name="category"></select></label><label>Логотип-заглушка<select name="icon"><option value="globe">Сайт</option><option value="cart">Продажи</option><option value="truck">Доставка</option><option value="server">Сервер</option><option value="cloud">Облако</option><option value="lock">Защита</option></select></label></div>
-            <label>Своя иконка <span class="field-hint">PNG, JPEG или WEBP, до 512 КБ</span><input name="icon_file" type="file" accept="image/png,image/jpeg,image/webp"></label>
+            <label>Раздел<select name="category"></select></label>
+            <label class="service-icon-upload">Своя иконка <span class="field-hint">PNG, JPEG или WEBP, до 512 КБ</span><span class="icon-upload-preview" data-icon-preview hidden><img data-icon-preview-image alt="Предпросмотр иконки"></span><input name="icon_file" type="file" accept="image/png,image/jpeg,image/webp"></label>
             <section class="form-section"><div class="form-section-title"><h3>Аккаунты</h3><button type="button" class="services-link" id="addAccount">+ Добавить аккаунт</button></div><div id="accountFields"></div></section>
             <section class="form-section" id="permissionsSection"><h3>Кому доступно</h3><div id="permissionFields" class="permission-fields"></div></section>
             <label class="service-check"><input name="favorite" type="checkbox"> Добавить в избранное</label>
@@ -59,7 +60,6 @@
     <form method="dialog">
         <header><div><h2 id="categoryDialogTitle">Управление разделами</h2><p>Добавляйте, переименовывайте и меняйте порядок разделов.</p></div><button type="button" class="dialog-close" data-category-close aria-label="Закрыть">×</button></header>
         <div class="service-form-body">
-            <div class="category-system-filters"><span>Все</span><span>Избранные</span><small>Системные фильтры</small></div>
             <div class="category-list" data-category-list></div>
             <div class="category-add-row"><input type="text" maxlength="60" placeholder="Название нового раздела" data-new-category><button type="button" class="services-secondary" data-add-category>+ Добавить раздел</button></div>
             <p class="form-status" data-category-status role="alert"></p>
