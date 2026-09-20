@@ -18860,7 +18860,7 @@ def services_page():
     except (ServiceVaultError, VaultKeyError) as error:
         app.logger.error("Services vault unavailable: %s", type(error).__name__)
         return render_template(
-            "services.html", services=[], service_users=[], vault_error=str(error),
+            "services.html", services=[], service_categories=[], service_users=[], vault_error=str(error),
             is_owner=user.get("role") == "admin", can_edit_services=False,
             csrf=csrf_token(),
         ), 503
@@ -18868,7 +18868,8 @@ def services_page():
     can_manage_services = any(item["permissions"]["can_manage_access"] for item in items)
     users = get_auth_store().list_team_presence() if (user.get("role") == "admin" or can_manage_services) else []
     return render_template(
-        "services.html", services=items, service_users=users, vault_error="",
+        "services.html", services=items, service_categories=vault.list_categories(),
+        service_users=users, vault_error="",
         is_owner=user.get("role") == "admin", can_edit_services=can_edit_services,
         csrf=csrf_token(),
     )
@@ -18878,7 +18879,129 @@ def services_page():
 def api_services_list():
     try:
         archived = request.args.get("archived") == "1"
-        return jsonify({"ok": True, "services": _service_vault().list_services(current_auth_user(), archived)})
+        actor = current_auth_user() or {}
+        viewed_user = actor
+        requested_user_id = request.args.get("user_id", type=int)
+        if requested_user_id:
+            if actor.get("role") != "admin":
+                raise ServicePermissionError("Недостаточно прав")
+            viewed_user = get_auth_store().get_team_user(requested_user_id)
+            if viewed_user is None or not viewed_user.get("active"):
+                raise ServiceNotFoundError("Пользователь не найден")
+        return jsonify({
+            "ok": True,
+            "services": _service_vault().list_services(viewed_user, archived),
+            "categories": _service_vault().list_categories(),
+        })
+    except (ServiceVaultError, VaultKeyError) as error:
+        return _service_error(error)
+
+
+@app.get("/api/services/access/users/<int:user_id>")
+def api_services_user_access(user_id):
+    try:
+        target = get_auth_store().get_team_user(user_id)
+        if target is None:
+            raise ServiceNotFoundError("Пользователь не найден")
+        return jsonify({
+            "ok": True,
+            "access": _service_vault().access_report(
+                user_id, current_auth_user(), target.get("role") == "admin"
+            ),
+        })
+    except (ServiceVaultError, VaultKeyError) as error:
+        return _service_error(error)
+
+
+@app.get("/api/service-categories")
+def api_service_categories_list():
+    try:
+        return jsonify({"ok": True, "categories": _service_vault().list_categories()})
+    except (ServiceVaultError, VaultKeyError) as error:
+        return _service_error(error)
+
+
+@app.post("/api/service-categories")
+def api_service_categories_create():
+    try:
+        require_csrf_when_authenticated()
+        payload = request.get_json(silent=True) or {}
+        category_key = _service_vault().create_category(
+            payload.get("name"), current_auth_user()
+        )
+        _record_service_audit(
+            "category:" + category_key, "created", payload.get("name"),
+            metadata={"text_snapshot": "Раздел сервисов добавлен"},
+        )
+        return jsonify({"ok": True, "key": category_key}), 201
+    except (ServiceVaultError, VaultKeyError) as error:
+        return _service_error(error)
+
+
+@app.put("/api/service-categories/<category_key>")
+def api_service_categories_update(category_key):
+    try:
+        require_csrf_when_authenticated()
+        payload = request.get_json(silent=True) or {}
+        _service_vault().rename_category(
+            category_key, payload.get("name"), current_auth_user()
+        )
+        _record_service_audit(
+            "category:" + category_key, "updated", payload.get("name"),
+            metadata={"text_snapshot": "Раздел сервисов переименован"},
+        )
+        return jsonify({"ok": True})
+    except (ServiceVaultError, VaultKeyError) as error:
+        return _service_error(error)
+
+
+@app.post("/api/service-categories/reorder")
+def api_service_categories_reorder():
+    try:
+        require_csrf_when_authenticated()
+        payload = request.get_json(silent=True) or {}
+        _service_vault().reorder_categories(
+            payload.get("ordered_keys") or [], current_auth_user()
+        )
+        return jsonify({"ok": True})
+    except (ServiceVaultError, VaultKeyError) as error:
+        return _service_error(error)
+
+
+@app.delete("/api/service-categories/<category_key>")
+def api_service_categories_delete(category_key):
+    try:
+        require_csrf_when_authenticated()
+        payload = request.get_json(silent=True) or {}
+        result = _service_vault().delete_category(
+            category_key, payload.get("replacement_key"), current_auth_user()
+        )
+        _record_service_audit(
+            "category:" + category_key, "deleted", result["name"],
+            metadata={"text_snapshot": "Раздел сервисов удалён; перенесено: {}".format(result["moved"])},
+        )
+        return jsonify({"ok": True, "result": result})
+    except (ServiceVaultError, VaultKeyError) as error:
+        return _service_error(error)
+
+
+@app.post("/api/services/access/users/<int:user_id>/revoke")
+def api_services_user_access_revoke(user_id):
+    try:
+        require_csrf_when_authenticated()
+        actor = current_auth_user() or {}
+        target = get_auth_store().get_team_user(user_id)
+        if target is None:
+            raise ServiceNotFoundError("Пользователь не найден")
+        if target.get("role") == "admin":
+            raise ServiceVaultError("У администратора полный доступ по роли")
+        access = _service_vault().revoke_user(user_id, actor)
+        for service in access["services"]:
+            _record_service_audit(
+                service["id"], "permissions_changed", service["name"],
+                metadata={"text_snapshot": "Все доступы сотрудника отозваны"},
+            )
+        return jsonify({"ok": True, "access": access})
     except (ServiceVaultError, VaultKeyError) as error:
         return _service_error(error)
 
@@ -18929,6 +19052,22 @@ def api_services_archive(service_id):
         vault.set_archived(service_id, archived, current_auth_user())
         _record_service_audit(service_id, "archived" if archived else "restored", name,
                               metadata={"text_snapshot": "Сервис перемещён в архив" if archived else "Сервис восстановлен"})
+        return jsonify({"ok": True})
+    except (ServiceVaultError, VaultKeyError) as error:
+        return _service_error(error)
+
+
+@app.delete("/api/services/<int:service_id>")
+def api_services_delete(service_id):
+    try:
+        require_csrf_when_authenticated()
+        service = _service_vault().delete_archived(
+            service_id, current_auth_user()
+        )
+        _record_service_audit(
+            service_id, "deleted", service["name"],
+            metadata={"text_snapshot": "Сервис удалён навсегда"},
+        )
         return jsonify({"ok": True})
     except (ServiceVaultError, VaultKeyError) as error:
         return _service_error(error)
@@ -19127,13 +19266,21 @@ def team_page():
 
 @app.get("/app/team/<int:user_id>")
 def team_user_page(user_id):
-    _require_team_admin()
+    actor = _require_team_admin()
     target = get_auth_store().get_team_user(user_id)
     if target is None:
         abort(404)
     display_name = " ".join((target["first_name"] or "", target["last_name"] or "")).strip()
     target["display_name"] = display_name or target["login"] or target["email"]
     target["role_label"] = ALLOWED_ROLES.get(target["role"], target["role"])
+    try:
+        service_access = _service_vault().access_report(
+            user_id, actor, target.get("role") == "admin"
+        )
+        service_access_error = ""
+    except (ServiceVaultError, VaultKeyError):
+        service_access = {"services": [], "passwords": []}
+        service_access_error = "Не удалось проверить доступы к сервисам."
     category = str(request.args.get("category") or "").strip()
     category_map = {
         "sales": "sale", "orders": "order", "receipts": "receipt",
@@ -19174,6 +19321,7 @@ def team_user_page(user_id):
         "team_user.html", team_user=target, roles=ALLOWED_ROLES,
         events=events, next_cursor=listing["next_cursor"], category=category,
         period=period, date_from=date_from, date_to=date_to,
+        service_access=service_access, service_access_error=service_access_error,
         journal_active=any(key in request.args for key in (
             "category", "period", "date_from", "date_to", "cursor"
         )),
@@ -19224,13 +19372,47 @@ def api_team_update_user(user_id):
 def api_team_delete_user(user_id):
     actor = _require_team_admin()
     require_csrf_when_authenticated()
+    target_before = get_auth_store().get_team_user(user_id)
+    if target_before is None:
+        return api_error("NOT_FOUND", "Пользователь не найден.", 404)
+    target_is_owner = target_before.get("role") == "admin"
+    vault = None
+    access = {"services": [], "passwords": []}
+    try:
+        vault = _service_vault()
+        access = vault.access_report(user_id, actor, target_is_owner)
+    except (ServiceVaultError, VaultKeyError) as error:
+        return api_error("SERVICE_ACCESS_UNAVAILABLE", str(error), 503)
     try:
         target = get_auth_store().deactivate_team_user(user_id, actor["id"])
     except TeamAccountError as error:
         return api_error(error.code, error.message, 409)
+    # The account has already been disabled and all sessions invalidated before
+    # grants are removed, so there is no interval in which it can use them.
+    try:
+        access = vault.revoke_user(user_id, actor, target_is_owner)
+    except (ServiceVaultError, VaultKeyError) as error:
+        app.logger.error(
+            "User %s deactivated but service grants could not be removed: %s",
+            user_id, type(error).__name__,
+        )
+        return api_error(
+            "SERVICE_ACCESS_REVOKE_FAILED",
+            "Учётная запись отключена, но доступы к сервисам не удалось очистить.",
+            503,
+        )
     _record_team_audit(target, "deleted", before={"active": True}, after={"active": False},
-                       text="Учётная запись деактивирована; история сохранена")
-    return api_success({"redirect": "/app/team"})
+                       text="Учётная запись деактивирована; доступы к сервисам отозваны")
+    for service in access["services"]:
+        _record_service_audit(
+            service["id"], "permissions_changed", service["name"],
+            metadata={"text_snapshot": "Все доступы уволенного сотрудника отозваны"},
+        )
+    return api_success({
+        "redirect": "/app/team",
+        "revoked_services": access["services"],
+        "passwords_to_rotate": access["passwords"],
+    })
 
 
 @app.post("/api/v1/presence/heartbeat")

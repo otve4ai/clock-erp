@@ -166,6 +166,98 @@ class ServicesVaultTest(unittest.TestCase):
         self.assertEqual(copied.get_json()["value"], "correct horse battery")
         self.assertIn("no-store", copied.headers["Cache-Control"])
 
+    def test_credential_grant_never_bypasses_service_visibility(self):
+        malformed = self.payload()
+        malformed["permissions"][0].update({
+            "can_view": False,
+            "can_view_login": True,
+            "can_copy_login": True,
+            "can_view_password": True,
+            "can_copy_password": True,
+        })
+        self.assertEqual(self.create(malformed).status_code, 201)
+        account_id = self.client.get("/api/services").get_json()["services"][0]["accounts"][0]["id"]
+
+        self.login(self.employee_id)
+        self.assertEqual(self.client.get("/api/services").get_json()["services"], [])
+        for kind in ("login", "password"):
+            response = self.client.get(
+                "/api/service-accounts/{}/{}".format(account_id, kind)
+            )
+            self.assertEqual(response.status_code, 403)
+            self.assertNotIn("employee-login", response.get_data(as_text=True))
+            self.assertNotIn("correct horse battery", response.get_data(as_text=True))
+
+    def test_deactivating_employee_revokes_all_service_access_and_reports_rotation(self):
+        service_id = self.create().get_json()["id"]
+        report = self.client.get(
+            "/api/services/access/users/{}".format(self.employee_id)
+        )
+        self.assertEqual(report.status_code, 200)
+        access = report.get_json()["access"]
+        self.assertEqual([item["id"] for item in access["services"]], [service_id])
+        self.assertEqual(access["passwords"], [])
+
+        item = self.client.get("/api/services").get_json()["services"][0]
+        payload = self.payload(password="")
+        payload["version"] = item["version"]
+        payload["permissions"][0]["can_view_password"] = True
+        for source, existing in zip(payload["accounts"], item["accounts"]):
+            source["id"] = existing["id"]
+            source["login"] = ""
+            source["password"] = ""
+        self.assertEqual(self.client.put(
+            "/api/services/{}".format(service_id), json=payload,
+            headers={"X-CSRF-Token": "services-csrf"},
+        ).status_code, 200)
+
+        with mock.patch.object(web, "_record_team_audit"):
+            deleted = self.client.delete(
+                "/api/v1/team/users/{}".format(self.employee_id),
+                headers={"X-CSRF-Token": "services-csrf"},
+            )
+        self.assertEqual(deleted.status_code, 200)
+        result = deleted.get_json()["data"]
+        self.assertEqual([item["id"] for item in result["revoked_services"]], [service_id])
+        self.assertEqual(len(result["passwords_to_rotate"]), 2)
+        with sqlite3.connect(str(self.services_path)) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT COUNT(*) FROM service_permissions WHERE user_id=?",
+                (self.employee_id,),
+            ).fetchone()[0], 0)
+
+    def test_owner_can_preview_employee_services_and_revoke_every_grant(self):
+        service_id = self.create().get_json()["id"]
+        preview = self.client.get(
+            "/api/services?user_id={}".format(self.employee_id)
+        )
+        self.assertEqual(preview.status_code, 200)
+        services = preview.get_json()["services"]
+        self.assertEqual([item["id"] for item in services], [service_id])
+        self.assertTrue(services[0]["permissions"]["can_view_login"])
+        self.assertFalse(services[0]["permissions"]["can_view_password"])
+
+        self.login(self.employee_id)
+        forbidden = self.client.get(
+            "/api/services?user_id={}".format(self.owner_id)
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+        self.login(self.owner_id)
+        revoked = self.client.post(
+            "/api/services/access/users/{}/revoke".format(self.employee_id),
+            headers={"X-CSRF-Token": "services-csrf"},
+        )
+        self.assertEqual(revoked.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in revoked.get_json()["access"]["services"]],
+            [service_id],
+        )
+        after = self.client.get(
+            "/api/services?user_id={}".format(self.employee_id)
+        )
+        self.assertEqual(after.get_json()["services"], [])
+
     def test_owner_edits_archives_restores_and_conflict_is_detected(self):
         service_id = self.create().get_json()["id"]
         item = self.client.get("/api/services").get_json()["services"][0]
@@ -195,6 +287,45 @@ class ServicesVaultTest(unittest.TestCase):
             headers={"X-CSRF-Token": "services-csrf"},
         )
         self.assertEqual(restored.status_code, 200)
+
+    def test_only_owner_can_permanently_delete_an_archived_service(self):
+        service_id = self.create().get_json()["id"]
+        account_id = self.client.get("/api/services").get_json()["services"][0]["accounts"][0]["id"]
+
+        active = self.client.delete(
+            "/api/services/{}".format(service_id),
+            headers={"X-CSRF-Token": "services-csrf"},
+        )
+        self.assertEqual(active.status_code, 400)
+        self.assertEqual(self.client.post(
+            "/api/services/{}/archive".format(service_id),
+            json={"archived": True}, headers={"X-CSRF-Token": "services-csrf"},
+        ).status_code, 200)
+
+        self.login(self.employee_id)
+        forbidden = self.client.delete(
+            "/api/services/{}".format(service_id),
+            headers={"X-CSRF-Token": "services-csrf"},
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+        self.login(self.owner_id)
+        deleted = self.client.delete(
+            "/api/services/{}".format(service_id),
+            headers={"X-CSRF-Token": "services-csrf"},
+        )
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(self.client.get(
+            "/api/services?archived=1"
+        ).get_json()["services"], [])
+        with sqlite3.connect(str(self.services_path)) as connection:
+            self.assertIsNone(connection.execute(
+                "SELECT id FROM service_accounts WHERE id=?", (account_id,)
+            ).fetchone())
+            self.assertEqual(connection.execute(
+                "SELECT COUNT(*) FROM service_permissions WHERE service_id=?",
+                (service_id,),
+            ).fetchone()[0], 0)
 
     def test_csrf_auth_url_and_icon_validation(self):
         unauthenticated = web.app.test_client().post("/api/services", json=self.payload())
@@ -236,6 +367,60 @@ class ServicesVaultTest(unittest.TestCase):
         self.assertFalse(owner[-1]["favorite"])
         self.assertFalse(employee[0]["favorite"])
 
+    def test_owner_manages_categories_and_delete_reassigns_without_losing_secrets(self):
+        service_id = self.create().get_json()["id"]
+        account_id = self.client.get("/api/services").get_json()["services"][0]["accounts"][0]["id"]
+        created = self.client.post(
+            "/api/service-categories", json={"name": "Маркетплейсы"},
+            headers={"X-CSRF-Token": "services-csrf"},
+        )
+        self.assertEqual(created.status_code, 201)
+        category_key = created.get_json()["key"]
+        renamed = self.client.put(
+            "/api/service-categories/{}".format(category_key),
+            json={"name": "Площадки"}, headers={"X-CSRF-Token": "services-csrf"},
+        )
+        self.assertEqual(renamed.status_code, 200)
+
+        item = self.client.get("/api/services").get_json()["services"][0]
+        payload = self.payload(password="")
+        payload["version"] = item["version"]
+        payload["category"] = category_key
+        for source, existing in zip(payload["accounts"], item["accounts"]):
+            source["id"] = existing["id"]
+            source["login"] = ""
+            source["password"] = ""
+        self.assertEqual(self.client.put(
+            "/api/services/{}".format(service_id), json=payload,
+            headers={"X-CSRF-Token": "services-csrf"},
+        ).status_code, 200)
+
+        blocked = self.client.delete(
+            "/api/service-categories/{}".format(category_key), json={},
+            headers={"X-CSRF-Token": "services-csrf"},
+        )
+        self.assertEqual(blocked.status_code, 400)
+        deleted = self.client.delete(
+            "/api/service-categories/{}".format(category_key),
+            json={"replacement_key": "sites"},
+            headers={"X-CSRF-Token": "services-csrf"},
+        )
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.get_json()["result"]["moved"], 1)
+        moved = self.client.get("/api/services").get_json()["services"][0]
+        self.assertEqual(moved["category"], "sites")
+        value = self.client.get(
+            "/api/service-accounts/{}/password".format(account_id)
+        )
+        self.assertEqual(value.get_json()["value"], "correct horse battery")
+
+        self.login(self.employee_id)
+        forbidden = self.client.post(
+            "/api/service-categories", json={"name": "Нельзя"},
+            headers={"X-CSRF-Token": "services-csrf"},
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
     def test_missing_and_wrong_key_fail_without_secret_in_error(self):
         with mock.patch.dict(os.environ, {"SERVICE_VAULT_KEY": ""}):
             with self.assertRaises(VaultKeyError) as missing:
@@ -255,9 +440,43 @@ class ServicesVaultTest(unittest.TestCase):
         second = apply_services_migration(self.services_path)
         self.assertEqual(first, second)
         self.assertEqual(verify(self.services_path), first)
+        with sqlite3.connect(str(self.services_path)) as connection:
+            connection.execute(
+                "DELETE FROM service_categories WHERE category_key='infrastructure'"
+            )
+            connection.commit()
+        apply_services_migration(self.services_path)
+        with sqlite3.connect(str(self.services_path)) as connection:
+            self.assertIsNone(connection.execute(
+                "SELECT 1 FROM service_categories WHERE category_key='infrastructure'"
+            ).fetchone())
         source = Path("scripts/migrate_services_vault.py").read_text(encoding="utf-8").upper()
         for forbidden in (" RETURNING ", " ON CONFLICT ", " JSON_EXTRACT", " WHERE ARCHIVED_AT IS NULL"):
             self.assertNotIn(forbidden, source)
+
+    def test_category_migration_upgrades_v1_and_preserves_services(self):
+        legacy = self.root / "services-v1.db"
+        apply_services_migration(legacy)
+        with sqlite3.connect(str(legacy)) as connection:
+            connection.execute("DROP TABLE service_categories")
+            connection.execute(
+                "DELETE FROM service_schema_migrations WHERE migration_id=?",
+                ("2026-09-20-service-categories-v2",),
+            )
+            connection.execute(
+                "INSERT INTO services(name,url,description,category,icon,created_by,created_at,updated_at,version) "
+                "VALUES('Legacy','https://legacy.example','','delivery','truck',1,1,1,1)"
+            )
+            connection.commit()
+        result = apply_services_migration(legacy)
+        self.assertEqual(result["services"], 1)
+        with sqlite3.connect(str(legacy)) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT name FROM service_categories WHERE category_key='delivery'"
+            ).fetchone()[0], "Доставка")
+            self.assertEqual(connection.execute(
+                "SELECT category FROM services WHERE name='Legacy'"
+            ).fetchone()[0], "delivery")
 
 
 if __name__ == "__main__":
