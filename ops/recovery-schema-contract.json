@@ -15,7 +15,11 @@
       "orders_snapshot_meta"
     ],
     "purchases.db": ["purchase_requests", "supplier_orders"],
-    "services.db": ["services", "service_accounts", "service_categories"],
+    "services.db": [
+      "services",
+      "service_accounts",
+      "service_categories"
+    ],
     "sms.db": ["sms_messages", "sms_meta"],
     "tasks.db": ["tasks", "task_history"]
   }
