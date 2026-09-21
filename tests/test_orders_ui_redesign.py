@@ -1,4 +1,5 @@
 import unittest
+from datetime import date, timedelta
 from html import unescape
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -30,7 +31,7 @@ class OrdersUiRedesignTest(unittest.TestCase):
         web.app.config.clear()
         web.app.config.update(self.original_config)
 
-    def render_selected_order(self, path="/order/7"):
+    def render_selected_order(self, path="/order/7", created_at="2026-08-21 10:30"):
         summary = {
             "id": "7",
             "number": "7007",
@@ -39,7 +40,7 @@ class OrdersUiRedesignTest(unittest.TestCase):
             "customer": "Очень длинное имя клиента для проверки строки",
             "phone": "+7 900 000-00-00",
             "order_total": 12990,
-            "created_at": "2026-08-21 10:30",
+            "created_at": created_at,
             "source_name": "Интернет-магазин",
             "products": [],
         }
@@ -125,9 +126,11 @@ class OrdersUiRedesignTest(unittest.TestCase):
         )
 
     def test_order_links_keep_all_query_parameters(self):
+        created_at = f"{(date.today() - timedelta(days=3)).isoformat()} 10:30"
         html = self.render_selected_order(
             "/order/7?page=3&page_size=50&q=Другой&status=N&period=30d"
-            "&source=tictactoy&sort=created_at&direction=desc"
+            "&source=tictactoy&sort=created_at&direction=desc",
+            created_at=created_at,
         )
         row = html.split('data-order-id="8"', 1)[1].split("</tr>", 1)[0]
         href = unescape(row.split('data-order-href="', 1)[1].split('"', 1)[0])
