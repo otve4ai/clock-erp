@@ -202,7 +202,8 @@ test('compact rows retain density, disclosure and independent scrolling', async 
           return box.top >= viewport.top && box.bottom <= viewport.bottom;
         }).length;
       });
-      expect(density).toBeGreaterThanOrEqual(5);
+      // Two visible order positions intentionally make list rows taller.
+      expect(density).toBeGreaterThanOrEqual(3);
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const before = await row.boundingBox();
