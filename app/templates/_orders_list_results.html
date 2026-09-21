@@ -23,8 +23,14 @@
                 {% set order_url = url_for('wildberries_order_page', wb_order_id=order.get('wb_order_id'), **navigation_query_args) if is_wb else url_for('order_page', order_id=oid, **navigation_query_args) if oid else '#' %}
                 {% set products = order.get('items') or order.get('products') or [] %}
                 {% set product = products|first if products else {} %}
-                {% set second_product = products[1] if products|length > 1 else {} %}
-                {% set second_article = second_product.get('article') or second_product.get('sku') %}
+                {% set positions_count = products|length %}
+                {% set positions_mod_100 = positions_count % 100 %}
+                {% set positions_mod_10 = positions_count % 10 %}
+                {% set positions_word = 'позиция' if positions_mod_10 == 1 and positions_mod_100 != 11 else 'позиции' if positions_mod_10 in [2, 3, 4] and not 12 <= positions_mod_100 <= 14 else 'позиций' %}
+                {% set remaining_count = positions_count - 2 %}
+                {% set remaining_mod_100 = remaining_count % 100 %}
+                {% set remaining_mod_10 = remaining_count % 10 %}
+                {% set remaining_word = 'позицию' if remaining_mod_10 == 1 and remaining_mod_100 != 11 else 'позиции' if remaining_mod_10 in [2, 3, 4] and not 12 <= remaining_mod_100 <= 14 else 'позиций' %}
                 {% set preview = order.get('product_preview') or product %}
                 {% set is_selected = selected_order and selected_order.get('id')|string == oid|string %}
                 {% set total = order.get('order_total') if order.get('order_total') is not none else order.get('price') %}
@@ -32,27 +38,23 @@
                     <td class="order-identity-cell">
                         <div class="order-row-product">
                             {% if preview.get('image_url') %}<img class="order-row-photo" src="{{ preview.image_url }}" alt="Фото товара" loading="lazy">{% else %}<span class="order-row-photo order-photo-placeholder" role="img" aria-label="Нет фото">◇</span>{% endif %}
-                            <div class="order-row-copy"><div class="order-row-identity"><a class="order-number" href="{{ order_url }}">№{{ number }}</a>
+                            <div class="order-row-copy"><div class="order-row-identity"><span class="order-number-stack"><a class="order-number" href="{{ order_url }}">№{{ number }}</a>
+                                {% if positions_count > 1 %}<span class="order-position-count">{{ positions_count }} {{ positions_word }}</span>{% endif %}</span>
                                 <span class="source-label{% if is_wb %} source-label-wb{% endif %}">{{ 'Wildberries' if is_wb else 'TicTacToy' }}</span>
                                 {% if order.get('customer') %}<span class="order-row-customer" title="{{ order.customer }}">{{ order.customer }}</span>{% endif %}
                                 </div><div class="order-row-description">
-                                <strong class="list-product-name" title="{{ preview.get('name') or product.get('name') or product.get('NAME') or '' }}">{{ preview.get('name') or product.get('name') or product.get('NAME') or 'Состав не загружен' }}</strong>
-                                {% set article = preview.get('article') or product.get('article') or product.get('sku') %}{% if article %}<span class="cell-secondary order-row-article" title="Артикул: {{ article }}">Артикул: {{ article }}</span>{% endif %}
-                                {% if products|length > 1 %}<span class="order-row-second-product"><span class="order-row-second-product-name" title="{{ second_product.get('name') or second_product.get('NAME') or 'Товар без названия' }}">{{ second_product.get('name') or second_product.get('NAME') or 'Товар без названия' }}</span>{% if second_article %}<span class="cell-secondary order-row-second-product-article" title="Артикул: {{ second_article }}">Артикул: {{ second_article }}</span>{% endif %}</span>{% endif %}
-                                {% set remaining_products = products|length - 2 %}
-                                {% if remaining_products > 0 %}
-                                    {% set remaining_mod_100 = remaining_products % 100 %}
-                                    {% set remaining_mod_10 = remaining_products % 10 %}
-                                    {% set position_word = 'позиция' if remaining_mod_10 == 1 and remaining_mod_100 != 11 else 'позиции' if remaining_mod_10 in [2, 3, 4] and not 12 <= remaining_mod_100 <= 14 else 'позиций' %}
-                                    <span class="order-row-more-products">+ ещё {{ remaining_products }} {{ position_word }}</span>
-                                {% endif %}
+                                {% if products %}<div class="order-row-items">{% for item in products[:2] %}
+                                    {% set item_name = preview.get('name') or item.get('name') or item.get('NAME') if loop.first else item.get('name') or item.get('NAME') %}
+                                    {% set item_article = preview.get('article') or item.get('article') or item.get('sku') if loop.first else item.get('article') or item.get('sku') %}
+                                    <div class="order-row-item"><strong class="list-product-name order-row-item-name" title="{{ item_name or 'Товар без названия' }}">{{ item_name or 'Товар без названия' }}</strong><span class="cell-secondary order-row-article" title="Артикул: {{ item_article or 'не указан' }}">Артикул: {{ item_article or 'не указан' }}</span></div>
+                                {% endfor %}</div>{% else %}<strong class="list-product-name order-row-item-name">Состав не загружен</strong>{% endif %}
                                 {% if mode == 'split' %}<span class="date-value order-row-date" data-date="{{ order.get('created_at') or order.get('date') }}">—</span>{% endif %}
                                 </div>
                             </div>
                         </div>
-                        <details class="order-row-secondary"><summary aria-label="Подробнее о заказе №{{ number }}" title="Подробнее"><span class="order-disclosure-label">Подробнее</span></summary>
+                        <details class="order-row-secondary"><summary aria-label="Подробнее о заказе №{{ number }}" title="Подробнее"><span class="order-disclosure-label">{% if remaining_count > 0 %}Раскрыть остальные {{ remaining_count }} {{ remaining_word }}{% else %}Подробнее{% endif %}</span></summary>
                             {% if not is_wb and order.get('customer') %}<p>{{ order.customer }}{% if order.get('phone') %} · {{ order.phone }}{% endif %}{% if order.get('email') %} · {{ order.email }}{% endif %}</p>{% endif %}
-                            {% for item in products %}<p>{{ item.get('name') or item.get('NAME') }} · {{ item.get('quantity', item.get('QUANTITY', 1)) }} шт.{% if item.get('model') %} · {{ item.model }}{% endif %}{% if item.get('article') or item.get('sku') %} · Артикул: {{ item.get('article') or item.get('sku') }}{% endif %}</p>{% endfor %}
+                            {% for item in products %}<p>{{ item.get('name') or item.get('NAME') }} · {{ item.get('quantity', item.get('QUANTITY', 1)) }} шт.{% if item.get('model') %} · {{ item.model }}{% endif %} · Артикул: {{ item.get('article') or item.get('sku') or 'не указан' }}</p>{% endfor %}
                             {% set address = [order.get('country'), order.get('region'), order.get('city'), order.get('address') or order.get('delivery_address')]|select|unique|join(' · ') %}{% if order.get('delivery') or address %}<p>Доставка: {{ order.get('delivery') or '' }} {{ address }}</p>{% endif %}
                             {% if not is_wb and order.get('paid') is not none %}<p>Оплата: {{ 'Оплачен' if order.get('paid')|string|upper in ['Y','YES','TRUE','1'] else 'Не оплачен' }} · {{ order.get('payment_system') or '' }}</p>{% endif %}
                             {% if order.get('internal_comment') %}<p>Сотрудник: {{ order.internal_comment.get('author_name') or '' }} · {{ order.internal_comment.get('created_at') or '' }} · {{ order.internal_comment.get('text') }}</p>{% endif %}

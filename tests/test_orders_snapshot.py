@@ -597,9 +597,9 @@ class OrdersListIntegrationTest(unittest.TestCase):
         self.assertEqual(header_positions, sorted(header_positions))
         for expected in (
             "Wildberries", "BLM Blue AUTOMATIC", "Артикул: BLM-01",
-            'class="order-row-second-product-name" title="Bradley Black"',
-            'class="cell-secondary order-row-second-product-article" title="Артикул: BR-02"',
-            "+ ещё 1 позиция",
+            "3 позиции", 'title="Bradley Black">Bradley Black</strong>',
+            'title="Артикул: BR-02">Артикул: BR-02</span>',
+            "Bradley White · 1 шт. · Артикул: BR-03",
             "Уточнил цвет ремешка", "Максим У.",
             "2026-09-01T18:35:00", "Открыть",
             'aria-current="true"',
@@ -618,7 +618,7 @@ class OrdersListIntegrationTest(unittest.TestCase):
             css,
         )
 
-    def test_order_rows_show_second_product_and_only_count_products_after_it(self):
+    def test_order_rows_show_position_badge_and_every_product_with_article_fallback(self):
         one_product = dict(order_row(1), products=[{"name": "Первый товар"}])
         two_products = dict(
             order_row(2),
@@ -654,20 +654,22 @@ class OrdersListIntegrationTest(unittest.TestCase):
                 'data-order-id="{}"'.format(row["id"]), 1
             )[1].split("</tr>", 1)[0]
 
-        self.assertNotIn("order-row-second-product", rows[one_product["id"]])
-        self.assertIn(
-            'class="order-row-second-product-name" title="Второй товар">Второй товар</span>',
-            rows[two_products["id"]],
-        )
+        self.assertNotIn("order-position-count", rows[one_product["id"]])
+        self.assertIn("Артикул: не указан", rows[one_product["id"]])
+        self.assertIn("2 позиции", rows[two_products["id"]])
+        self.assertEqual(rows[two_products["id"]].count("order-row-item-name"), 2)
         self.assertIn("Артикул: SECOND-02", rows[two_products["id"]])
-        self.assertNotIn("order-row-more-products", rows[two_products["id"]])
-        self.assertIn(
-            'class="order-row-second-product-name" title="Второй товар">Второй товар</span>',
-            rows[four_products["id"]],
-        )
+        self.assertIn("4 позиции", rows[four_products["id"]])
+        self.assertEqual(rows[four_products["id"]].count("order-row-item-name"), 2)
         self.assertIn("Артикул: SECOND-SKU", rows[four_products["id"]])
-        self.assertIn("+ ещё 2 позиции", rows[four_products["id"]])
-        self.assertNotIn("Третий товар", rows[four_products["id"]].split("<details", 1)[0])
+        collapsed_row = rows[four_products["id"]].split("<details", 1)[0]
+        expanded_details = rows[four_products["id"]].split("<details", 1)[1]
+        self.assertNotIn("Третий товар", collapsed_row)
+        self.assertNotIn("Четвёртый товар", collapsed_row)
+        self.assertIn("Третий товар", expanded_details)
+        self.assertIn("Четвёртый товар", expanded_details)
+        self.assertIn("Артикул: не указан", expanded_details)
+        self.assertIn("Раскрыть остальные 2 позиции", rows[four_products["id"]])
 
     def test_bulk_sale_evidence_uses_only_canonical_active_order_relation(self):
         catalog = CatalogDatabase(Path(self.temporary.name) / "catalog.db")
