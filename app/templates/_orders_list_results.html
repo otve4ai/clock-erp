@@ -23,6 +23,8 @@
                 {% set order_url = url_for('wildberries_order_page', wb_order_id=order.get('wb_order_id'), **navigation_query_args) if is_wb else url_for('order_page', order_id=oid, **navigation_query_args) if oid else '#' %}
                 {% set products = order.get('items') or order.get('products') or [] %}
                 {% set product = products|first if products else {} %}
+                {% set second_product = products[1] if products|length > 1 else {} %}
+                {% set second_article = second_product.get('article') or second_product.get('sku') %}
                 {% set preview = order.get('product_preview') or product %}
                 {% set is_selected = selected_order and selected_order.get('id')|string == oid|string %}
                 {% set total = order.get('order_total') if order.get('order_total') is not none else order.get('price') %}
@@ -36,7 +38,14 @@
                                 </div><div class="order-row-description">
                                 <strong class="list-product-name" title="{{ preview.get('name') or product.get('name') or product.get('NAME') or '' }}">{{ preview.get('name') or product.get('name') or product.get('NAME') or 'Состав не загружен' }}</strong>
                                 {% set article = preview.get('article') or product.get('article') or product.get('sku') %}{% if article %}<span class="cell-secondary order-row-article" title="Артикул: {{ article }}">Артикул: {{ article }}</span>{% endif %}
-                                {% if products|length > 1 %}<span class="cell-secondary">Ещё позиций: {{ products|length - 1 }}</span>{% endif %}
+                                {% if products|length > 1 %}<span class="order-row-second-product"><span class="order-row-second-product-name" title="{{ second_product.get('name') or second_product.get('NAME') or 'Товар без названия' }}">{{ second_product.get('name') or second_product.get('NAME') or 'Товар без названия' }}</span>{% if second_article %}<span class="cell-secondary order-row-second-product-article" title="Артикул: {{ second_article }}">Артикул: {{ second_article }}</span>{% endif %}</span>{% endif %}
+                                {% set remaining_products = products|length - 2 %}
+                                {% if remaining_products > 0 %}
+                                    {% set remaining_mod_100 = remaining_products % 100 %}
+                                    {% set remaining_mod_10 = remaining_products % 10 %}
+                                    {% set position_word = 'позиция' if remaining_mod_10 == 1 and remaining_mod_100 != 11 else 'позиции' if remaining_mod_10 in [2, 3, 4] and not 12 <= remaining_mod_100 <= 14 else 'позиций' %}
+                                    <span class="order-row-more-products">+ ещё {{ remaining_products }} {{ position_word }}</span>
+                                {% endif %}
                                 {% if mode == 'split' %}<span class="date-value order-row-date" data-date="{{ order.get('created_at') or order.get('date') }}">—</span>{% endif %}
                                 </div>
                             </div>
