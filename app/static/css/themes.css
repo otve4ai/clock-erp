@@ -1338,8 +1338,8 @@ html[data-theme="klok-green"] :where(
 }
 
 html[data-theme] ::selection {
-    background: var(--theme-accent-soft);
-    color: var(--theme-text-strong);
+    background: var(--theme-info);
+    color: #fff;
 }
 
 html[data-theme] ::-webkit-scrollbar {
