@@ -1550,20 +1550,118 @@ class OrderTictactoySaleTest(unittest.TestCase):
             "order_id", "order_item_id", "product_id", "created_at", "updated_at"
         ])
 
-    def test_refusal_requires_cancelling_linked_sale_first(self):
+    def test_refusal_cancels_linked_items_before_sale_and_order_status(self):
         self.conduct()
         status_service = OrderStatusService(self.database)
+        sale = self.inventory.list_sales()[0]
+        stock_before = {
+            self.watch["id"]: self.watch["stock"] - 2,
+            self.strap["id"]: self.strap["stock"] - 1,
+        }
+
+        def assert_local_refusal_is_complete(_order_id, _status):
+            stored = self.inventory.get_sale(sale["id"])
+            self.assertEqual(stored["order_status"], "cancelled")
+            self.assertEqual(stored["cancellation_reason"], "Клиент отказался")
+            self.assertEqual(
+                status_service.get("18593")["erp_status"], "refused"
+            )
+            with self.database.connect() as connection:
+                stocks = {
+                    row["id"]: row["stock"]
+                    for row in connection.execute(
+                        "SELECT id,stock FROM catalog_excel_products "
+                        "WHERE id IN (?,?)",
+                        (self.watch["id"], self.strap["id"]),
+                    )
+                }
+            self.assertEqual(stocks[self.watch["id"]], self.watch["stock"])
+            self.assertEqual(stocks[self.strap["id"]], self.strap["stock"])
+            return {"status": "ok"}
+
         with (
             mock.patch.object(web, "SalesInventory", return_value=self.inventory),
             mock.patch.object(web, "order_status_service", return_value=status_service),
             mock.patch.object(web, "load_stock_operations", return_value=[]),
-            mock.patch.object(web, "update_order_status") as update,
+            mock.patch.object(
+                web, "update_order_status", side_effect=assert_local_refusal_is_complete
+            ) as update,
         ):
             response = self.client.post("/order/18593/status", data={"status": "C"})
+        self.assertEqual(response.status_code, 302)
+        update.assert_called_once_with("18593", "C")
+        self.assertNotEqual(stock_before[self.watch["id"]], self.watch["stock"])
+        self.assertEqual(
+            len([
+                movement for movement in self.inventory.list_movements()
+                if movement["sale_id"] == sale["id"]
+                and movement["type"] == "cancellation"
+            ]),
+            2,
+        )
+
+    def test_refusal_return_failure_keeps_sale_and_order_active(self):
+        self.conduct()
+        status_service = OrderStatusService(self.database)
+        sale = self.inventory.list_sales()[0]
+        with self.database.transaction() as connection:
+            connection.execute(
+                "DELETE FROM catalog_stock_movements WHERE sale_id=?",
+                (sale["id"],),
+            )
+        with (
+            mock.patch.object(web, "SalesInventory", return_value=self.inventory),
+            mock.patch.object(web, "order_status_service", return_value=status_service),
+            mock.patch.object(web, "update_order_status") as update,
+        ):
+            response = self.client.post(
+                "/order/18593/status", data={"status": "C"}
+            )
         update.assert_not_called()
         self.assertIn(
-            "Сначала отмените связанную продажу",
+            "Остаток не изменён",
             parse_qs(urlsplit(response.location).query)["message"][0],
+        )
+        self.assertFalse(self.inventory.get_sale(sale["id"])["cancelled_at"])
+        self.assertEqual(
+            status_service.get("18593")["erp_status"], "assembled"
+        )
+
+    def test_repeated_order_refusal_does_not_return_stock_twice(self):
+        one_item_order = {
+            **self.order,
+            "products": [self.order["products"][0]],
+            "order_total": 15000,
+        }
+        self.conduct(
+            order=one_item_order,
+            mappings={"line:line-1": self.mappings["line:line-1"]},
+        )
+        status_service = OrderStatusService(self.database)
+        sale = self.inventory.list_sales()[0]
+        with (
+            mock.patch.object(web, "SalesInventory", return_value=self.inventory),
+            mock.patch.object(web, "order_status_service", return_value=status_service),
+            mock.patch.object(
+                web, "update_order_status", return_value={"status": "ok"}
+            ),
+        ):
+            first = self.client.post(
+                "/order/18593/status", data={"status": "C"}
+            )
+            repeated = self.client.post(
+                "/order/18593/status", data={"status": "C"}
+            )
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(repeated.status_code, 302)
+        self.assertEqual(self.inventory.get_sale(sale["id"])["returned_quantity"], 2)
+        self.assertEqual(
+            len([
+                movement for movement in self.inventory.list_movements()
+                if movement["sale_id"] == sale["id"]
+                and movement["type"] == "cancellation"
+            ]),
+            1,
         )
 
     def test_refusal_can_be_set_manually_without_sale(self):
@@ -1581,7 +1679,7 @@ class OrderTictactoySaleTest(unittest.TestCase):
                 "/order/18593/status", data={"status": "C"}
             )
         self.assertEqual(response.status_code, 302)
-        update.assert_called_once_with(18593, "C")
+        update.assert_called_once_with("18593", "C")
         self.assertEqual(
             status_service.get("18593")["erp_status"], "refused"
         )

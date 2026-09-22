@@ -1611,6 +1611,7 @@ class SalesInventory:
         idempotency_key="",
         failure_hook=None,
         audit_actor=None,
+        order_id=None,
     ):
         sale_id = str(sale_id or "").strip()
         reason = str(reason or "").strip()
@@ -1641,10 +1642,53 @@ class SalesInventory:
                     "Возвращённую продажу нельзя отменить."
                 )
 
+            if order_id is not None:
+                expected_order_id = str(order_id).strip()
+                metadata = self._metadata(sale)
+                snapshots = {
+                    int(snapshot.get("sale_item_id")): snapshot
+                    for snapshot in metadata.get("items", [])
+                    if isinstance(snapshot, dict)
+                    and str(snapshot.get("sale_item_id") or "").isdigit()
+                }
+                ownership_is_explicit = any(
+                    str(
+                        snapshot.get("order_id")
+                        or snapshot.get("external_order_id")
+                        or ""
+                    ).strip()
+                    for snapshot in snapshots.values()
+                )
+                if ownership_is_explicit:
+                    items = [
+                        item for item in items
+                        if str(
+                            snapshots.get(int(item["id"]), {}).get("order_id")
+                            or snapshots.get(int(item["id"]), {}).get(
+                                "external_order_id"
+                            )
+                            or ""
+                        ).strip() == expected_order_id
+                    ]
+                elif str(sale["external_order_id"] or "").strip() != expected_order_id:
+                    items = []
+                if not items:
+                    raise CancellationConflictError(
+                        "Позиция связанного заказа в продаже не найдена."
+                    )
+
             strap_operation = connection.execute(
                 "SELECT * FROM erp_order_strap_operations WHERE sale_id=?",
                 (sale_id,),
             ).fetchone()
+            all_item_count = connection.execute(
+                "SELECT COUNT(*) FROM erp_sale_items WHERE sale_id=?",
+                (sale_id,),
+            ).fetchone()[0]
+            if strap_operation is not None and len(items) != all_item_count:
+                raise CancellationConflictError(
+                    "Продажа с заменой ремешка отменяется только целиком."
+                )
             if strap_operation is not None:
                 movement_rows = connection.execute(
                     "SELECT product_id,SUM(quantity_delta) AS net_delta,"
@@ -1663,9 +1707,22 @@ class SalesInventory:
                         if abs(float(row["net_delta"] or 0)) > 0.000001
                     ],
                 }
-            else:
+            elif len(items) == all_item_count:
                 plan = self._movement_plan_from_connection(connection, sale_id)
-            if not plan["safe"]:
+            else:
+                item_ids = [int(item["id"]) for item in items]
+                placeholders = ",".join("?" for _value in item_ids)
+                movement_rows = connection.execute(
+                    "SELECT product_id,SUM(quantity_delta) AS net_delta,"
+                    "COUNT(*) AS movement_count FROM catalog_stock_movements "
+                    "WHERE sale_id=? AND sale_item_id IN ({}) "
+                    "GROUP BY product_id".format(placeholders),
+                    [sale_id, *item_ids],
+                ).fetchall()
+                plan = self._movement_plan_from_rows(movement_rows)
+            if not plan["safe"] or (
+                order_id is not None and not plan["reversals"]
+            ):
                 raise CancellationConflictError(
                     "Не удалось безопасно определить складское движение "
                     "этой продажи. Остаток не изменён, продажа не отменена."
@@ -1755,20 +1812,38 @@ class SalesInventory:
                 "cancellation_comment": comment,
                 "cancelled_by": user_name,
             })
+            selected_item_ids = [int(item["id"]) for item in items]
+            selected_placeholders = ",".join("?" for _value in selected_item_ids)
             connection.execute(
                 "UPDATE erp_sale_items SET returned_quantity = quantity, "
                 "status = 'returned', returned_at = ?, return_reason = ? "
-                "WHERE sale_id = ?",
-                (cancelled_at, reason or "Отмена продажи", sale_id),
+                "WHERE sale_id = ? AND id IN ({})".format(
+                    selected_placeholders
+                ),
+                (
+                    cancelled_at,
+                    reason or "Отмена продажи",
+                    sale_id,
+                    *selected_item_ids,
+                ),
+            )
+            has_remaining_items = connection.execute(
+                "SELECT 1 FROM erp_sale_items WHERE sale_id=? "
+                "AND returned_quantity<quantity LIMIT 1",
+                (sale_id,),
+            ).fetchone() is not None
+            sale_status = (
+                "partially_returned" if has_remaining_items else "returned"
             )
             cursor = connection.execute(
-                "UPDATE erp_sales SET status = 'returned', returned_at = ?, "
+                "UPDATE erp_sales SET status = ?, returned_at = ?, "
                 "return_reason = ?, cancelled_at = ?, cancellation_reason = ?, "
                 "cancellation_comment = ?, cancelled_by = ?, metadata_json = ?, "
                 "updated_at = ? WHERE id = ? AND cancelled_at IS NULL "
                 "AND deleted_at IS NULL",
                 (
-                    cancelled_at, reason or "Отмена продажи", cancelled_at,
+                    sale_status, cancelled_at,
+                    reason or "Отмена продажи", cancelled_at,
                     reason or None, comment or None, user_name or None,
                     json.dumps(metadata, ensure_ascii=False, sort_keys=True),
                     cancelled_at, sale_id,
