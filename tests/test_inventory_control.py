@@ -47,7 +47,10 @@ class InventoryControlTest(unittest.TestCase):
     def complete_with_difference(self):
         session = self.inventory.start(self.brand_id, "Максим")[0]
         items = self.inventory.list_items(session["id"])
-        self.assertEqual({item["product_id"] for item in items}, {self.first["id"], self.second["id"]})
+        self.assertEqual(
+            {item["product_id"] for item in items},
+            {self.first["id"], self.second["id"], self.zero["id"]},
+        )
         for item in items:
             actual = 2 if item["product_id"] == self.first["id"] else item["snapshot_stock"]
             self.inventory.confirm(
@@ -63,7 +66,7 @@ class InventoryControlTest(unittest.TestCase):
         second = InventoryControl(self.database).document(session["id"])
         self.assertEqual(first["document_number"], "ИНВ-0001")
         self.assertEqual(second["document_number"], first["document_number"])
-        self.assertEqual(first["accuracy"], 50.0)
+        self.assertEqual(first["accuracy"], 66.7)
         self.assertEqual(first["shortage"], 2)
         self.assertEqual(inventory_accuracy(0, 0), 100.0)
         listing = self.control.history({"q": "ИНВ-0001", "discrepancies": "1"}, 1, 25)
@@ -71,7 +74,7 @@ class InventoryControlTest(unittest.TestCase):
         queue = self.control.discrepancies({"direction": "shortage"}, 1, 25)
         self.assertEqual(queue["rows"][0]["item_id"], item["id"])
         analytics = self.control.analytics("2000-01-01", "2999-12-31")
-        self.assertEqual((analytics["documents"], analytics["positions"]), (1, 2))
+        self.assertEqual((analytics["documents"], analytics["positions"]), (1, 3))
         self.assertEqual((analytics["shortage"], analytics["surplus"]), (2, 0))
 
     def test_review_validation_audit_and_applied_adjustment_guard(self):

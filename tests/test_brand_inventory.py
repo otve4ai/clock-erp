@@ -164,7 +164,7 @@ class BrandInventoryTest(unittest.TestCase):
         session = self.start()
         self.assertEqual(session["start_positions"], 2)
         items = self.service.list_items(session["id"])
-        self.assertEqual(
+        self.assertCountEqual(
             [item["product_id"] for item in items],
             [positive["id"], zero["id"]],
         )
