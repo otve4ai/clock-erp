@@ -89,8 +89,10 @@ class SettingsContractTest(unittest.TestCase):
         self.assertIn('value="Current Company"', body)
         self.assertIn('value="Current ERP"', body)
         self.assertIn('value="3"', body)
-        for theme in ("classic", "klok-green", "bn0024-white"):
+        for theme in ("classic", "dark"):
             self.assertIn('data-theme-option="{}"'.format(theme), body)
+        self.assertNotIn('data-theme-option="klok-green"', body)
+        self.assertNotIn('data-theme-option="bn0024-white"', body)
         self.assertNotIn('name="theme"', body)
         self.assertIn('name="csrf_token"', body)
 

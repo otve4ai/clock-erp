@@ -65,11 +65,13 @@ class ErpDesignSystemV1Test(unittest.TestCase):
         for scope in (".brands-page", ".journal-page", ".settings-page"):
             self.assertIn(scope, v1)
 
-    def test_theme_names_and_persistence_key_are_unchanged(self):
+    def test_theme_names_and_persistence_key_are_current(self):
         settings = self.source("app/templates/settings.html")
         theme_script = self.source("app/static/js/theme.js")
-        for theme in ("classic", "klok-green", "bn0024-white"):
+        for theme in ("classic", "dark"):
             self.assertIn(f'data-theme-option="{theme}"', settings)
+        self.assertNotIn('data-theme-option="klok-green"', settings)
+        self.assertNotIn('data-theme-option="bn0024-white"', settings)
         self.assertIn('const STORAGE_KEY = "vechasu-erp-theme-v1";', theme_script)
 
     def test_global_keyboard_focus_uses_one_visible_ring(self):

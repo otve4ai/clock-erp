@@ -8,7 +8,7 @@
 
 ## Источники
 
-- `app/static/css/themes.css` — глобальные theme tokens и три темы;
+- `app/static/css/themes.css` — глобальные theme tokens и две темы;
 - `app/static/css/erp-components.css` — общие элементы рабочих страниц;
 - `app/static/css/sidebar.css` — desktop/mobile application shell;
 - `app/static/css/notifications.css` — toast-состояния;
@@ -19,7 +19,8 @@
 
 ## Токены и темы
 
-Поддерживаются `classic`, `bn0024-white` и `klok-green`. `themes.css` определяет
+Поддерживаются `classic` и `dark`. Ночная тема использует чёрный фон, тёмные
+поверхности, светлый текст и системный синий акцент. `themes.css` определяет
 surface/background, text/muted, border, primary/accent, focus, success/warning/
 error/info, overlay, shadows, radii, control height, table colors, scrollbar,
 font family и font weights. `erp-components.css` добавляет:
@@ -115,7 +116,7 @@ loading-состояния, возврат фокуса из drawer и роли 
 уведомления и pending-состояние описаны settings-контрактом в
 `erp-components.css`. Локальный CSS страницы и блока приглашений удалён.
 
-Theme selector сохраняет темы `classic`, `klok-green`, `bn0024-white`, ключ
+Theme selector сохраняет темы `classic`, `dark`, ключ
 `vechasu-erp-theme-v1` и мгновенное применение. Выбор отражается через
 `aria-checked`, поддерживает стрелки клавиатуры и видимые selected, hover,
 focus и disabled-состояния. На mobile карточки и темы становятся одноколоночными,
