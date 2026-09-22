@@ -1,7 +1,12 @@
 /* Shared presentation only; Bitrix and supply controllers remain independent. */
 .product-picker {
-  --picker-border: #e2e8f0;
-  --picker-muted: #64748b;
+  --picker-border: var(--theme-border, #e2e8f0);
+  --picker-muted: var(--theme-text-muted, #64748b);
+  --picker-surface: var(--theme-surface, #fff);
+  --picker-surface-muted: var(--theme-surface-muted, #f8fafc);
+  --picker-text: var(--theme-text, #0f172a);
+  --picker-primary: var(--theme-primary, #2563eb);
+  --picker-selected: var(--theme-table-selected, #eff6ff);
 }
 .product-picker[hidden],
 .product-picker [hidden] {
@@ -14,7 +19,8 @@
   padding: 0;
   overflow: hidden;
   border-radius: 16px;
-  background: #fff;
+  background: var(--picker-surface);
+  color: var(--picker-text);
 }
 dialog.product-picker[open],
 .product-picker.bitrix-import-dialog {
@@ -59,9 +65,10 @@ dialog.product-picker[open],
   min-width: 0;
   height: 48px;
   padding: 0 16px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--theme-border-strong, #cbd5e1);
   border-radius: 10px;
-  background: #fff;
+  background: var(--theme-input-bg, #fff);
+  color: var(--picker-text);
   font: inherit;
 }
 .product-picker .picker-status {
@@ -106,21 +113,21 @@ dialog.product-picker[open],
   padding: 12px;
   border: 1px solid var(--picker-border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--picker-surface);
   text-align: left;
-  color: #0f172a;
+  color: var(--picker-text);
   cursor: pointer;
   font: inherit;
 }
 .product-picker .picker-result:hover {
-  border-color: #93c5fd;
-  background: #f8fafc;
+  border-color: var(--theme-accent, #93c5fd);
+  background: var(--theme-hover, #f8fafc);
 }
 html[data-theme]
   .product-picker.product-picker
   .picker-result[aria-pressed="true"] {
-  border-color: #2563eb;
-  background: #eff6ff;
+  border-color: var(--picker-primary);
+  background: var(--picker-selected);
 }
 .product-picker .picker-result-label {
   min-width: 0;
@@ -142,7 +149,7 @@ html[data-theme]
   color: var(--picker-muted);
 }
 .product-picker .picker-choose {
-  color: #2563eb;
+  color: var(--theme-accent, #2563eb);
   font-size: 12px;
   font-weight: 600;
 }
@@ -155,7 +162,7 @@ html[data-theme]
   min-width: 64px;
   overflow: hidden;
   border-radius: 8px;
-  background: #f8fafc;
+  background: var(--picker-surface-muted);
   color: var(--picker-muted);
   font-size: 11px;
   text-align: center;
@@ -173,7 +180,7 @@ html[data-theme]
   overflow: auto;
   overscroll-behavior: contain;
   padding: 20px 24px;
-  background: #fafbfc;
+  background: var(--picker-surface-muted);
 }
 .product-picker .picker-empty {
   display: flex;
@@ -198,7 +205,7 @@ html[data-theme]
   width: 160px;
   height: 160px;
   margin: auto;
-  background: #fff;
+  background: var(--picker-surface);
 }
 .product-picker .bitrix-preview-photo {
   width: 160px;
@@ -232,11 +239,11 @@ html[data-theme]
   margin: 0;
   padding: 16px 24px;
   border-top: 1px solid var(--picker-border);
-  background: #fff;
+  background: var(--picker-surface);
 }
 .product-picker .picker-error {
   padding: 0 24px;
-  color: #b91c1c;
+  color: var(--theme-error, #b91c1c);
   font-size: 13px;
 }
 .product-picker .picker-error:not(:empty) {
@@ -259,7 +266,7 @@ html[data-theme]
   color: var(--picker-muted);
 }
 .product-picker :focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--theme-focus, #2563eb);
   outline-offset: 3px;
 }
 body:has(dialog.product-picker[open]) {
@@ -314,15 +321,15 @@ body:has(dialog.product-picker[open]) {
 /* Theme-wide button/surface rules otherwise erase the selected and primary states. */
 .product-picker .picker-footer .is-primary,
 .product-picker .picker-footer .primary {
-  background: #2563eb !important;
-  border-color: #2563eb !important;
-  color: #fff !important;
+  background: var(--picker-primary) !important;
+  border-color: var(--picker-primary) !important;
+  color: var(--theme-primary-text, #fff) !important;
 }
 html[data-theme]
   .product-picker.product-picker
   .picker-result[aria-pressed="true"] {
-  background: #eff6ff !important;
-  border-color: #2563eb !important;
+  background: var(--picker-selected) !important;
+  border-color: var(--picker-primary) !important;
 }
 .product-picker .picker-results-panel,
 .product-picker .picker-selected-panel {
