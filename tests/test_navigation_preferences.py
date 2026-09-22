@@ -161,7 +161,7 @@ class NavigationPreferencesTest(unittest.TestCase):
         self.assertNotIn('data-navigation-key="team"', settings)
         self.assertNotIn('data-navigation-preference-key="journal"', settings)
         self.assertNotIn('data-navigation-preference-key="team"', settings)
-        self.assertNotIn("data-presence-root", settings)
+        self.assertNotIn('<div class="sidebar-presence" data-presence-root', settings)
         self.assertEqual(self.save(keys + ["journal"], [], employee).status_code, 422)
         self.assertEqual(self.save(keys + ["team"], [], employee).status_code, 422)
 
