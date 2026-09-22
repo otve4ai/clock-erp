@@ -8535,6 +8535,8 @@ select.erp-control {
     }
 }
 
+/* End compact mutation modals. */
+
 /* Products and sales use one final desktop table-header interaction contract. */
 :is(.warehouse-products-table, .sales-table).erp-data-table {
     border-collapse: separate;
