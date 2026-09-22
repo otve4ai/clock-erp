@@ -30,7 +30,10 @@ class ErpTableUxPolishTest(unittest.TestCase):
         self.assertIn('id="warehouseColumnSettingsList"', toolbar)
         self.assertIn('id="warehouseTableReset"', toolbar)
         self.assertIn('list.replaceChildren()', column_settings)
-        self.assertIn('resetWarehouseTableView(table, view)', column_settings)
+        self.assertIn(
+            'resetWarehouseTableView(table, view, columnController)',
+            column_settings,
+        )
         self.assertNotIn('class="warehouse-table-toolbar"', source)
 
     def test_stock_filter_stays_inside_products_workspace(self):
@@ -48,8 +51,8 @@ class ErpTableUxPolishTest(unittest.TestCase):
 
     def test_resize_scroll_and_action_column_contracts_remain(self):
         contracts = {
-            "warehouse.html": "warehouse-column-resize-handle",
-            "sales.html": "sales-column-resize-handle",
+            "warehouse.html": "js/erp-native-table-columns.js",
+            "sales.html": "js/erp-native-table-columns.js",
             "receipts.html": "receipt-column-resize-handle",
         }
         for template, handle in contracts.items():
@@ -61,7 +64,7 @@ class ErpTableUxPolishTest(unittest.TestCase):
                 self.assertIn("js/table-scroll-hint.js", source)
 
         warehouse = self.source("app/templates/warehouse.html")
-        self.assertIn('data-column-key="actions"', warehouse)
+        self.assertIn('data-system-column="actions"', warehouse)
         for template in ("sales.html", "receipts.html"):
             source = self.source("app/templates/" + template)
             self.assertIn('data-system-column="actions"', source)
@@ -142,7 +145,8 @@ class ErpTableUxPolishTest(unittest.TestCase):
         sales = self.source("app/templates/sales.html")
         receipts = self.source("app/templates/receipts.html")
 
-        self.assertIn("vechasu.warehouse.table-view.v2", warehouse)
+        self.assertIn("vechasu.warehouse.table-view.v3", warehouse)
+        self.assertIn("js/erp-table-layout.js", warehouse)
         self.assertIn('data-sales-settings-key="sales_{{ active_source }}"', sales)
         self.assertIn("vechasu-receipts-table-view-v1", receipts)
         self.assertIn("warehouseTableViewController.abort()", warehouse)
@@ -150,24 +154,51 @@ class ErpTableUxPolishTest(unittest.TestCase):
         self.assertIn("initializeWarehouseTableView();", warehouse)
         self.assertIn('if (table.dataset.viewReady === "1") return;', warehouse)
 
+    def test_products_reuse_sales_column_interaction_contract(self):
+        warehouse = self.source("app/templates/warehouse.html")
+        sales = self.source("app/templates/sales.html")
+        controller = self.source("app/static/js/erp-native-table-columns.js")
+        css = self.source("app/static/css/erp-components.css")
+
+        for template in (warehouse, sales):
+            self.assertIn("window.ErpNativeTableColumns.create({", template)
+            self.assertNotIn('handle.className = "sales-column-resize-handle"', template)
+            self.assertNotIn("let dragState = null", template)
+        self.assertIn('const HANDLE_CLASS = "sales-column-resize-handle"', controller)
+        self.assertIn('const DROP_BEFORE_CLASS = "sales-drop-before"', controller)
+        self.assertIn('Math.abs(event.clientX - dragState.startX) < 6', controller)
+        self.assertIn('warehouseTableMaximumWidth = 520', warehouse)
+        self.assertIn("snapshotVisibleWidths();", controller)
+        self.assertIn("view.widths[key] =", controller)
+        self.assertIn("keys.map((key) => [key, view.widths[key]])", controller)
+        self.assertIn(
+            'table.style.setProperty("min-width", tableWidth, exactPriority)',
+            controller,
+        )
+        self.assertIn('data-system-column="actions"', warehouse)
+        self.assertIn(
+            ':is(.warehouse-products-table, .sales-table).erp-data-table thead th',
+            css,
+        )
+        self.assertIn(
+            ':is(.warehouse-products-table .warehouse-sort-label, .sales-table .sales-sort-label)',
+            css,
+        )
+
     def test_resize_completion_suppresses_sort_and_cleans_pointer_handlers(self):
-        contracts = {
-            "warehouse.html": "warehouseTableSuppressSortUntil",
-            "sales.html": "suppressSortUntil",
-            "receipts.html": "suppressSortUntil",
-        }
-        for template, guard in contracts.items():
-            with self.subTest(template=template):
-                source = self.source("app/templates/" + template)
-                self.assertIn(guard + " = Date.now() + 350", source)
-                self.assertRegex(
-                    source,
-                    re.compile(r'removeEventListener\(\s*"pointerup"'),
-                )
-                self.assertRegex(
-                    source,
-                    re.compile(r'removeEventListener\(\s*"pointercancel"'),
-                )
+        controller = self.source("app/static/js/erp-native-table-columns.js")
+        self.assertIn("suppressClickUntil = Date.now() + 350", controller)
+        self.assertRegex(
+            controller,
+            re.compile(r'removeEventListener\(\s*"pointerup"'),
+        )
+        self.assertRegex(
+            controller,
+            re.compile(r'removeEventListener\(\s*"pointercancel"'),
+        )
+
+        receipts = self.source("app/templates/receipts.html")
+        self.assertIn("suppressSortUntil = Date.now() + 350", receipts)
 
     def test_wide_tables_are_contained_by_their_scroll_owners(self):
         css = self.source("app/static/css/erp-components.css")

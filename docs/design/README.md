@@ -42,7 +42,7 @@ font family и font weights. `erp-components.css` добавляет:
 | Отступы и поверхности | ERP spacing scale, surfaces, borders, shadows и card radii | Layout padding и gaps частично остаются локальными |
 | Кнопки | Общие `.button`, workspace actions, table actions и destructive coloring | Названия классов и размеры различаются между страницами |
 | Поля | `.erp-control`, search input, modal fields, combobox trigger | Некоторые формы используют локальные `.control`/`.field` |
-| Таблицы | `.erp-data-table`, sticky/colored head, row hover, actions, numeric alignment | Состав колонок, resizing и mobile-представление page-specific |
+| Таблицы | `.erp-data-table`, sticky/colored head, row hover, actions, numeric alignment; «Товары» и «Продажи» используют один header/resize/drag contract | Состав колонок и mobile-представление page-specific |
 | Поиск и фильтры | `.erp-search-input`, filter trigger/count, panels, active-filter chips | Набор фильтров и момент применения различаются |
 | Вкладки | Товары, продажи, журнал и ремонт используют общий визуальный контракт `.erp-section-tabs` / `.erp-section-tab`; существующие ссылки, порядок и active-механизмы остаются локальными | Продажи сохраняют собственную scroll-обёртку |
 | Модальные окна | `[data-erp-modal-shell]`, dialog/header/body/actions, overlay, focus trap | Часть ремонтов использует drawer; закрытие Escape намеренно блокируется modal shell |
@@ -138,6 +138,13 @@ overflow. API, CSRF, права, хранилище и приглашения с
 принадлежит только `.erp-table-scroll`; на mobile используется существующий
 карточный режим. Формы добавления и редактирования, возврат, отмена, удаление,
 архивирование, CSRF и серверные write-handlers в этот этап не входят.
+
+Desktop-таблицы «Товары» и «Продажи» подключают единый контроллер
+`erp-native-table-columns.js`. Он централизованно управляет layout calculator,
+resize handles, фиксацией остальных ширин при resize, pointer-drag, drop markers,
+action-column и реакцией на изменение контейнера. Шаблоны передают контроллеру
+только конфигурацию колонок, правила порядка и callbacks сохранения. Набор полей,
+обязательные первые колонки, storage key и mobile layout остаются page-specific.
 
 ## Раздел «Продажи»: форма добавления и редактирования
 
