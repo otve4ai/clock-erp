@@ -1,5 +1,7 @@
 """Existing imported names are not a new collision on an unrelated update."""
 import test_stage2_products_api as api_tests
+from unittest import mock
+from app import web
 from app.services.excel_product_catalog import ExcelProductCatalog
 from app.catalog_db import CatalogDatabase
 from app.services.shared_catalog import DuplicateCatalogValueError
@@ -36,6 +38,26 @@ class ProductDuplicateUpdateTest(unittest.TestCase):
         response = self.patch(product, {'price': '123.45'})
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(self.catalog().get_product(product['id'])['bitrix_price_amount'], '123.45')
+
+    def test_employee_cannot_patch_stock_but_admin_can(self):
+        product = self.catalog().create_product(
+            'Role protected stock', article='ROLE-STOCK', stock=4,
+        )
+        employee = {'id': 2, 'role': 'employee', 'email': 'employee@example.test'}
+        with mock.patch.object(web, 'auth_is_enabled', return_value=True), \
+                mock.patch.object(web, 'current_auth_user', return_value=employee), \
+                mock.patch.object(web, 'require_csrf_when_authenticated'):
+            rejected = self.patch(product, {'stock': 9})
+        self.assertEqual(rejected.status_code, 403, rejected.get_json())
+        self.assertEqual(self.catalog().get_product(product['id'])['stock'], 4)
+
+        admin = {'id': 1, 'role': 'admin', 'email': 'admin@example.test'}
+        with mock.patch.object(web, 'auth_is_enabled', return_value=True), \
+                mock.patch.object(web, 'current_auth_user', return_value=admin), \
+                mock.patch.object(web, 'require_csrf_when_authenticated'):
+            accepted = self.patch(product, {'stock': 9, 'stock_reason': 'Тест'})
+        self.assertEqual(accepted.status_code, 200, accepted.get_json())
+        self.assertEqual(self.catalog().get_product(product['id'])['stock'], 9)
 
     def test_update_brand_category_and_self_exclusion(self):
         _, product = self.legacy_pair()

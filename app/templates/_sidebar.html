@@ -124,7 +124,7 @@ window.ERP_NOTIFICATION_CONTEXT={
     </nav>
 
     <div class="sidebar-footer">
-        {% if current_user %}
+        {% if current_user and current_user.role == "admin" %}
             <div class="sidebar-presence" data-presence-root data-section="{{ session.get('current_section', '') }}">
                 <button class="sidebar-presence-trigger" type="button" data-presence-trigger aria-expanded="false" aria-controls="sidebarPresenceMenu">
                     <span class="sidebar-presence-dot" aria-hidden="true"></span>
