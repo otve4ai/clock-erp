@@ -680,6 +680,56 @@ html[data-theme] tbody tr:where(
     box-shadow: inset 3px 0 0 var(--theme-accent);
 }
 
+/* Keep dense product and sales tables readable without changing Classic. */
+html[data-theme="dark"] :is(
+    .warehouse-products-table.erp-data-table,
+    .sales-table.erp-data-table
+) thead th {
+    background: var(--theme-table-head) !important;
+    color: var(--theme-text-muted) !important;
+}
+
+html[data-theme="dark"] :is(
+    .warehouse-products-table.erp-data-table,
+    .sales-table.erp-data-table
+) tbody td {
+    color: var(--theme-text) !important;
+}
+
+html[data-theme="dark"] :is(
+    .warehouse-products-table.erp-data-table,
+    .sales-table.erp-data-table
+) tbody td :where(
+    .warehouse-ellipsis,
+    .manual-view-value,
+    .automatic-view-value,
+    .sales-number-value,
+    .erp-datetime-cell
+) {
+    color: inherit !important;
+}
+
+html[data-theme="dark"] :is(
+    .warehouse-products-table.erp-data-table,
+    .sales-table.erp-data-table
+) :where(
+    .erp-datetime-time,
+    .erp-muted-value,
+    .sales-product-meta
+) {
+    color: var(--theme-text-muted) !important;
+}
+
+html[data-theme="dark"] .warehouse-products-table.erp-data-table
+td.stock-good {
+    color: var(--theme-success) !important;
+}
+
+html[data-theme="dark"] .warehouse-products-table.erp-data-table
+td.stock-zero {
+    color: var(--theme-error) !important;
+}
+
 html[data-theme] tbody tr.receipt-row-error {
     background: var(--theme-error-soft) !important;
     color: var(--theme-error) !important;
