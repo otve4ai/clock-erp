@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    {% include "_favicon.html" %}
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Отчёт по товарам — Vechasu ERP</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/erp-components.css') }}">
+    <style>
+        * { box-sizing: border-box; }
+        [hidden] { display: none !important; }
+        body { margin: 0; background: #f3f6fb; color: #172033; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+        .report-shell { min-width: 0; padding: 24px; }
+        .report-page { width: 100%; max-width: 1600px; margin: 0 auto; }
+        .report-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+        .report-header h1 { margin: 0 0 5px; font-size: 27px; }
+        .report-header p { max-width: 850px; margin: 0; color: #64748b; }
+        .header-actions, .report-actions, .table-toolbar, .pagination { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+        .button { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; padding: 9px 15px; border: 0; border-radius: 9px; font-size: 13px; font-weight: 800; text-decoration: none; cursor: pointer; }
+        .button-primary { background: #2563eb; color: #fff; }
+        .button-excel { background: #15803d; color: #fff; }
+        .button-reset { border: 1px solid #cbd5e1; background: #fff; color: #475569; }
+        .back-link { color: #2563eb; font-weight: 750; text-decoration: none; }
+        .card { margin-bottom: 16px; border: 1px solid #dce3ed; border-radius: 15px; background: #fff; box-shadow: 0 8px 25px rgba(15, 23, 42, .05); }
+        .filter-card { padding: 18px; }
+        .filter-grid { display: grid; grid-template-columns: repeat(4, minmax(155px, 1fr)); gap: 12px; }
+        .field { display: flex; flex-direction: column; gap: 6px; }
+        .field-wide { grid-column: span 2; }
+        .field label { color: #475569; font-size: 12px; font-weight: 800; }
+        .control { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; color: #172033; font: inherit; }
+        .report-actions { margin-top: 14px; }
+        .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+        .metric { padding: 17px; }
+        .metric span { display: block; margin-bottom: 7px; color: #64748b; font-size: 12px; font-weight: 800; }
+        .metric strong { font-size: 25px; }
+        .table-toolbar { justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid #e2e8f0; }
+        .table-toolbar h2 { margin: 0; font-size: 18px; }
+        .table-wrap { width: 100%; overflow-x: auto; }
+        .report-table { width: 100%; min-width: 1180px; border-collapse: collapse; }
+        .report-table th, .report-table td { padding: 11px 12px; border-bottom: 1px solid #e8edf4; text-align: left; vertical-align: middle; }
+        .report-table th { position: relative; background: #f8fafc; color: #475569; font-size: 12px; white-space: nowrap; }
+        .report-table th a { color: inherit; text-decoration: none; }
+        .report-table td { font-size: 13px; }
+        .product-photo { width: 46px; height: 46px; border-radius: 8px; object-fit: contain; background: #f1f5f9; }
+        .photo-placeholder { display: grid; width: 46px; height: 46px; place-items: center; border-radius: 8px; background: #f1f5f9; color: #94a3b8; font-size: 10px; }
+        .stock { font-weight: 800; }
+        .status { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 11px; font-weight: 800; }
+        .status.inactive { background: #e2e8f0; color: #475569; }
+        .empty { padding: 36px 18px; color: #64748b; text-align: center; }
+        .pagination { justify-content: space-between; padding: 14px 18px; }
+        .page-links { display: flex; align-items: center; gap: 5px; }
+        .page-link { min-width: 34px; padding: 7px 9px; border: 1px solid #d7dfeb; border-radius: 8px; color: #334155; text-align: center; text-decoration: none; }
+        .page-link.active { border-color: #2563eb; background: #2563eb; color: #fff; }
+        .columns-menu { position: relative; }
+        .columns-menu summary { list-style: none; }
+        .columns-panel { position: absolute; z-index: 20; top: calc(100% + 7px); right: 0; min-width: 210px; padding: 10px; border: 1px solid #dce3ed; border-radius: 10px; background: #fff; box-shadow: 0 12px 30px rgba(15, 23, 42, .15); }
+        .columns-panel label { display: flex; gap: 8px; padding: 6px; font-size: 13px; }
+        @media (max-width: 1000px) { .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .metrics { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 767px) { .report-shell { padding: 14px; } .report-header { display: block; } .header-actions { margin-top: 14px; } .header-actions .button { flex: 1; } .filter-grid { grid-template-columns: 1fr; } .field-wide { grid-column: auto; } .metrics { grid-template-columns: 1fr 1fr; } .pagination { align-items: flex-start; flex-direction: column; } }
+    </style>
+</head>
+<body>
+<div class="app">
+    {% include "_sidebar.html" %}
+    <main class="report-shell" id="main-content">
+        <div class="report-page">
+            <header class="report-header">
+                <div>
+                    <h1>Отчёт по товарам</h1>
+                    <p>Анализируйте остатки, наличие и характеристики товаров. Выберите нужные параметры и выгрузите результат в Excel.</p>
+                </div>
+                <div class="header-actions">
+                    <a class="back-link" href="{{ url_for('warehouse_page') }}">← К товарам</a>
+                    <a class="button button-excel" href="{{ excel_url }}">↓ Выгрузить в Excel</a>
+                </div>
+            </header>
+
+            <form class="card filter-card" method="get" action="{{ url_for('products_report_page') }}">
+                <div class="filter-grid">
+                    <div class="field field-wide"><label for="report-q">Название, модель, артикул или штрих-код</label><input class="control" id="report-q" name="q" value="{{ parameters.query }}" placeholder="Поиск товара"></div>
+                    <div class="field"><label for="report-stock">Наличие</label><select class="control" id="report-stock" name="stock_state"><option value="all"{% if parameters.stock_state == 'all' %} selected{% endif %}>Все</option><option value="in"{% if parameters.stock_state == 'in' %} selected{% endif %}>В наличии</option><option value="out"{% if parameters.stock_state == 'out' %} selected{% endif %}>Нет в наличии</option></select></div>
+                    <div class="field"><label for="report-activity">Статус товара</label><select class="control" id="report-activity" name="activity"><option value="all"{% if parameters.activity == 'all' %} selected{% endif %}>Все</option><option value="active"{% if parameters.activity == 'active' %} selected{% endif %}>Активные</option><option value="inactive"{% if parameters.activity == 'inactive' %} selected{% endif %}>Неактивные</option></select></div>
+                    <div class="field"><label for="report-brand">Бренд</label><select class="control" id="report-brand" name="brand_id" onchange="this.form.submit()"><option value="">Все бренды</option>{% for option in brands %}<option value="{{ option.id }}"{% if parameters.brand_id|string == option.id|string %} selected{% endif %}>{{ option.name }}</option>{% endfor %}</select></div>
+                    <div class="field"><label for="report-category">Категория</label><select class="control" id="report-category" name="category_id"{% if not parameters.brand_id %} disabled{% endif %} onchange="this.form.submit()"><option value="">Все категории</option>{% for option in categories %}<option value="{{ option.id }}"{% if parameters.category_id|string == option.id|string %} selected{% endif %}>{{ option.name }}</option>{% endfor %}</select></div>
+                    <div class="field"><label for="report-model">Модель</label><select class="control" id="report-model" name="model_id"{% if not parameters.category_id %} disabled{% endif %}><option value="">Все модели</option>{% for option in models %}<option value="{{ option.id }}"{% if parameters.model_id|string == option.id|string %} selected{% endif %}>{{ option.name }}</option>{% endfor %}</select></div>
+                    <div class="field"><label for="report-cell">Складская ячейка</label><select class="control" id="report-cell" name="cell"><option value="">Все ячейки</option>{% for option in cell_options %}<option value="{{ option }}"{% if parameters.cell == option %} selected{% endif %}>{{ option }}</option>{% endfor %}</select></div>
+                    <div class="field"><label for="report-from">Добавлен с</label><input class="control" id="report-from" type="date" name="date_from" value="{{ parameters.created_from }}"></div>
+                    <div class="field"><label for="report-to">Добавлен по</label><input class="control" id="report-to" type="date" name="date_to" value="{{ parameters.created_to }}"></div>
+                    <div class="field" id="check-state-field"{% if parameters.stock_state != 'out' %} hidden{% endif %}><label for="report-check">Проверка отсутствующего товара</label><select class="control" id="report-check" name="check_state"><option value="all"{% if parameters.check_state == 'all' %} selected{% endif %}>Все</option><option value="unchecked"{% if parameters.check_state == 'unchecked' %} selected{% endif %}>Не проверен</option><option value="partial"{% if parameters.check_state == 'partial' %} selected{% endif %}>Проверен частично</option><option value="complete"{% if parameters.check_state == 'complete' %} selected{% endif %}>Проверен полностью</option></select></div>
+                </div>
+                <div class="report-actions"><a class="button button-reset" href="{{ url_for('products_report_page') }}">Сбросить</a><button class="button button-primary" type="submit">Применить</button></div>
+            </form>
+
+            <section class="metrics" aria-label="Показатели отчёта">
+                <article class="card metric"><span>Всего моделей</span><strong id="report-total">{{ result.total }}</strong></article>
+                <article class="card metric"><span>Моделей в наличии</span><strong id="report-in-stock">{{ result.stats.positive_positions }}</strong></article>
+                <article class="card metric"><span>Нет моделей</span><strong id="report-out-of-stock">{{ result.stats.zero_positions }}</strong></article>
+                <article class="card metric"><span>Общий остаток, шт.</span><strong id="report-stock-total">{{ format_stock_number(result.stats.total_stock) }}</strong></article>
+            </section>
+
+            <section class="card">
+                <div class="table-toolbar">
+                    <h2>Найдено товаров: {{ result.total }}</h2>
+                    <details class="columns-menu"><summary class="button button-reset">Столбцы</summary><div class="columns-panel">{% for key, label in [('photo','Фото'),('name','Название'),('stock','Остаток'),('price','Цена'),('article','Артикул'),('brand','Бренд'),('category','Категория'),('model','Модель'),('status','Статус'),('barcode','Штрих-код'),('cell','Ячейка')] %}<label><input type="checkbox" data-report-column="{{ key }}" checked> {{ label }}</label>{% endfor %}</div></details>
+                </div>
+                <div class="table-wrap">
+                    <table class="report-table" id="productsReportTable" data-erp-table-key="products-report">
+                        <thead><tr>
+                            <th data-column-key="photo" data-erp-column-key="photo">Фото</th>
+                            {% for key, label in [('name','Название'),('stock','Остаток'),('price','Цена'),('article','Артикул'),('brand','Бренд'),('category','Категория'),('model','Модель')] %}<th data-column-key="{{ key }}" data-erp-column-key="{{ key }}"><a href="{{ sort_urls[key] }}">{{ label }}{% if parameters.sort_by == key %} {{ '↑' if parameters.sort_dir == 'asc' else '↓' }}{% endif %}</a></th>{% endfor %}
+                            <th data-column-key="status" data-erp-column-key="status">Статус</th>
+                            <th data-column-key="barcode" data-erp-column-key="barcode">Штрих-код</th>
+                            <th data-column-key="cell" data-erp-column-key="cell"><a href="{{ sort_urls.cell }}">Ячейка{% if parameters.sort_by == 'cell' %} {{ '↑' if parameters.sort_dir == 'asc' else '↓' }}{% endif %}</a></th>
+                        </tr></thead>
+                        <tbody>{% for item in items %}<tr>
+                            <td data-erp-column-key="photo">{% if item.thumbnail_url %}<img class="product-photo" src="{{ item.thumbnail_url }}" alt="" loading="lazy">{% else %}<span class="photo-placeholder">Нет фото</span>{% endif %}</td>
+                            <td data-erp-column-key="name">{{ item.name or '—' }}</td><td class="stock" data-erp-column-key="stock">{{ item.stock_display }}</td><td data-erp-column-key="price">{{ item.price_display or '—' }}</td><td data-erp-column-key="article">{{ item.article or '—' }}</td><td data-erp-column-key="brand">{{ item.brand or '—' }}</td><td data-erp-column-key="category">{{ item.category or '—' }}</td><td data-erp-column-key="model">{{ item.model or '—' }}</td><td data-erp-column-key="status"><span class="status{% if item.status_label == 'Неактивен' %} inactive{% endif %}">{{ item.status_label }}</span></td><td data-erp-column-key="barcode">{{ item.barcode or '—' }}</td><td data-erp-column-key="cell">{{ item.cell or '—' }}</td>
+                        </tr>{% else %}<tr><td class="empty" colspan="11">По выбранным фильтрам товары не найдены.</td></tr>{% endfor %}</tbody>
+                    </table>
+                </div>
+                <nav class="pagination" aria-label="Страницы отчёта">
+                    <span>Показано {{ pagination.start }}–{{ pagination.end }} из {{ pagination.total }}</span>
+                    <div class="page-links">{% if pagination.previous_url %}<a class="page-link" href="{{ pagination.previous_url }}">←</a>{% endif %}{% for page in pagination['items'] %}{% if page %}<a class="page-link{% if page.number == pagination.page %} active{% endif %}" href="{{ page.url }}">{{ page.number }}</a>{% else %}<span>…</span>{% endif %}{% endfor %}{% if pagination.next_url %}<a class="page-link" href="{{ pagination.next_url }}">→</a>{% endif %}</div>
+                    <form method="get">{% for key, value in pagination.state_args %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}<label>На странице <select class="control" name="per_page" onchange="this.form.submit()">{% for option in pagination.per_page_options %}<option value="{{ option }}"{% if option == pagination.per_page %} selected{% endif %}>{{ option }}</option>{% endfor %}</select></label></form>
+                </nav>
+            </section>
+        </div>
+    </main>
+</div>
+<script>
+(() => {
+    const stock = document.getElementById('report-stock');
+    const checkField = document.getElementById('check-state-field');
+    stock.addEventListener('change', () => { checkField.hidden = stock.value !== 'out'; });
+    const storageKey = 'vechasu:products-report:visible-columns:v1';
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(storageKey) || '{}'); } catch (_) {}
+    document.querySelectorAll('[data-report-column]').forEach((input) => {
+        const key = input.dataset.reportColumn;
+        input.checked = saved[key] !== false;
+        const apply = () => document.querySelectorAll('[data-erp-column-key="' + CSS.escape(key) + '"]').forEach((cell) => { cell.hidden = !input.checked; });
+        apply();
+        input.addEventListener('change', () => { saved[key] = input.checked; localStorage.setItem(storageKey, JSON.stringify(saved)); apply(); });
+    });
+})();
+</script>
+</body>
+</html>

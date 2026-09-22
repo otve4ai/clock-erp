@@ -795,7 +795,7 @@ class ExcelProductCatalog:
                       category_id=None, model_id=None, product_id=None,
                       include_cell_item_names=True, include_facets=True,
                       include_inventory_locked=False, stock_state="all",
-                      check_state="all"):
+                      check_state="all", activity="active"):
         self.database.initialize()
         if stock_state == "out" or check_state != "all":
             OutOfStockChecks(self.database).sync()
@@ -816,7 +816,12 @@ class ExcelProductCatalog:
         sort_by = sort_by if sort_by in allowed_sort_fields else "name"
         sort_dir = sort_dir if sort_dir in {"asc", "desc"} else "asc"
         visible_cards_sql = VISIBLE_PRODUCT_SQL
-        where = ["p.active = 1", visible_cards_sql]
+        activity = activity if activity in {"all", "active", "inactive"} else "active"
+        where = [visible_cards_sql]
+        if activity == "active":
+            where.append("p.active = 1")
+        elif activity == "inactive":
+            where.append("p.active = 0")
         if not include_inventory_locked:
             where.append(unlocked_product_sql("p"))
         parameters = []

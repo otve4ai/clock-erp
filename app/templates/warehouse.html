@@ -4137,7 +4137,8 @@
                 'products',
                 product_metrics,
                 add_button=true,
-                export_filtered_url=export_filtered_url
+                export_filtered_url=export_filtered_url,
+                report_url=url_for('products_report_page')
             ) }}
 
             {% if request.args.get("notice") and request.args.get("message") %}
