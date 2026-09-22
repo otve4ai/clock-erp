@@ -1370,8 +1370,14 @@
         }
     };
 
-    function sharedCatalogOption(item, kind, hideCategoryCount) {
+    function sharedCatalogOption(
+        item,
+        kind,
+        hideCategoryCount,
+        optionCountMode
+    ) {
         const product = kind === "product";
+        const positionsAndStock = optionCountMode === "positions-and-stock";
         return {
             value: product
                 ? sharedCatalogIdValue(item.id)
@@ -1400,7 +1406,10 @@
                 ].filter(Boolean).join(" · ")
                 : kind === "category" && hideCategoryCount
                     ? ""
-                    : sharedCatalogStockDisplay(item),
+                    : positionsAndStock
+                        ? String(Number(item.product_count || 0))
+                            + " поз. · " + sharedCatalogStockDisplay(item)
+                        : sharedCatalogStockDisplay(item),
             image: product
                 ? String(item.image_url || item.thumbnail_url || "")
                 : "",
@@ -1708,7 +1717,8 @@
                 const option = sharedCatalogOption(
                     item,
                     kind,
-                    globalCategoryOptions
+                    globalCategoryOptions,
+                    scope?.dataset.catalogOptionCount || "stock"
                 );
                 if (scope?.dataset.catalogOptionImages === "false") {
                     option.image = "";
