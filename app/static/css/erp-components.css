@@ -8535,6 +8535,32 @@ select.erp-control {
     }
 }
 
+/* Keep the key stock and sale values aligned with their column labels. */
+.warehouse-products-table.erp-data-table :is(
+    th[data-column-key="stock"],
+    td[data-column-key="stock"],
+    th[data-column-key="price"],
+    td[data-column-key="price"]
+),
+.sales-table.erp-data-table :is(
+    th.col-quantity_display,
+    td.col-quantity_display,
+    th.col-unit_price_display,
+    td.col-unit_price_display
+) {
+    text-align: center;
+}
+
+.warehouse-products-table.erp-data-table
+    th[data-column-key="stock"]
+    .warehouse-sort-label,
+.sales-table.erp-data-table
+    :is(th.col-quantity_display, th.col-unit_price_display)
+    .sales-sort-label {
+    width: 100%;
+    justify-content: center;
+}
+
 /* ERP Design System V1: visual contracts shared by every active workspace. */
 .brands-page,
 .journal-page {
@@ -9350,6 +9376,7 @@ select.erp-control {
         padding-left: 12px;
     }
 }
+
 
 /* Sales toolbar order stays task-first on compact screens. */
 @media (max-width: 560px) {

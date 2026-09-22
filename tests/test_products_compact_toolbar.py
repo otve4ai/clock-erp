@@ -19,7 +19,7 @@ class ProductsCompactToolbarTest(unittest.TestCase):
         self.assertNotIn("Подборки", self.template)
         self.assertNotIn("productCollection", self.template)
 
-    def test_more_menu_exposes_the_two_context_actions(self):
+    def test_sales_style_table_controls_are_directly_available(self):
         toolbar = self.template.split('id="warehouseSearchForm"', 1)[1].split(
             "</form>", 1
         )[0]
@@ -29,21 +29,26 @@ class ProductsCompactToolbarTest(unittest.TestCase):
         ):
             self.assertIn(control, toolbar)
         for label in (
-            "Настроить столбцы",
-            "Развернуть таблицу",
+            "Столбцы",
+            "Развернуть",
         ):
             self.assertIn(label, toolbar)
-        self.assertIn('event.key === "Escape" && !menu.hidden', self.template)
-        self.assertIn('!event.target.closest(".warehouse-more")', self.template)
+        self.assertNotIn('id="warehouseMoreTrigger"', toolbar)
+        self.assertNotIn('id="warehouseMoreMenu"', toolbar)
+        self.assertIn('event.key === "Escape" && !panel.hidden', self.template)
+        self.assertIn(
+            '!event.target.closest(".warehouse-column-settings")',
+            self.template,
+        )
 
     def test_columns_and_focus_keep_existing_controllers(self):
         self.assertIn(
             "function initializeWarehouseColumnSettings", self.template
         )
-        self.assertIn('reset.id = "warehouseTableReset"', self.template)
+        self.assertIn('id="warehouseTableReset"', self.template)
         self.assertIn("data-erp-focus-mode-toggle", self.template)
         self.assertIn("label.textContent = action + labelSuffix", self.focus_script)
-        self.assertIn('data-focus-mode-label-suffix=" таблицу"', self.template)
+        self.assertNotIn('data-focus-mode-label-suffix=" таблицу"', self.template)
 
 
 

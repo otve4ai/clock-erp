@@ -19,22 +19,18 @@ class ErpTableUxPolishTest(unittest.TestCase):
             "function initializeWarehouseColumnSettings", 1
         )[1].split("function initializeWarehouseTableView", 1)[0]
 
-        self.assertIn('id="warehouseMoreTrigger"', toolbar)
-        self.assertIn('id="warehouseMoreMenu"', toolbar)
+        self.assertNotIn('id="warehouseMoreTrigger"', toolbar)
+        self.assertNotIn('id="warehouseMoreMenu"', toolbar)
         self.assertNotIn('id="warehouseCollectionModeTrigger"', toolbar)
         self.assertIn('id="warehouseColumnSettingsTrigger"', toolbar)
         self.assertIn('id="warehouseColumnSettingsPanel"', toolbar)
-        self.assertIn('data-focus-mode-label-suffix=" таблицу"', toolbar)
-        self.assertIn("Ещё", toolbar)
-        self.assertIn('reset.id = "warehouseTableReset"', column_settings)
-        self.assertIn(
-            'reset.textContent = "Сбросить вид таблицы"',
-            column_settings,
-        )
-        self.assertLess(
-            column_settings.index("warehouse-column-settings-divider"),
-            column_settings.index('reset.id = "warehouseTableReset"'),
-        )
+        self.assertIn('id="warehouseFocusModeToggle"', toolbar)
+        self.assertIn("Столбцы", toolbar)
+        self.assertIn(">Развернуть</span>", toolbar)
+        self.assertIn('id="warehouseColumnSettingsList"', toolbar)
+        self.assertIn('id="warehouseTableReset"', toolbar)
+        self.assertIn('list.replaceChildren()', column_settings)
+        self.assertIn('resetWarehouseTableView(table, view)', column_settings)
         self.assertNotIn('class="warehouse-table-toolbar"', source)
 
     def test_stock_filter_stays_inside_products_workspace(self):
@@ -87,6 +83,23 @@ class ErpTableUxPolishTest(unittest.TestCase):
         self.assertIn(".erp-scroll-hint.has-horizontal-overflow", css)
         self.assertIn(".receipt-delete-button:hover", css)
         self.assertIn(".sale-row.is-cancelled td", css)
+
+    def test_product_and_sales_key_numeric_columns_are_centered(self):
+        css = self.source("app/static/css/erp-components.css")
+
+        for selector in (
+            'th[data-column-key="stock"]',
+            'td[data-column-key="stock"]',
+            'th[data-column-key="price"]',
+            'td[data-column-key="price"]',
+            "th.col-quantity_display",
+            "td.col-quantity_display",
+            "th.col-unit_price_display",
+            "td.col-unit_price_display",
+        ):
+            self.assertIn(selector, css)
+        self.assertIn("text-align: center", css)
+        self.assertIn("justify-content: center", css)
 
     def test_report_labels_are_short_and_secondary(self):
         sales = self.source("app/templates/sales.html")

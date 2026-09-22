@@ -458,20 +458,7 @@
             box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
         }
 
-        .warehouse-more {
-            position: relative;
-        }
-
-        .warehouse-more-trigger {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 7px;
-            min-width: 86px;
-        }
-
-        .warehouse-more-trigger svg,
-        .warehouse-more-menu svg {
+        .warehouse-table-control svg {
             width: 18px;
             height: 18px;
             flex: 0 0 auto;
@@ -482,61 +469,21 @@
             stroke-width: 1.7;
         }
 
-        .warehouse-more-menu {
-            position: absolute;
-            z-index: 40;
-            top: calc(100% + 6px);
-            right: 0;
-            width: 224px;
-            padding: 6px;
-            border: 1px solid #dbe3ec;
-            border-radius: 12px;
-            background: #ffffff;
-            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
-        }
-
-        .warehouse-more-menu[hidden] {
-            display: none;
-        }
-
-        .warehouse-more-action {
-            display: flex;
-            width: 100%;
-            min-height: 40px;
+        .warehouse-table-control {
+            display: inline-flex;
+            min-width: max-content;
             align-items: center;
-            justify-content: flex-start;
-            gap: 9px;
-            padding: 8px 10px;
-            border-radius: 8px;
-            background: #ffffff;
-            color: #334155;
-            font-size: 13px;
-            font-weight: 700;
-            text-align: left;
-        }
-
-        .warehouse-more-action:hover,
-        .warehouse-more-action:focus-visible {
-            background: #f1f5f9;
-            color: #1d4ed8;
-            outline: none;
-        }
-
-        .warehouse-more .warehouse-column-settings-panel {
-            top: calc(100% + 6px);
+            justify-content: center;
+            gap: 7px;
         }
 
         @media (max-width: 767px) {
-            .warehouse-more {
+            .warehouse-table-control,
+            .warehouse-column-settings {
                 width: 100%;
             }
 
-            .warehouse-more-trigger {
-                width: 100%;
-            }
-
-            .warehouse-more-menu,
-            .warehouse-more .warehouse-column-settings-panel {
+            .warehouse-column-settings-panel {
                 right: 0;
                 max-width: calc(100vw - 32px);
             }
@@ -552,26 +499,93 @@
             z-index: 30;
             top: calc(100% + 6px);
             right: 0;
-            width: 220px;
-            padding: 10px;
+            width: 300px;
             border: 1px solid #dbe3ec;
             border-radius: 12px;
             background: #ffffff;
             box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
+            overflow: hidden;
         }
 
         .warehouse-column-settings-panel[hidden] {
             display: none;
         }
 
+        .warehouse-column-settings-header,
+        .warehouse-column-settings-footer {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px;
+        }
+
+        .warehouse-column-settings-header {
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .warehouse-column-settings-footer {
+            align-items: center;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .warehouse-column-settings-title {
+            margin: 0;
+            color: #172033;
+            font-size: 14px;
+            font-weight: 800;
+        }
+
+        .warehouse-column-settings-help {
+            margin: 3px 0 0;
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+
+        .warehouse-column-settings-close {
+            display: inline-flex;
+            width: 28px;
+            min-width: 28px;
+            height: 28px;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 0;
+            border-radius: 7px;
+            background: transparent;
+            color: #64748b;
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        .warehouse-column-settings-close:hover,
+        .warehouse-column-settings-close:focus-visible {
+            background: #f1f5f9;
+            color: #1d4ed8;
+            outline: none;
+        }
+
+        .warehouse-column-settings-list {
+            display: grid;
+            max-height: min(390px, 55vh);
+            padding: 8px;
+            overflow-y: auto;
+        }
+
         .warehouse-column-settings-option {
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 6px 4px;
+            padding: 7px 6px;
+            border-radius: 7px;
             color: #334155;
             font-size: 13px;
             font-weight: 650;
+        }
+
+        .warehouse-column-settings-option:hover {
+            background: #f8fafc;
         }
 
         .warehouse-column-settings-option input {
@@ -581,24 +595,17 @@
 
         .warehouse-column-settings-hint {
             min-height: 16px;
-            margin: 5px 4px 0;
+            margin: 0;
             color: #b45309;
             font-size: 11px;
         }
 
-        .warehouse-column-settings-divider {
-            height: 1px;
-            margin: 8px 0;
-            background: #e5e7eb;
-        }
-
         .warehouse-column-settings-reset {
-            display: flex;
-            width: 100%;
+            display: inline-flex;
             min-height: 38px;
             align-items: center;
-            padding: 8px 9px;
-            border: 0;
+            padding: 8px 10px;
+            border: 1px solid #dbe3ec;
             border-radius: 8px;
             background: #ffffff;
             color: #475569;
@@ -617,9 +624,7 @@
         }
 
         @media (max-width: 767px) {
-            .warehouse-column-settings {
-                display: none;
-            }
+            .warehouse-column-settings-panel { width: min(300px, calc(100vw - 32px)); }
         }
 
         .warehouse-table-footer {
@@ -836,7 +841,7 @@
             table-layout: fixed;
             width: max-content;
             min-width: 100%;
-            --warehouse-row-height: 60px;
+            --warehouse-row-height: 72px;
         }
 
         .warehouse-header-more { position: relative; }
@@ -914,8 +919,9 @@
         }
 
         .warehouse-products-table th:hover .warehouse-column-resize-handle::after,
+        .warehouse-column-resize-handle.is-active::after,
         body.warehouse-column-resizing .warehouse-column-resize-handle::after {
-            background: #94a3b8;
+            background: #2563eb;
         }
 
         .warehouse-products-table th.warehouse-drop-before::before,
@@ -4128,7 +4134,7 @@
         data-focus-mode-storage-key="vechasu.erp.products.focus-mode.v1"
         data-focus-mode-subject="таблицу товаров"
         data-focus-mode-hide=".products-workspace-header,.products-workspace-tabs,.products-workspace-metrics,#appSidebar,.mobile-erp-navigation,.mobile-erp-more-sheet,.mobile-erp-more-backdrop,#sidebarTooltip,#pageNotice,.inventory-lock-panel,#warehouseAddModal,#warehouseLoadingState"
-        data-focus-mode-overlays="#filterDrawer.open,#editDrawer.open,#warehouseMoreMenu:not([hidden]),#warehouseColumnSettingsPanel:not([hidden]),.brand-combobox-dropdown,.warehouse-calendar-popup:not([hidden]),.modal.is-open,.mobile-erp-more-sheet.is-open"
+        data-focus-mode-overlays="#filterDrawer.open,#editDrawer.open,#warehouseColumnSettingsPanel:not([hidden]),.brand-combobox-dropdown,.warehouse-calendar-popup:not([hidden]),.modal.is-open,.mobile-erp-more-sheet.is-open"
     >
         {% include "_sidebar.html" %}
 
@@ -4428,48 +4434,54 @@
                         </label>
                     </div>
 
-                    <div class="warehouse-more">
+                    <div class="warehouse-column-settings">
                         <button
-                            id="warehouseMoreTrigger"
-                            class="warehouse-more-trigger search-tool-button erp-secondary-action"
+                            id="warehouseColumnSettingsTrigger"
+                            class="warehouse-table-control search-tool-button erp-secondary-action"
                             type="button"
-                            aria-haspopup="menu"
+                            aria-haspopup="dialog"
                             aria-expanded="false"
-                            aria-controls="warehouseMoreMenu"
+                            aria-controls="warehouseColumnSettingsPanel"
                         >
-                            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="4" cy="10" r="1"></circle><circle cx="10" cy="10" r="1"></circle><circle cx="16" cy="10" r="1"></circle></svg>
-                            <span>Ещё</span>
+                            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="1.5"></rect><path d="M8 4v12m4.5-12v12"></path></svg>
+                            <span>Столбцы</span>
                         </button>
                         <div
-                            id="warehouseMoreMenu"
-                            class="warehouse-more-menu"
-                            role="menu"
-                            aria-label="Дополнительные действия"
+                            id="warehouseColumnSettingsPanel"
+                            class="warehouse-column-settings-panel"
+                            role="dialog"
+                            aria-label="Настройка столбцов товаров"
                             hidden
                         >
-                            <button id="warehouseColumnSettingsTrigger" class="warehouse-more-action" type="button" role="menuitem" aria-haspopup="true" aria-expanded="false" aria-controls="warehouseColumnSettingsPanel">
-                                <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="1.5"></rect><path d="M8 4v12m4-12v12"></path></svg>
-                                <span>Настроить столбцы</span>
-                            </button>
-                            <button
-                                id="warehouseFocusModeToggle"
-                                class="warehouse-more-action warehouse-focus-toggle"
-                                type="button"
-                                role="menuitem"
-                                aria-label="Развернуть таблицу товаров"
-                                aria-pressed="false"
-                                aria-expanded="false"
-                                title="Развернуть таблицу товаров"
-                                data-erp-focus-mode-toggle
-                                data-focus-mode-label-suffix=" таблицу"
-                            >
-                                <svg viewBox="0 0 20 20" data-focus-expand-icon aria-hidden="true"><path d="M8 3H3v5M12 3h5v5M8 17H3v-5M12 17h5v-5"></path><path d="m3 3 5 5m9-5-5 5M3 17l5-5m9 5-5-5"></path></svg>
-                                <svg viewBox="0 0 20 20" data-focus-collapse-icon aria-hidden="true" hidden><path d="M8 8H3V3M12 8h5V3M8 12H3v5M12 12h5v5"></path><path d="M8 8 3 3m9 5 5-5M8 12l-5 5m9-5 5 5"></path></svg>
-                                <span class="warehouse-focus-label" data-focus-mode-label>Развернуть таблицу</span>
-                            </button>
+                            <div class="warehouse-column-settings-header">
+                                <div>
+                                    <p class="warehouse-column-settings-title">Столбцы таблицы</p>
+                                    <p class="warehouse-column-settings-help">Перетаскивайте заголовки таблицы и выбирайте видимые столбцы.</p>
+                                </div>
+                                <button id="warehouseColumnSettingsClose" class="warehouse-column-settings-close" type="button" aria-label="Закрыть настройки столбцов">×</button>
+                            </div>
+                            <div id="warehouseColumnSettingsList" class="warehouse-column-settings-list"></div>
+                            <div class="warehouse-column-settings-footer">
+                                <p class="warehouse-column-settings-hint" aria-live="polite"></p>
+                                <button id="warehouseTableReset" class="warehouse-column-settings-reset" type="button">Сбросить</button>
+                            </div>
                         </div>
-                        <div id="warehouseColumnSettingsPanel" class="warehouse-column-settings-panel" role="group" aria-label="Видимые столбцы таблицы" hidden></div>
                     </div>
+
+                    <button
+                        id="warehouseFocusModeToggle"
+                        class="warehouse-table-control warehouse-focus-toggle search-tool-button erp-secondary-action"
+                        type="button"
+                        aria-label="Развернуть таблицу товаров"
+                        aria-pressed="false"
+                        aria-expanded="false"
+                        title="Развернуть таблицу товаров"
+                        data-erp-focus-mode-toggle
+                    >
+                        <svg viewBox="0 0 20 20" data-focus-expand-icon aria-hidden="true"><path d="M8 3H3v5M12 3h5v5M8 17H3v-5M12 17h5v-5"></path><path d="m3 3 5 5m9-5-5 5M3 17l5-5m9 5-5-5"></path></svg>
+                        <svg viewBox="0 0 20 20" data-focus-collapse-icon aria-hidden="true" hidden><path d="M8 8H3V3M12 8h5V3M8 12H3v5M12 12h5v5"></path><path d="M8 8 3 3m9 5 5-5M8 12l-5 5m9-5 5 5"></path></svg>
+                        <span class="warehouse-focus-label" data-focus-mode-label>Развернуть</span>
+                    </button>
 
                 </form>
             </div>
@@ -7562,42 +7574,6 @@
             });
         }
 
-        (function initializeWarehouseMoreMenu() {
-            const trigger = document.getElementById("warehouseMoreTrigger");
-            const menu = document.getElementById("warehouseMoreMenu");
-            if (!trigger || !menu) return;
-
-            function closeMoreMenu(returnFocus) {
-                menu.hidden = true;
-                trigger.setAttribute("aria-expanded", "false");
-                if (returnFocus) trigger.focus();
-            }
-
-            trigger.addEventListener("click", function(event) {
-                event.stopPropagation();
-                const shouldOpen = menu.hidden;
-                document.getElementById("warehouseColumnSettingsPanel").hidden = true;
-                document.getElementById("warehouseColumnSettingsTrigger")
-                    .setAttribute("aria-expanded", "false");
-                menu.hidden = !shouldOpen;
-                trigger.setAttribute("aria-expanded", String(shouldOpen));
-            });
-            menu.addEventListener("click", function(event) {
-                if (event.target.closest("button[role=menuitem]")) {
-                    closeMoreMenu(false);
-                }
-            });
-            document.addEventListener("click", function(event) {
-                if (!event.target.closest(".warehouse-more")) closeMoreMenu(false);
-            });
-            document.addEventListener("keydown", function(event) {
-                if (event.key === "Escape" && !menu.hidden) {
-                    event.preventDefault();
-                    closeMoreMenu(true);
-                }
-            });
-        })();
-
     </script>
 
 <script>
@@ -8129,8 +8105,11 @@
                 "warehouseColumnSettingsTrigger"
             );
             const panel = document.getElementById("warehouseColumnSettingsPanel");
-            if (!trigger || !panel) return;
-            panel.innerHTML = "";
+            const list = document.getElementById("warehouseColumnSettingsList");
+            const close = document.getElementById("warehouseColumnSettingsClose");
+            const reset = document.getElementById("warehouseTableReset");
+            if (!trigger || !panel || !list || !close || !reset) return;
+            list.replaceChildren();
             warehouseTableDefaults.order.forEach(function(key) {
                 const label = document.createElement("label");
                 label.className = "warehouse-column-settings-option";
@@ -8162,33 +8141,32 @@
                 label.appendChild(document.createTextNode(
                     warehouseTableColumnLabels[key]
                 ));
-                panel.appendChild(label);
+                list.appendChild(label);
             });
-            const hint = document.createElement("div");
-            hint.className = "warehouse-column-settings-hint";
-            hint.setAttribute("aria-live", "polite");
-            panel.appendChild(hint);
-            const divider = document.createElement("div");
-            divider.className = "warehouse-column-settings-divider";
-            divider.setAttribute("aria-hidden", "true");
-            panel.appendChild(divider);
-            const reset = document.createElement("button");
-            reset.id = "warehouseTableReset";
-            reset.className = "warehouse-column-settings-reset";
-            reset.type = "button";
-            reset.textContent = "Сбросить вид таблицы";
             reset.addEventListener("click", function() {
                 resetWarehouseTableView(table, view);
             }, { signal: viewSignal });
-            panel.appendChild(reset);
+            function closePanel(returnFocus) {
+                panel.hidden = true;
+                trigger.setAttribute("aria-expanded", "false");
+                if (returnFocus) trigger.focus();
+            }
             trigger.addEventListener("click", function() {
                 panel.hidden = !panel.hidden;
                 trigger.setAttribute("aria-expanded", String(!panel.hidden));
             }, { signal: viewSignal });
+            close.addEventListener("click", function() {
+                closePanel(true);
+            }, { signal: viewSignal });
             document.addEventListener("click", function(event) {
-                if (!event.target.closest(".warehouse-more")) {
-                    panel.hidden = true;
-                    trigger.setAttribute("aria-expanded", "false");
+                if (!event.target.closest(".warehouse-column-settings")) {
+                    closePanel(false);
+                }
+            }, { signal: viewSignal });
+            document.addEventListener("keydown", function(event) {
+                if (event.key === "Escape" && !panel.hidden) {
+                    event.preventDefault();
+                    closePanel(true);
                 }
             }, { signal: viewSignal });
         }
@@ -8252,6 +8230,7 @@
                     const key = header.dataset.columnKey;
                     const startX = event.clientX;
                     const startWidth = header.getBoundingClientRect().width;
+                    handle.classList.add("is-active");
                     document.body.classList.add("warehouse-table-interacting", "warehouse-column-resizing");
                     function resizeColumn(moveEvent) {
                         view.widths[key] = Math.max(
@@ -8265,6 +8244,7 @@
                     }
                     function finishResize() {
                         warehouseTableSuppressSortUntil = Date.now() + 350;
+                        handle.classList.remove("is-active");
                         document.body.classList.remove("warehouse-table-interacting", "warehouse-column-resizing");
                         saveWarehouseTableView(view);
                         window.removeEventListener("pointermove", resizeColumn);
@@ -8282,12 +8262,12 @@
                 if (event.button !== 0 || event.target.closest("input, button, form, label, .warehouse-column-resize-handle")) return;
                 const header = event.target.closest("th[data-column-key]");
                 if (header) {
-                    dragState = { header: header, startX: event.clientX, dragging: false, target: null, after: false, preview: null };
+                    dragState = { header: header, startX: event.clientX, startY: event.clientY, dragging: false, target: null, after: false, preview: null };
                 }
             });
             window.addEventListener("pointermove", function(event) {
                 if (!dragState) return;
-                if (!dragState.dragging && Math.abs(event.clientX - dragState.startX) < 6) return;
+                if (!dragState.dragging && Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY) < 6) return;
                 if (!dragState.dragging) {
                     dragState.dragging = true;
                     document.body.classList.add("warehouse-table-interacting");
@@ -8297,6 +8277,7 @@
                     dragState.preview.textContent = dragState.header.textContent.trim();
                     document.body.appendChild(dragState.preview);
                 }
+                event.preventDefault();
                 dragState.preview.style.left = event.clientX + 14 + "px";
                 dragState.preview.style.top = event.clientY + 14 + "px";
                 table.querySelectorAll(".warehouse-drop-before, .warehouse-drop-after").forEach(function(header) {
@@ -8304,7 +8285,7 @@
                 });
                 const element = document.elementFromPoint(event.clientX, event.clientY);
                 const target = element ? element.closest("th[data-column-key]") : null;
-                if (!target || target === dragState.header) {
+                if (!target || target.closest("table") !== table || target === dragState.header || target.hidden) {
                     dragState.target = null;
                     return;
                 }
@@ -8313,7 +8294,7 @@
                 dragState.after = event.clientX > rect.left + rect.width / 2;
                 target.classList.add(dragState.after ? "warehouse-drop-after" : "warehouse-drop-before");
             }, { signal: viewSignal });
-            window.addEventListener("pointerup", function() {
+            function finishColumnDrag() {
                 if (!dragState) return;
                 if (dragState.dragging) {
                     warehouseTableSuppressSortUntil = Date.now() + 350;
@@ -8335,7 +8316,9 @@
                     if (dragState.preview) dragState.preview.remove();
                 }
                 dragState = null;
-            }, { signal: viewSignal });
+            }
+            window.addEventListener("pointerup", finishColumnDrag, { signal: viewSignal });
+            window.addEventListener("pointercancel", finishColumnDrag, { signal: viewSignal });
             table.addEventListener("click", function(event) {
                 if (Date.now() < warehouseTableSuppressSortUntil) {
                     event.preventDefault();
@@ -9359,7 +9342,7 @@
                         "warehouseColumnSettingsTrigger"
                     ),
                     container: document.querySelector(
-                        ".warehouse-more"
+                        ".warehouse-column-settings"
                     ),
                     isOpen: () => !document.getElementById(
                         "warehouseColumnSettingsPanel"
