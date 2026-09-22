@@ -40,14 +40,41 @@ class SettingsDesignSystemContractTest(unittest.TestCase):
     def test_theme_names_storage_aria_and_keyboard_contract_are_preserved(self):
         template = self.source("app/templates/settings.html")
         theme_script = self.source("app/static/js/theme.js")
-        for theme in ("classic", "klok-green", "bn0024-white"):
+        themes_css = self.source("app/static/css/themes.css")
+        for theme in ("classic", "dark"):
             self.assertIn('data-theme-option="{}"'.format(theme), template)
-        self.assertEqual(template.count('role="radio"'), 3)
-        self.assertEqual(template.count('aria-checked="false"'), 3)
+        self.assertNotIn('data-theme-option="klok-green"', template)
+        self.assertNotIn('data-theme-option="bn0024-white"', template)
+        self.assertEqual(template.count('role="radio"'), 2)
+        self.assertEqual(template.count('aria-checked="false"'), 2)
         self.assertIn('const STORAGE_KEY = "vechasu-erp-theme-v1";', theme_script)
+        self.assertIn('normalizedTheme === "dark" ? "dark" : "light"', theme_script)
+        dark_tokens = themes_css.split(
+            'html[data-theme="dark"] {', 1
+        )[1].split("}", 1)[0]
+        for token in (
+            "color-scheme: dark",
+            "--theme-app-bg: #000000",
+            "--theme-sidebar-bg: #000000",
+            "--theme-text-strong: #ffffff",
+            "--theme-primary: #0a84ff",
+        ):
+            self.assertIn(token, dark_tokens)
         self.assertIn('option.tabIndex = selected ? 0 : -1;', theme_script)
         self.assertIn('"ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"', theme_script)
         self.assertIn("applyTheme(nextOption.dataset.themeOption)", theme_script)
+
+    def test_dark_table_contrast_is_scoped_away_from_classic_theme(self):
+        themes_css = self.source("app/static/css/themes.css")
+        contrast_contract = themes_css.split(
+            "Keep dense product and sales tables readable", 1
+        )[1].split("html[data-theme] tbody tr.receipt-row-error", 1)[0]
+        self.assertIn('html[data-theme="dark"]', contrast_contract)
+        self.assertIn(".warehouse-products-table.erp-data-table", contrast_contract)
+        self.assertIn(".sales-table.erp-data-table", contrast_contract)
+        self.assertIn("color: var(--theme-text) !important", contrast_contract)
+        self.assertIn("color: var(--theme-text-muted) !important", contrast_contract)
+        self.assertNotIn('html[data-theme="classic"]', contrast_contract)
 
     def test_save_states_errors_and_double_submit_guard_are_explicit(self):
         script = self.source("app/static/js/settings.js")

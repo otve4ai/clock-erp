@@ -3,7 +3,7 @@
  *
  * Page templates retain their layout and business-specific rules. This file
  * is loaded after page CSS and maps every shared visual primitive to one of
- * the three supported design systems.
+ * the two supported design systems.
  */
 
 :root,
@@ -101,138 +101,71 @@ html[data-theme="classic"] {
     --erp-shadow: var(--theme-shadow);
 }
 
-html[data-theme="bn0024-white"] {
-    color-scheme: light;
-    --theme-app-bg: #f3f3f1;
-    --theme-workspace-bg: #f7f7f5;
-    --theme-sidebar-bg: #f0f0ed;
-    --theme-sidebar-hover: #e5e5e1;
-    --theme-sidebar-active: #deded8;
-    --theme-sidebar-text: #202020;
-    --theme-sidebar-muted: #686864;
-    --theme-surface: #ffffff;
-    --theme-surface-muted: #f4f4f1;
-    --theme-surface-raised: #ffffff;
-    --theme-text: #1e1e1d;
-    --theme-text-strong: #0e0e0e;
-    --theme-text-muted: #666663;
-    --theme-border: #d4d4cf;
-    --theme-border-strong: #ababa4;
-    --theme-primary: #242423;
-    --theme-primary-hover: #090909;
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --theme-app-bg: #000000;
+    --theme-workspace-bg: #000000;
+    --theme-sidebar-bg: #000000;
+    --theme-sidebar-hover: #1c1c1e;
+    --theme-sidebar-active: #2c2c2e;
+    --theme-sidebar-text: #ffffff;
+    --theme-sidebar-muted: #98989d;
+    --theme-surface: #1c1c1e;
+    --theme-surface-muted: #242426;
+    --theme-surface-raised: #2c2c2e;
+    --theme-text: #f2f2f7;
+    --theme-text-strong: #ffffff;
+    --theme-text-muted: #aeaeb2;
+    --theme-border: #38383a;
+    --theme-border-strong: #545458;
+    --theme-primary: #0a84ff;
+    --theme-primary-hover: #409cff;
     --theme-primary-text: #ffffff;
-    --theme-accent: #cf4827;
-    --theme-accent-hover: #a9361c;
-    --theme-accent-soft: #f8e8e2;
-    --theme-hover: #f0f0ed;
-    --theme-active: #e7e7e2;
-    --theme-selected: #ecece7;
-    --theme-focus: #cf4827;
-    --theme-focus-ring: rgba(207, 72, 39, 0.22);
-    --theme-success: #246b43;
-    --theme-success-soft: #e8f3eb;
-    --theme-warning: #8a5a08;
-    --theme-warning-soft: #fff3d6;
-    --theme-error: #a72e26;
-    --theme-error-soft: #fbe9e7;
-    --theme-info: #315d7d;
-    --theme-info-soft: #e8f0f5;
-    --theme-overlay: rgba(20, 20, 19, 0.48);
-    --theme-shadow: 0 1px 2px rgba(18, 18, 17, 0.06);
-    --theme-shadow-raised:
-        0 12px 30px rgba(18, 18, 17, 0.09),
-        0 2px 5px rgba(18, 18, 17, 0.05);
-    --theme-card-radius: 5px;
-    --theme-control-radius: 3px;
-    --theme-pill-radius: 999px;
-    --theme-control-height: 42px;
-    --theme-table-head: #ecece8;
-    --theme-table-row: #ffffff;
-    --theme-table-row-alt: #fafaf8;
-    --theme-table-row-hover: #f1f1ed;
-    --theme-table-selected: #e9e9e3;
-    --theme-input-bg: #ffffff;
-    --theme-input-disabled: #ebebe7;
-    --theme-scrollbar: #aaa9a2;
-    --theme-scrollbar-track: #e8e8e4;
-    --theme-font:
-        "Helvetica Neue",
-        Helvetica,
-        Arial,
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
-    --theme-heading-weight: 700;
-    --theme-body-weight: 400;
-}
-
-html[data-theme="klok-green"] {
-    color-scheme: light;
-    --theme-app-bg: #dceadc;
-    --theme-workspace-bg: #edf5e9;
-    --theme-sidebar-bg: #063d2b;
-    --theme-sidebar-hover: #0b5138;
-    --theme-sidebar-active: #126342;
-    --theme-sidebar-text: #efffe8;
-    --theme-sidebar-muted: #a8cdb4;
-    --theme-surface: #fbfff7;
-    --theme-surface-muted: #e5f1df;
-    --theme-surface-raised: #ffffff;
-    --theme-text: #123326;
-    --theme-text-strong: #07291d;
-    --theme-text-muted: #4e6b5c;
-    --theme-border: #b9cfbb;
-    --theme-border-strong: #83a88d;
-    --theme-primary: #8ce51d;
-    --theme-primary-hover: #74ca0c;
-    --theme-primary-text: #092c1d;
-    --theme-accent: #32b86b;
-    --theme-accent-hover: #218e50;
-    --theme-accent-soft: #d8f5d4;
-    --theme-hover: #e3f1dd;
-    --theme-active: #cfebc4;
-    --theme-selected: #d9efce;
-    --theme-focus: #1b8a4d;
-    --theme-focus-ring: rgba(27, 138, 77, 0.25);
-    --theme-success: #126b3d;
-    --theme-success-soft: #d9f2dc;
-    --theme-warning: #8b5700;
-    --theme-warning-soft: #fff0bf;
-    --theme-error: #a32f28;
-    --theme-error-soft: #fde7e2;
-    --theme-info: #176166;
-    --theme-info-soft: #dff1ec;
-    --theme-overlay: rgba(3, 38, 25, 0.56);
+    --theme-accent: #0a84ff;
+    --theme-accent-hover: #409cff;
+    --theme-accent-soft: #102a43;
+    --theme-hover: #2c2c2e;
+    --theme-active: #323235;
+    --theme-selected: #183a5d;
+    --theme-focus: #64d2ff;
+    --theme-focus-ring: rgba(100, 210, 255, 0.28);
+    --theme-success: #30d158;
+    --theme-success-soft: #15391f;
+    --theme-warning: #ffd60a;
+    --theme-warning-soft: #3a3210;
+    --theme-error: #ff453a;
+    --theme-error-soft: #401b1d;
+    --theme-info: #64d2ff;
+    --theme-info-soft: #17333d;
+    --theme-overlay: rgba(0, 0, 0, 0.78);
     --theme-shadow:
-        0 1px 2px rgba(5, 54, 35, 0.08),
-        0 7px 18px rgba(5, 54, 35, 0.05);
+        0 8px 24px rgba(0, 0, 0, 0.34),
+        0 1px 2px rgba(0, 0, 0, 0.48);
     --theme-shadow-raised:
-        0 18px 42px rgba(4, 48, 32, 0.16),
-        0 3px 7px rgba(4, 48, 32, 0.08);
-    --theme-card-radius: 15px;
-    --theme-control-radius: 11px;
+        0 20px 48px rgba(0, 0, 0, 0.58),
+        0 3px 8px rgba(0, 0, 0, 0.42);
+    --theme-card-radius: 16px;
+    --theme-control-radius: 10px;
     --theme-pill-radius: 999px;
     --theme-control-height: 44px;
-    --theme-table-head: #dbead7;
-    --theme-table-row: #fbfff7;
-    --theme-table-row-alt: #f3faef;
-    --theme-table-row-hover: #e5f3df;
-    --theme-table-selected: #d6edca;
-    --theme-input-bg: #ffffff;
-    --theme-input-disabled: #dce8d9;
-    --theme-scrollbar: #5b8f6a;
-    --theme-scrollbar-track: #dce9d9;
+    --theme-table-head: #242426;
+    --theme-table-row: #1c1c1e;
+    --theme-table-row-alt: #202022;
+    --theme-table-row-hover: #2c2c2e;
+    --theme-table-selected: #183a5d;
+    --theme-input-bg: #1c1c1e;
+    --theme-input-disabled: #2c2c2e;
+    --theme-scrollbar: #636366;
+    --theme-scrollbar-track: #1c1c1e;
     --theme-font:
-        "Avenir Next",
-        Avenir,
-        Inter,
         -apple-system,
         BlinkMacSystemFont,
+        "SF Pro Display",
         "Segoe UI",
+        Arial,
         sans-serif;
     --theme-heading-weight: 800;
-    --theme-body-weight: 450;
+    --theme-body-weight: 400;
 }
 
 html[data-theme] {
@@ -747,6 +680,56 @@ html[data-theme] tbody tr:where(
     box-shadow: inset 3px 0 0 var(--theme-accent);
 }
 
+/* Keep dense product and sales tables readable without changing Classic. */
+html[data-theme="dark"] :is(
+    .warehouse-products-table.erp-data-table,
+    .sales-table.erp-data-table
+) thead th {
+    background: var(--theme-table-head) !important;
+    color: var(--theme-text-muted) !important;
+}
+
+html[data-theme="dark"] :is(
+    .warehouse-products-table.erp-data-table,
+    .sales-table.erp-data-table
+) tbody td {
+    color: var(--theme-text) !important;
+}
+
+html[data-theme="dark"] :is(
+    .warehouse-products-table.erp-data-table,
+    .sales-table.erp-data-table
+) tbody td :where(
+    .warehouse-ellipsis,
+    .manual-view-value,
+    .automatic-view-value,
+    .sales-number-value,
+    .erp-datetime-cell
+) {
+    color: inherit !important;
+}
+
+html[data-theme="dark"] :is(
+    .warehouse-products-table.erp-data-table,
+    .sales-table.erp-data-table
+) :where(
+    .erp-datetime-time,
+    .erp-muted-value,
+    .sales-product-meta
+) {
+    color: var(--theme-text-muted) !important;
+}
+
+html[data-theme="dark"] .warehouse-products-table.erp-data-table
+td.stock-good {
+    color: var(--theme-success) !important;
+}
+
+html[data-theme="dark"] .warehouse-products-table.erp-data-table
+td.stock-zero {
+    color: var(--theme-error) !important;
+}
+
 html[data-theme] tbody tr.receipt-row-error {
     background: var(--theme-error-soft) !important;
     color: var(--theme-error) !important;
@@ -931,23 +914,8 @@ html[data-theme] .sidebar-link.active {
     box-shadow: inset 3px 0 0 var(--theme-accent) !important;
 }
 
-html[data-theme="bn0024-white"] .sidebar {
+html[data-theme="dark"] .sidebar {
     border-right: 1px solid var(--theme-border) !important;
-}
-
-html[data-theme="bn0024-white"] .sidebar-link.active {
-    box-shadow: inset 3px 0 0 var(--theme-accent) !important;
-}
-
-html[data-theme="klok-green"] .sidebar-link.active::after {
-    position: absolute;
-    right: 10px;
-    width: 11px;
-    height: 11px;
-    border: 2px solid var(--theme-primary);
-    border-radius: 50%;
-    box-shadow: 0 0 0 3px rgba(140, 229, 29, 0.14);
-    content: "";
 }
 
 html[data-theme] .sidebar-system-dot {
@@ -1059,25 +1027,17 @@ html[data-theme] .auth-card {
     box-shadow: var(--theme-shadow-raised) !important;
 }
 
-html[data-theme="bn0024-white"] .auth-brand-panel::after {
-    border-radius: 0;
-    border-color: var(--theme-border-strong);
+html[data-theme="dark"] .auth-brand-panel::after {
+    border-color: rgba(10, 132, 255, 0.3);
     box-shadow:
-        0 0 0 52px rgba(20, 20, 19, 0.025),
-        0 0 0 104px rgba(20, 20, 19, 0.018);
-}
-
-html[data-theme="klok-green"] .auth-brand-panel::after {
-    border-color: rgba(140, 229, 29, 0.32);
-    box-shadow:
-        0 0 0 60px rgba(140, 229, 29, 0.07),
-        0 0 0 120px rgba(140, 229, 29, 0.04);
+        0 0 0 60px rgba(10, 132, 255, 0.06),
+        0 0 0 120px rgba(10, 132, 255, 0.035);
 }
 
 /* Theme chooser. */
 html[data-theme] .theme-options {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
 }
 
@@ -1195,65 +1155,34 @@ html[data-theme] .theme-option[aria-checked="true"] {
     background: #dbe4ef;
 }
 
-.theme-preview-klok {
-    background: #edf5e9;
+.theme-preview-dark {
+    border-color: #38383a;
+    background: #000000;
 }
 
-.theme-preview-klok .theme-preview-sidebar {
-    background: #063d2b;
+.theme-preview-dark .theme-preview-sidebar {
+    border-right: 1px solid #38383a;
+    background: #000000;
 }
 
-.theme-preview-klok .theme-preview-sidebar::before,
-.theme-preview-klok .theme-preview-sidebar::after {
-    background: #8ce51d;
+.theme-preview-dark .theme-preview-sidebar::before,
+.theme-preview-dark .theme-preview-sidebar::after {
+    background: #0a84ff;
 }
 
-.theme-preview-klok .theme-preview-heading {
-    border-radius: 999px;
-    background: #123326;
-}
-
-.theme-preview-klok .theme-preview-control {
-    border-radius: 999px;
-    background: #8ce51d;
-}
-
-.theme-preview-klok .theme-preview-table span {
-    border-radius: 4px;
-    background: #cadfc7;
-}
-
-.theme-preview-bn {
-    background: #f7f7f5;
-    border-radius: 3px;
-}
-
-.theme-preview-bn .theme-preview-sidebar {
-    border-right: 1px solid #c9c9c4;
-    background: #f0f0ed;
-}
-
-.theme-preview-bn .theme-preview-sidebar::before,
-.theme-preview-bn .theme-preview-sidebar::after {
-    border-radius: 0;
-    background: #242423;
-}
-
-.theme-preview-bn .theme-preview-sidebar::after {
-    background: #cf4827;
-}
-
-.theme-preview-bn .theme-preview-heading {
-    background: #1e1e1d;
-}
-
-.theme-preview-bn .theme-preview-control {
-    border: 1px solid #ababa4;
+.theme-preview-dark .theme-preview-heading {
+    border-radius: 5px;
     background: #ffffff;
 }
 
-.theme-preview-bn .theme-preview-table span {
-    background: #dcdcd7;
+.theme-preview-dark .theme-preview-control {
+    border-radius: 5px;
+    background: #0a84ff;
+}
+
+.theme-preview-dark .theme-preview-table span {
+    border-radius: 3px;
+    background: #38383a;
 }
 
 .theme-option-copy {
@@ -1293,7 +1222,7 @@ html[data-theme] .theme-option[aria-checked="true"] {
 }
 
 /* Theme-specific geometry details do not affect application layout. */
-html[data-theme="bn0024-white"] :where(
+html[data-theme="dark"] :where(
     .panel,
     .settings-card,
     .stat-group,
@@ -1301,40 +1230,7 @@ html[data-theme="bn0024-white"] :where(
     .erp-table-card,
     .auth-card
 ) {
-    box-shadow: none !important;
-}
-
-html[data-theme="bn0024-white"] :where(
-    .page-title,
-    .page-header h1,
-    .sales-page-header h1
-) {
-    letter-spacing: -0.025em !important;
-}
-
-html[data-theme="klok-green"] :where(
-    .page-title,
-    .page-header h1,
-    .sales-page-header h1
-)::after {
-    width: 13px;
-    height: 13px;
-    display: inline-block;
-    margin-left: 10px;
-    border: 3px solid var(--theme-accent);
-    border-radius: 50%;
-    box-shadow: 0 0 0 3px var(--theme-focus-ring);
-    content: "";
-    vertical-align: 0.08em;
-}
-
-html[data-theme="klok-green"] :where(
-    .button-primary,
-    .btn-primary,
-    .primary-button,
-    .erp-primary-action
-) {
-    border-radius: var(--theme-pill-radius) !important;
+    border-color: var(--theme-border) !important;
 }
 
 html[data-theme] ::selection {

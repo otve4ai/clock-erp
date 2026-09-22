@@ -3,8 +3,7 @@
 
     const THEMES = Object.freeze([
         "classic",
-        "klok-green",
-        "bn0024-white",
+        "dark",
     ]);
     const DEFAULT_THEME = "classic";
     const STORAGE_KEY = "vechasu-erp-theme-v1";
@@ -47,7 +46,9 @@
 
         document.documentElement.dataset.theme = normalizedTheme;
         document.documentElement.dataset.themeReady = "true";
-        document.documentElement.style.colorScheme = "light";
+        document.documentElement.style.colorScheme = (
+            normalizedTheme === "dark" ? "dark" : "light"
+        );
 
         return normalizedTheme;
     }
