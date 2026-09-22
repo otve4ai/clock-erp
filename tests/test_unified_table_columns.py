@@ -56,12 +56,23 @@ def test_shared_controller_is_loaded_once_from_the_erp_shell():
     assert sidebar.count("erp-table-columns.js") == 1
 
 
-def test_existing_sales_and_warehouse_tables_keep_independent_widths_and_preview():
+def test_sales_and_warehouse_tables_share_the_same_native_interaction_contract():
     sales = (TEMPLATES / "sales.html").read_text(encoding="utf-8")
     warehouse = (TEMPLATES / "warehouse.html").read_text(encoding="utf-8")
+    controller = (
+        ROOT / "app" / "static" / "js" / "erp-native-table-columns.js"
+    ).read_text(encoding="utf-8")
 
-    assert "view.widths[columnKey] = actualWidths[columnKey]" in sales
-    assert 'table.style.minWidth = renderedTotal + "px"' in warehouse
-    assert "flexibleColumns" not in warehouse
-    assert 'preview.className = "erp-column-drag-preview"' in sales
-    assert 'preview.className = "erp-column-drag-preview"' in warehouse
+    for template in (sales, warehouse):
+        assert template.count("js/erp-native-table-columns.js") == 1
+        assert "window.ErpNativeTableColumns.create({" in template
+        assert 'handle.className = "sales-column-resize-handle"' not in template
+        assert "let dragState = null" not in template
+
+    assert "snapshotVisibleWidths();" in controller
+    assert "function moveColumnOrder" in controller
+    assert "function applyLayout" in controller
+    assert 'const HANDLE_CLASS = "sales-column-resize-handle"' in controller
+    assert 'data-system-column="actions"' in warehouse
+    assert "Math.abs(event.clientX - dragState.startX) < 6" in controller
+    assert 'dragState.preview.className = "erp-column-drag-preview"' in controller

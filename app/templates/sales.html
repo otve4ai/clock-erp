@@ -2405,6 +2405,7 @@
             ></div>
 
             <script src="{{ url_for('static', filename='js/erp-table-layout.js') }}"></script>
+            <script src="{{ url_for('static', filename='js/erp-native-table-columns.js') }}"></script>
             <script src="{{ url_for('static', filename='js/sales-table-initial-layout.js') }}"></script>
             <section class="table-card erp-table-card erp-table-shell sales-table-card-initializing" style="visibility: hidden">
                 <div
@@ -5438,7 +5439,6 @@
             trigger: settingsTrigger,
             panel: settingsPanel,
         });
-        let suppressSortUntil = 0;
 
         function minimumWidthFor(key) {
             return minimumWidths[key] || minimumWidth;
@@ -5606,136 +5606,14 @@
                 });
         }
 
-        function applyOrder() {
-            salesTable.querySelectorAll("tr").forEach((row) => {
-                view.order.forEach((key) => {
-                    const cell = row.querySelector(
-                        '[data-column-key="' + key + '"]'
-                    );
-
-                    if (cell) {
-                        row.appendChild(cell);
-                    }
-                });
-
-                const actions = row.querySelector(
-                    '[data-system-column="actions"]'
-                );
-
-                if (actions) {
-                    row.appendChild(actions);
-                }
-            });
-
-            const colgroup = salesTable.querySelector("colgroup");
-
-            if (colgroup) {
-                view.order.forEach((key) => {
-                    const column = colgroup.querySelector(
-                        '[data-column-key="' + key + '"]'
-                    );
-
-                    if (column) {
-                        colgroup.appendChild(column);
-                    }
-                });
-
-                const actions = colgroup.querySelector(
-                    '[data-system-column="actions"]'
-                );
-
-                if (actions) {
-                    colgroup.appendChild(actions);
-                }
-            }
-        }
-
-        let actualWidths = {};
-        let lastContainerWidth = -1;
-        let lastObservedWidth = -1;
-        let layoutFrame = 0;
-        let layoutObserver = null;
+        let columnController = null;
 
         function applyVisibilityAndWidths(force = false) {
-            const visibleKeys = view.order.filter(
-                (key) => !view.hidden.includes(key)
-            );
-            const containerWidth = tableWrap?.clientWidth || 0;
-            if (
-                !force
-                && Math.abs(containerWidth - lastContainerWidth) < 0.5
-            ) {
-                return;
-            }
-            lastContainerWidth = containerWidth;
-            const layout = view.customWidths.length
-                ? {
-                    widths: Object.fromEntries(
-                        visibleKeys.map((key) => [key, view.widths[key]])
-                    ),
-                    tableWidth: visibleKeys.reduce(
-                        (total, key) => total + view.widths[key],
-                        actionColumnWidth(),
-                    ),
-                }
-                : window.ErpTableLayout.computeColumnWidths({
-                    keys: visibleKeys,
-                    preferredWidths: view.widths,
-                    minimumWidths,
-                    growWeights,
-                    containerWidth,
-                    actionWidth: actionColumnWidth(),
-                });
-            actualWidths = layout.widths;
-
-            const actionColumn = salesTable.querySelector(
-                'col[data-system-column="actions"]'
-            );
-            if (actionColumn) {
-                actionColumn.style.width = actionColumnWidth() + "px";
-            }
-
-            view.order.forEach((key) => {
-                const hidden = view.hidden.includes(key);
-                const width = hidden
-                    ? view.widths[key]
-                    : actualWidths[key];
-
-                salesTable
-                    .querySelectorAll(
-                        '[data-column-key="' + key + '"]'
-                    )
-                    .forEach((element) => {
-                        element.hidden = hidden;
-
-                        if (element.tagName === "COL") {
-                            element.style.width = width + "px";
-                        }
-                    });
-
-            });
-
-            const tableWidth = layout.tableWidth;
-            salesTable.style.width = tableWidth + "px";
-            salesTable.dataset.horizontalOverflow = String(
-                tableWidth > containerWidth + 0.5
-            );
-            updateEmptyRows();
+            return columnController.applyLayout(force);
         }
 
-        function scheduleLayout(force = false) {
-            if (layoutFrame) {
-                cancelAnimationFrame(layoutFrame);
-            }
-            layoutFrame = requestAnimationFrame(() => {
-                layoutFrame = 0;
-                applyVisibilityAndWidths(force);
-            });
-        }
-
-        function applyView() {
-            applyOrder();
-            applyVisibilityAndWidths();
+        function applyView(force = true) {
+            return columnController.applyView(force);
         }
 
         function setSettingsMessage(message) {
@@ -5768,31 +5646,6 @@
             });
         }
 
-        function moveColumn(sourceKey, targetKey, after) {
-            if (
-                sourceKey === targetKey
-                || !view.order.includes(sourceKey)
-                || !view.order.includes(targetKey)
-            ) {
-                return;
-            }
-
-            const order = view.order.filter(
-                (key) => key !== sourceKey
-            );
-            let targetIndex = order.indexOf(targetKey);
-
-            if (after) {
-                targetIndex += 1;
-            }
-
-            order.splice(targetIndex, 0, sourceKey);
-            view.order = sanitizeOrder(order);
-            applyView();
-            renderSettingsList();
-            saveView();
-        }
-
         function closeSettings(returnFocus = false) {
             settingsPopover.close({returnFocus});
         }
@@ -5803,6 +5656,23 @@
         const view = hasInitialTableLayout
             ? normalizeView(window.salesInitialTableLayoutView)
             : readView();
+        columnController = window.ErpNativeTableColumns.create({
+            table: salesTable,
+            view,
+            container: tableWrap,
+            resizeTarget: layoutResizeTarget,
+            minimumWidths,
+            minimumWidthFor,
+            growWeights,
+            maximumWidth,
+            actionWidth: actionColumnWidth,
+            normalizeOrder: sanitizeOrder,
+            onLayout: updateEmptyRows,
+            onChange: ({type}) => {
+                if (type === "order") renderSettingsList();
+                saveView();
+            },
+        });
         if (hasInitialTableLayout) {
             // The parser-time layout already put every cell in the saved
             // order. Re-appending the same cells after a delayed asset can
@@ -5815,270 +5685,6 @@
         }
         saveView();
         renderSettingsList();
-
-        if (typeof ResizeObserver === "function" && layoutResizeTarget) {
-            layoutObserver = new ResizeObserver((entries) => {
-                const observedWidth = entries[0]?.contentRect.width || 0;
-                if (Math.abs(observedWidth - lastObservedWidth) < 0.5) {
-                    return;
-                }
-                lastObservedWidth = observedWidth;
-                scheduleLayout();
-            });
-            layoutObserver.observe(layoutResizeTarget);
-        }
-        window.addEventListener("resize", scheduleLayout);
-        const layoutRoot = salesTable.closest("[data-erp-focus-mode]");
-        layoutRoot?.addEventListener(
-            "erp:focus-mode-change",
-            () => scheduleLayout(true),
-        );
-        layoutRoot?.addEventListener(
-            "erp:sidebar-change",
-            () => scheduleLayout(true),
-        );
-        window.addEventListener("pagehide", () => {
-            layoutObserver?.disconnect();
-        });
-        window.addEventListener("pageshow", () => {
-            if (layoutObserver && layoutResizeTarget) {
-                layoutObserver.observe(layoutResizeTarget);
-            }
-            scheduleLayout(true);
-        });
-
-        salesTable
-            .querySelectorAll("thead th[data-column-key]")
-            .forEach((header) => {
-                const handle = document.createElement("span");
-                handle.className = "sales-column-resize-handle";
-                handle.setAttribute("aria-hidden", "true");
-                header.appendChild(handle);
-
-                handle.addEventListener(
-                    "pointerdown",
-                    (event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        const key = header.dataset.columnKey;
-                        const startX = event.clientX;
-                        const startWidth =
-                            header.getBoundingClientRect().width;
-                        view.order.forEach((columnKey) => {
-                            if (!view.hidden.includes(columnKey)) {
-                                view.widths[columnKey] = actualWidths[columnKey];
-                                if (!view.customWidths.includes(columnKey)) {
-                                    view.customWidths.push(columnKey);
-                                }
-                            }
-                        });
-                        handle.classList.add("is-active");
-                        document.body.classList.add(
-                            "sales-table-interacting",
-                            "sales-column-resizing",
-                        );
-
-                        function resizeColumn(moveEvent) {
-                            view.widths[key] = Math.min(
-                                maximumWidth,
-                                Math.max(
-                                    minimumWidthFor(key),
-                                    Math.round(
-                                        startWidth
-                                        + moveEvent.clientX
-                                        - startX,
-                                    ),
-                                ),
-                            );
-                            if (!view.customWidths.includes(key)) {
-                                view.customWidths.push(key);
-                            }
-                            applyVisibilityAndWidths(true);
-                        }
-
-                        function finishResize() {
-                            suppressSortUntil = Date.now() + 350;
-                            handle.classList.remove("is-active");
-                            document.body.classList.remove(
-                                "sales-table-interacting",
-                                "sales-column-resizing",
-                            );
-                            saveView();
-                            window.removeEventListener(
-                                "pointermove",
-                                resizeColumn,
-                            );
-                            window.removeEventListener(
-                                "pointerup",
-                                finishResize,
-                            );
-                            window.removeEventListener(
-                                "pointercancel",
-                                finishResize,
-                            );
-                        }
-
-                        window.addEventListener(
-                            "pointermove",
-                            resizeColumn,
-                        );
-                        window.addEventListener(
-                            "pointerup",
-                            finishResize,
-                            {once: true},
-                        );
-                        window.addEventListener(
-                            "pointercancel",
-                            finishResize,
-                            {once: true},
-                        );
-                    },
-                );
-            });
-
-        let headerDrag = null;
-        salesTable
-            .querySelector("thead")
-            .addEventListener("pointerdown", (event) => {
-                if (
-                    event.button !== 0
-                    || event.target.closest(
-                        ".sales-column-resize-handle"
-                    )
-                ) {
-                    return;
-                }
-
-                const header = event.target.closest(
-                    "th[data-column-key]"
-                );
-
-                if (!header || header.hidden) {
-                    return;
-                }
-
-                headerDrag = {
-                    header,
-                    startX: event.clientX,
-                    dragging: false,
-                    target: null,
-                    after: false,
-                    preview: null,
-                };
-            });
-
-        window.addEventListener("pointermove", (event) => {
-            if (!headerDrag) {
-                return;
-            }
-
-            if (
-                !headerDrag.dragging
-                && Math.abs(event.clientX - headerDrag.startX) < 6
-            ) {
-                return;
-            }
-
-            if (!headerDrag.dragging) {
-                headerDrag.dragging = true;
-                document.body.classList.add(
-                    "sales-table-interacting"
-                );
-                headerDrag.header.classList.add("erp-column-dragging");
-                headerDrag.preview = document.createElement("div");
-                headerDrag.preview.className = "erp-column-drag-preview";
-                headerDrag.preview.textContent = headerDrag.header.textContent.trim();
-                document.body.appendChild(headerDrag.preview);
-            }
-            headerDrag.preview.style.left = event.clientX + 14 + "px";
-            headerDrag.preview.style.top = event.clientY + 14 + "px";
-            salesTable
-                .querySelectorAll(
-                    ".sales-drop-before, .sales-drop-after"
-                )
-                .forEach((header) => {
-                    header.classList.remove(
-                        "sales-drop-before",
-                        "sales-drop-after",
-                    );
-                });
-
-            const element = document.elementFromPoint(
-                event.clientX,
-                event.clientY,
-            );
-            const target = element
-                ? element.closest("th[data-column-key]")
-                : null;
-
-            if (
-                !target
-                || target === headerDrag.header
-                || target.hidden
-            ) {
-                headerDrag.target = null;
-                return;
-            }
-
-            const bounds = target.getBoundingClientRect();
-            headerDrag.target = target;
-            headerDrag.after =
-                event.clientX > bounds.left + bounds.width / 2;
-            target.classList.add(
-                headerDrag.after
-                    ? "sales-drop-after"
-                    : "sales-drop-before",
-            );
-        });
-
-        window.addEventListener("pointerup", () => {
-            if (!headerDrag) {
-                return;
-            }
-
-            if (headerDrag.dragging) {
-                suppressSortUntil = Date.now() + 350;
-
-                if (headerDrag.target) {
-                    moveColumn(
-                        headerDrag.header.dataset.columnKey,
-                        headerDrag.target.dataset.columnKey,
-                        headerDrag.after,
-                    );
-                }
-
-                salesTable
-                    .querySelectorAll(
-                        ".sales-drop-before, .sales-drop-after"
-                    )
-                    .forEach((header) => {
-                        header.classList.remove(
-                            "sales-drop-before",
-                            "sales-drop-after",
-                        );
-                    });
-                document.body.classList.remove(
-                    "sales-table-interacting"
-                );
-                headerDrag.header.classList.remove("erp-column-dragging");
-                if (headerDrag.preview) {
-                    headerDrag.preview.remove();
-                }
-            }
-
-            headerDrag = null;
-        });
-
-        salesTable.addEventListener(
-            "click",
-            (event) => {
-                if (Date.now() < suppressSortUntil) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                }
-            },
-            true,
-        );
 
         settingsTrigger.addEventListener("click", () => {
             if (settingsPopover.isOpen()) {
@@ -6138,7 +5744,7 @@
         window.salesColumnSettings = {
             key: settingsKey,
             getView: () => JSON.parse(JSON.stringify(view)),
-            getActualWidths: () => ({...actualWidths}),
+            getActualWidths: () => columnController.getActualWidths(),
             relayout: () => applyVisibilityAndWidths(true),
             reset: () => settingsReset.click(),
         };

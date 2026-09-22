@@ -108,7 +108,9 @@ class CompactModalLayoutTest(unittest.TestCase):
         self.assertIn("receipt-comment-field", form)
 
     def test_layout_uses_grid_without_scaling_or_global_font_shrinking(self):
-        compact_css = self.css.split("/* Compact mutation modals:", 1)[1]
+        compact_css = self.css.split("/* Compact mutation modals:", 1)[1].split(
+            "/* End compact mutation modals. */", 1
+        )[0]
         self.assertIn("@media (min-width: 768px)", compact_css)
         self.assertIn("repeat(12, minmax(0, 1fr))", compact_css)
         self.assertIn("repeat(3, minmax(0, 1fr))", compact_css)

@@ -576,7 +576,7 @@
     box-shadow: none !important;
 }
 
-.warehouse-products-table.erp-data-table thead th[data-column-key="actions"],
+.warehouse-products-table.erp-data-table thead th[data-system-column="actions"],
 .sales-table.erp-data-table thead th[data-system-column="actions"],
 .receipts-table.erp-data-table thead th[data-system-column="actions"] {
     background: #f3f6fa !important;
@@ -7152,7 +7152,7 @@ select.erp-control {
         grid-row: 5;
     }
 
-    .warehouse-products-table td[data-column-key="actions"] {
+    .warehouse-products-table td[data-system-column="actions"] {
         grid-column: 1 / 4;
         grid-row: 6;
         padding-top: 2px !important;
@@ -7162,7 +7162,7 @@ select.erp-control {
         display: block;
     }
 
-    .warehouse-products-table td[data-column-key="actions"] .row-actions {
+    .warehouse-products-table td[data-system-column="actions"] .row-actions {
         width: 100%;
         display: flex;
         align-items: center;
@@ -7170,13 +7170,13 @@ select.erp-control {
         gap: 6px;
     }
 
-    .warehouse-products-table td[data-column-key="actions"] .row-actions button {
+    .warehouse-products-table td[data-system-column="actions"] .row-actions button {
         width: 32px;
         min-width: 32px;
         min-height: 32px;
     }
 
-    .warehouse-products-table td[data-column-key="actions"] .row-actions form {
+    .warehouse-products-table td[data-system-column="actions"] .row-actions form {
         width: auto;
         margin: 0;
     }
@@ -8533,6 +8533,133 @@ select.erp-control {
     #receiptEditModal .receipt-card-media img {
         height: 96px;
     }
+}
+
+/* End compact mutation modals. */
+
+/* Products and sales use one final desktop table-header interaction contract. */
+:is(.warehouse-products-table, .sales-table).erp-data-table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+:is(.warehouse-products-table, .sales-table).erp-data-table thead th {
+    position: relative;
+    min-width: 76px;
+    height: 44px;
+    padding: 0 11px;
+    border: 0;
+    border-bottom: 1px solid #dce3eb;
+    border-radius: 0 !important;
+    background: #f3f6f9 !important;
+    background-image: none !important;
+    color: #27364a;
+    font-family: var(--erp-font-family);
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.2;
+    vertical-align: middle;
+    box-shadow: none !important;
+}
+
+:is(.warehouse-products-table .warehouse-sort-label, .sales-table .sales-sort-label) {
+    width: 100%;
+    height: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent !important;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    box-shadow: none !important;
+}
+
+:is(.warehouse-products-table .warehouse-sort-label, .sales-table .sales-sort-label):focus-visible {
+    outline: 2px solid #8eb1ff;
+    outline-offset: 2px;
+}
+
+:is(.warehouse-products-table, .sales-table).erp-data-table .erp-sort-arrow {
+    flex: 0 0 auto;
+    color: #58708f;
+    font-size: 13px;
+    opacity: 0;
+    transform: translateY(-1px);
+    transition: opacity 0.14s ease;
+}
+
+:is(.warehouse-products-table .warehouse-sort-label, .sales-table .sales-sort-label):is(:hover, :focus-visible, .is-active) .erp-sort-arrow {
+    opacity: 1;
+}
+
+.warehouse-products-table.erp-data-table .sales-column-resize-handle,
+.sales-table.erp-data-table .sales-column-resize-handle {
+    position: absolute;
+    z-index: 3;
+    top: 0;
+    right: -5px;
+    width: 10px;
+    height: 100%;
+    background: transparent;
+    cursor: col-resize;
+    touch-action: none;
+}
+
+:is(.warehouse-products-table, .sales-table).erp-data-table .sales-column-resize-handle::after {
+    position: absolute;
+    top: 9px;
+    bottom: 9px;
+    left: 4px;
+    width: 2px;
+    border-radius: 999px;
+    background: #cbd5e1;
+    content: "";
+    opacity: 0;
+    transition: background 0.14s ease, opacity 0.14s ease;
+}
+
+:is(.warehouse-products-table, .sales-table).erp-data-table th:hover .sales-column-resize-handle::after,
+:is(.warehouse-products-table, .sales-table).erp-data-table .sales-column-resize-handle:hover::after,
+:is(.warehouse-products-table, .sales-table).erp-data-table .sales-column-resize-handle.is-active::after {
+    background: #5f8fe9;
+    opacity: 1;
+}
+
+.warehouse-products-table.erp-data-table th.sales-drop-before::before,
+.warehouse-products-table.erp-data-table th.sales-drop-after::after,
+.sales-table.erp-data-table th.sales-drop-before::before,
+.sales-table.erp-data-table th.sales-drop-after::after {
+    position: absolute;
+    z-index: 4;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    border-radius: 3px;
+    background: #2563eb;
+    content: "";
+}
+
+:is(.warehouse-products-table, .sales-table).erp-data-table th.sales-drop-before::before {
+    left: -2px;
+}
+
+:is(.warehouse-products-table, .sales-table).erp-data-table th.sales-drop-after::after {
+    right: -2px;
+}
+
+body.sales-table-interacting {
+    cursor: grabbing;
+    user-select: none;
+}
+
+body.sales-column-resizing {
+    cursor: col-resize;
 }
 
 /* Keep the key stock and sale values aligned with their column labels. */

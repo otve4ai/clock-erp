@@ -897,63 +897,6 @@
             white-space: nowrap;
         }
 
-        .warehouse-column-resize-handle {
-            position: absolute;
-            z-index: 4;
-            top: 0;
-            right: -4px;
-            width: 9px;
-            height: 100%;
-            cursor: col-resize;
-            touch-action: none;
-        }
-
-        .warehouse-column-resize-handle::after {
-            position: absolute;
-            top: 22%;
-            right: 4px;
-            width: 1px;
-            height: 56%;
-            background: transparent;
-            content: "";
-        }
-
-        .warehouse-products-table th:hover .warehouse-column-resize-handle::after,
-        .warehouse-column-resize-handle.is-active::after,
-        body.warehouse-column-resizing .warehouse-column-resize-handle::after {
-            background: #2563eb;
-        }
-
-        .warehouse-products-table th.warehouse-drop-before::before,
-        .warehouse-products-table th.warehouse-drop-after::after {
-            position: absolute;
-            z-index: 5;
-            top: 0;
-            bottom: 0;
-            width: 3px;
-            border-radius: 3px;
-            background: #2563eb;
-            content: "";
-        }
-
-        .warehouse-products-table th.warehouse-drop-before::before {
-            left: -2px;
-        }
-
-        .warehouse-products-table th.warehouse-drop-after::after {
-            right: -2px;
-        }
-
-        body.warehouse-table-interacting,
-        body.warehouse-table-interacting * {
-            user-select: none !important;
-        }
-
-        body.warehouse-column-resizing,
-        body.warehouse-column-resizing * {
-            cursor: col-resize !important;
-        }
-
         .warehouse-products-table.warehouse-row-resize-ready tbody,
         .warehouse-products-table.warehouse-row-resize-ready tbody * {
             cursor: row-resize;
@@ -3552,8 +3495,8 @@
             text-align: center;
         }
 
-        .warehouse-products-table th[data-column-key="actions"],
-        .warehouse-products-table td[data-column-key="actions"] {
+        .warehouse-products-table th[data-system-column="actions"],
+        .warehouse-products-table td[data-system-column="actions"] {
             width: 82px;
             min-width: 82px;
             padding-right: 6px;
@@ -3561,13 +3504,13 @@
             text-align: center;
         }
 
-        .warehouse-products-table td[data-column-key="actions"] .row-actions {
+        .warehouse-products-table td[data-system-column="actions"] .row-actions {
             justify-content: center;
         }
 
         @media (min-width: 768px) {
-            .warehouse-products-table th[data-column-key="actions"],
-            .warehouse-products-table td[data-column-key="actions"] {
+            .warehouse-products-table th[data-system-column="actions"],
+            .warehouse-products-table td[data-system-column="actions"] {
                 position: sticky;
                 right: 0;
                 z-index: 5;
@@ -3577,7 +3520,7 @@
                     -10px 0 16px -18px rgba(15, 23, 42, 0.7);
             }
 
-            .warehouse-products-table th[data-column-key="actions"] {
+            .warehouse-products-table th[data-system-column="actions"] {
                 z-index: 7;
                 background: var(--erp-surface-muted, #f8fafc);
             }
@@ -4847,7 +4790,7 @@
                             <col class="warehouse-col-created" data-column-key="created">
                             <col class="warehouse-col-cell" data-column-key="cell">
                             {% if out_of_stock %}<col data-column-key="platform_checks">{% endif %}
-                            <col class="warehouse-col-actions" data-column-key="actions">
+                            <col class="warehouse-col-actions" data-system-column="actions">
                         </colgroup>
                         <thead>
                             <tr>
@@ -4974,7 +4917,7 @@
 
                                 {% if out_of_stock %}<th data-column-key="platform_checks">Проверка отключения</th>{% endif %}
 
-                                <th data-column-key="actions">Действия</th>
+                                <th data-system-column="actions">Действия</th>
                             </tr>
                         </thead>
 
@@ -5060,7 +5003,7 @@
                                     </td>
                                     {% endif %}
 
-                                    <td data-column-key="actions">
+                                    <td data-system-column="actions">
                                         {% if item.id %}
                                             <details class="mobile-erp-only mobile-erp-card-details warehouse-mobile-details">
                                                 <summary>Подробнее</summary>
@@ -6978,9 +6921,7 @@
                     currentPagination.replaceWith(nextPagination);
                 }
                 const view = readWarehouseTableView();
-                view.order = applyWarehouseColumnOrder(currentTable, view.order);
-                view.hidden = applyWarehouseColumnVisibility(currentTable, view.hidden);
-                applyWarehouseTableWidths(currentTable, view.widths);
+                window.warehouseNativeColumnController?.applyView(true);
                 currentTable.querySelectorAll("tbody tr").forEach(function(row) {
                     const savedHeight = Number(view.rowHeights[row.dataset.productId]);
                     if (savedHeight) {
@@ -7003,7 +6944,7 @@
             if (table && !canReuseTable) {
                 delete table.dataset.viewReady;
                 table.querySelectorAll(
-                    ".warehouse-column-resize-handle"
+                    ".sales-column-resize-handle"
                 ).forEach(function(handle) {
                     handle.remove();
                 });
@@ -7909,59 +7850,86 @@
 
 </script>
 
-
+    <script src="{{ url_for('static', filename='js/erp-table-layout.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/erp-native-table-columns.js') }}"></script>
     <script>
         const warehouseTableLegacyStorageKey = "vechasu.warehouse.table-view.v1";
-        const warehouseTableStorageKey = "vechasu.warehouse.table-view.v2";
+        const warehouseTablePreviousStorageKey = "vechasu.warehouse.table-view.v2";
+        const warehouseTableStorageKey = "vechasu.warehouse.table-view.v3";
         const warehouseTableDefaults = {
-            order: ["photo", "name", "stock", "price", "article", "brand", "category", "created", "model", "cell", "platform_checks", "actions"],
-            widths: { photo: 64, name: 256, model: 120, price: 80, article: 96, brand: 95, category: 150, stock: 104, created: 106, cell: 75, platform_checks: 210, actions: 82 },
+            order: ["photo", "name", "stock", "price", "article", "brand", "category", "created", "model", "cell", "platform_checks"],
+            widths: { photo: 64, name: 256, model: 120, price: 80, article: 96, brand: 95, category: 150, stock: 104, created: 106, cell: 75, platform_checks: 210 },
             hidden: ["model", "cell"]
         };
-        const warehouseTableRequiredColumns = ["photo", "name", "actions"];
+        const warehouseTableRequiredColumns = ["photo", "name"];
+        const warehouseTablePinnedColumns = ["photo", "name"];
         const warehouseTableColumnLabels = {
             photo: "Фото", name: "Название", model: "Модель", price: "Цена", article: "Артикул",
             brand: "Бренд", category: "Категория", stock: "Остаток",
-            created: "Добавлено", cell: "Ячейка", platform_checks: "Проверка отключения", actions: "Действия"
+            created: "Добавлено", cell: "Ячейка", platform_checks: "Проверка отключения"
         };
         const warehouseTableMinimumWidths = {
             photo: 60, name: 196, model: 90, price: 72, article: 86, brand: 84,
-            category: 138, stock: 98, created: 96, cell: 68, platform_checks: 180, actions: 82
+            category: 138, stock: 98, created: 96, cell: 68, platform_checks: 180
         };
-        const warehouseTableMaximumWidths = {
-            photo: 160, name: 520, model: 300, price: 180, article: 240, brand: 260,
-            category: 360, stock: 200, created: 220, cell: 180, platform_checks: 360, actions: 160
+        const warehouseTableGrowWeights = {
+            photo: 0.2, name: 5, model: 1.5, price: 0.25, article: 2, brand: 2,
+            category: 2.5, stock: 0.2, created: 0.5, cell: 0.5, platform_checks: 2
         };
+        const warehouseTableMaximumWidth = 520;
+        const warehouseTableActionWidth = 82;
         let warehouseTableSuppressSortUntil = 0;
 
         function readWarehouseTableView() {
             try {
                 let rawSaved = localStorage.getItem(warehouseTableStorageKey);
-                let migrated = false;
                 if (!rawSaved) {
-                    rawSaved = localStorage.getItem(warehouseTableLegacyStorageKey);
-                    migrated = Boolean(rawSaved);
+                    rawSaved = localStorage.getItem(warehouseTablePreviousStorageKey)
+                        || localStorage.getItem(warehouseTableLegacyStorageKey);
                 }
                 const saved = JSON.parse(rawSaved || "{}");
+                const savedWidths = saved.widths && typeof saved.widths === "object"
+                    ? saved.widths
+                    : {};
+                const knownSavedWidths = {};
+                warehouseTableDefaults.order.forEach(function(key) {
+                    if (Object.hasOwn(savedWidths, key)) {
+                        knownSavedWidths[key] = savedWidths[key];
+                    }
+                });
                 const view = {
+                    version: 3,
                     order: Array.isArray(saved.order) ? saved.order : warehouseTableDefaults.order.slice(),
-                    widths: Object.assign({}, warehouseTableDefaults.widths, saved.widths || {}),
+                    widths: Object.assign({}, warehouseTableDefaults.widths, knownSavedWidths),
+                    customWidths: Array.isArray(saved.customWidths)
+                        ? saved.customWidths.filter((key, index, values) => (
+                            warehouseTableDefaults.order.includes(key)
+                            && values.indexOf(key) === index
+                        ))
+                        : Object.keys(savedWidths).filter((key) => (
+                            warehouseTableDefaults.order.includes(key)
+                            && Number.isFinite(Number(savedWidths[key]))
+                            && Number(savedWidths[key]) > 0
+                            && Number(savedWidths[key]) !== warehouseTableDefaults.widths[key]
+                        )),
                     rowHeights: saved.rowHeights && typeof saved.rowHeights === "object"
                         ? saved.rowHeights
                         : {},
                     hidden: Array.isArray(saved.hidden)
-                        ? saved.hidden.filter(function(key) {
+                        ? saved.hidden.filter(function(key, index, values) {
                             return warehouseTableDefaults.order.includes(key)
-                                && !warehouseTableRequiredColumns.includes(key);
+                                && !warehouseTableRequiredColumns.includes(key)
+                                && values.indexOf(key) === index;
                         })
                         : warehouseTableDefaults.hidden.slice()
                 };
-                if (migrated) saveWarehouseTableView(view);
                 return view;
             } catch (error) {
                 return {
+                    version: 3,
                     order: warehouseTableDefaults.order.slice(),
                     widths: Object.assign({}, warehouseTableDefaults.widths),
+                    customWidths: [],
                     rowHeights: {},
                     hidden: warehouseTableDefaults.hidden.slice()
                 };
@@ -7972,14 +7940,15 @@
             localStorage.setItem(warehouseTableStorageKey, JSON.stringify(view));
         }
 
-        function resetWarehouseTableView(table, view) {
+        function resetWarehouseTableView(table, view, columnController) {
             view.order = warehouseTableDefaults.order.slice();
             view.widths = Object.assign({}, warehouseTableDefaults.widths);
+            view.customWidths = [];
             view.rowHeights = {};
             view.hidden = warehouseTableDefaults.hidden.slice();
-            applyWarehouseColumnOrder(table, view.order);
-            applyWarehouseColumnVisibility(table, view.hidden);
-            applyWarehouseTableWidths(table, view.widths);
+            view.order = normalizeWarehouseColumnOrder(table, view.order);
+            view.hidden = sanitizeWarehouseHidden(view.hidden);
+            columnController.applyView(true);
             table.querySelectorAll("tbody tr").forEach(function(row) {
                 row.style.removeProperty("--warehouse-row-height");
             });
@@ -7988,63 +7957,54 @@
                 view
             );
             localStorage.removeItem(warehouseTableStorageKey);
+            localStorage.removeItem(warehouseTablePreviousStorageKey);
             localStorage.removeItem(warehouseTableLegacyStorageKey);
         }
 
-        function applyWarehouseColumnOrder(table, order) {
-            const safeOrder = order.filter((key) => warehouseTableDefaults.order.includes(key));
+        function normalizeWarehouseColumnOrder(table, order) {
+            const availableColumns = Array.from(
+                table.querySelectorAll("thead th[data-column-key]")
+            ).map((header) => header.dataset.columnKey);
+            const normalizedOrder = [];
+            order.forEach(function(key) {
+                if (
+                    availableColumns.includes(key)
+                    && !normalizedOrder.includes(key)
+                ) {
+                    normalizedOrder.push(key);
+                }
+            });
             warehouseTableDefaults.order.forEach(function(key) {
-                if (!safeOrder.includes(key)) safeOrder.push(key);
+                if (availableColumns.includes(key) && !normalizedOrder.includes(key)) {
+                    normalizedOrder.push(key);
+                }
             });
-            table.querySelectorAll("tr").forEach(function(row) {
-                safeOrder.forEach(function(key) {
-                    const cell = row.querySelector('[data-column-key="' + key + '"]');
-                    if (cell) row.appendChild(cell);
-                });
-            });
-            const colgroup = table.querySelector("colgroup");
-            if (colgroup) {
-                safeOrder.forEach(function(key) {
-                    const column = colgroup.querySelector('[data-column-key="' + key + '"]');
-                    if (column) colgroup.appendChild(column);
-                });
-            }
-            return safeOrder;
+            return warehouseTablePinnedColumns
+                .filter((key) => normalizedOrder.includes(key))
+                .concat(normalizedOrder.filter((key) => !warehouseTablePinnedColumns.includes(key)));
         }
 
-        function applyWarehouseTableWidths(table, widths) {
-            const renderedWidths = {};
-            warehouseTableDefaults.order.forEach(function(key) {
-                const width = Math.max(
-                    warehouseTableMinimumWidths[key],
-                    Math.min(
-                        warehouseTableMaximumWidths[key],
-                        Number(widths[key]) || warehouseTableDefaults.widths[key]
-                    )
-                );
-                widths[key] = width;
-                renderedWidths[key] = width;
-            });
-            let renderedTotal = 0;
-            warehouseTableDefaults.order.forEach(function(key) {
-                const column = table.querySelector('col[data-column-key="' + key + '"]');
-                if (column) column.style.width = renderedWidths[key] + "px";
-                if (!column || !column.hidden) renderedTotal += renderedWidths[key];
-            });
-            table.style.width = renderedTotal + "px";
-            table.style.minWidth = renderedTotal + "px";
-            syncWarehouseTableScrollbars(table);
-        }
-
-        function applyWarehouseColumnVisibility(table, hidden) {
-            const safeHidden = hidden.filter(function(key) {
+        function sanitizeWarehouseHidden(hidden) {
+            return hidden.filter(function(key) {
                 return warehouseTableDefaults.order.includes(key)
                     && !warehouseTableRequiredColumns.includes(key);
             });
-            table.querySelectorAll("[data-column-key]").forEach(function(element) {
-                element.hidden = safeHidden.includes(element.dataset.columnKey);
+        }
+
+        function sanitizeWarehouseWidths(widths) {
+            warehouseTableDefaults.order.forEach(function(key) {
+                const numeric = Number(widths[key]);
+                widths[key] = Math.max(
+                    warehouseTableMinimumWidths[key],
+                    Math.min(
+                        warehouseTableMaximumWidth,
+                        Number.isFinite(numeric) && numeric > 0
+                            ? numeric
+                            : warehouseTableDefaults.widths[key]
+                    )
+                );
             });
-            return safeHidden;
+            return widths;
         }
 
         function syncWarehouseTableScrollbars(table) {
@@ -8100,7 +8060,12 @@
             });
         }
 
-        function initializeWarehouseColumnSettings(table, view, viewSignal) {
+        function initializeWarehouseColumnSettings(
+            table,
+            view,
+            viewSignal,
+            columnController
+        ) {
             const trigger = document.getElementById(
                 "warehouseColumnSettingsTrigger"
             );
@@ -8110,7 +8075,7 @@
             const reset = document.getElementById("warehouseTableReset");
             if (!trigger || !panel || !list || !close || !reset) return;
             list.replaceChildren();
-            warehouseTableDefaults.order.forEach(function(key) {
+            view.order.forEach(function(key) {
                 const label = document.createElement("label");
                 label.className = "warehouse-column-settings-option";
                 const input = document.createElement("input");
@@ -8119,7 +8084,7 @@
                 input.checked = !view.hidden.includes(key);
                 input.disabled = warehouseTableRequiredColumns.includes(key);
                 input.addEventListener("change", function() {
-                    const optionalVisible = warehouseTableDefaults.order.filter(function(columnKey) {
+                    const optionalVisible = view.order.filter(function(columnKey) {
                         return !warehouseTableRequiredColumns.includes(columnKey)
                             && !view.hidden.includes(columnKey);
                     });
@@ -8133,8 +8098,8 @@
                     view.hidden = input.checked
                         ? view.hidden.filter((columnKey) => columnKey !== key)
                         : view.hidden.concat(key);
-                    view.hidden = applyWarehouseColumnVisibility(table, view.hidden);
-                    applyWarehouseTableWidths(table, view.widths);
+                    view.hidden = sanitizeWarehouseHidden(view.hidden);
+                    columnController.applyLayout(true);
                     saveWarehouseTableView(view);
                 }, { signal: viewSignal });
                 label.appendChild(input);
@@ -8144,7 +8109,7 @@
                 list.appendChild(label);
             });
             reset.addEventListener("click", function() {
-                resetWarehouseTableView(table, view);
+                resetWarehouseTableView(table, view, columnController);
             }, { signal: viewSignal });
             function closePanel(returnFocus) {
                 panel.hidden = true;
@@ -8189,9 +8154,41 @@
             const viewSignal = window.warehouseTableViewController.signal;
             table.dataset.viewReady = "1";
             const view = readWarehouseTableView();
-            view.order = applyWarehouseColumnOrder(table, view.order);
-            view.hidden = applyWarehouseColumnVisibility(table, view.hidden);
-            applyWarehouseTableWidths(table, view.widths);
+            view.order = normalizeWarehouseColumnOrder(table, view.order);
+            view.hidden = sanitizeWarehouseHidden(view.hidden);
+            view.widths = sanitizeWarehouseWidths(view.widths);
+            const layoutResizeTarget = document.getElementById(
+                "warehouseTableScrollBody"
+            );
+            const columnController = window.ErpNativeTableColumns.create({
+                table: table,
+                view: view,
+                container: layoutResizeTarget,
+                resizeTarget: layoutResizeTarget,
+                minimumWidths: warehouseTableMinimumWidths,
+                minimumWidthFor: function(key) {
+                    return warehouseTableMinimumWidths[key];
+                },
+                growWeights: warehouseTableGrowWeights,
+                maximumWidth: warehouseTableMaximumWidth,
+                actionWidth: warehouseTableActionWidth,
+                normalizeOrder: function(order) {
+                    return normalizeWarehouseColumnOrder(table, order);
+                },
+                signal: viewSignal,
+                onLayout: function() {
+                    syncWarehouseTableScrollbars(table);
+                },
+                onSuppressSort: function(until) {
+                    warehouseTableSuppressSortUntil = until;
+                },
+                onChange: function() {
+                    saveWarehouseTableView(view);
+                }
+            });
+            window.warehouseNativeColumnController = columnController;
+            columnController.applyView(true);
+            saveWarehouseTableView(view);
             table.querySelectorAll("tbody tr").forEach(function(row) {
                 const savedHeight = Number(view.rowHeights[row.dataset.productId]);
                 if (savedHeight) {
@@ -8204,127 +8201,20 @@
             document.documentElement.classList.add(
                 "warehouse-table-ready"
             );
-            initializeWarehouseColumnSettings(table, view, viewSignal);
+            initializeWarehouseColumnSettings(
+                table,
+                view,
+                viewSignal,
+                columnController
+            );
             initializeWarehouseTableScrollbars(table, viewSignal);
-            window.addEventListener("resize", function() {
-                applyWarehouseTableWidths(table, view.widths);
-            }, { signal: viewSignal });
-
             window.matchMedia("(min-width: 768px)").addEventListener(
                 "change",
                 function() {
-                    applyWarehouseColumnVisibility(table, view.hidden);
-                    applyWarehouseTableWidths(table, view.widths);
+                    columnController.applyLayout(true);
                 },
                 { signal: viewSignal }
             );
-
-            table.querySelectorAll("thead th[data-column-key]").forEach(function(header) {
-                const handle = document.createElement("span");
-                handle.className = "warehouse-column-resize-handle";
-                handle.setAttribute("aria-hidden", "true");
-                header.appendChild(handle);
-                handle.addEventListener("pointerdown", function(event) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    const key = header.dataset.columnKey;
-                    const startX = event.clientX;
-                    const startWidth = header.getBoundingClientRect().width;
-                    handle.classList.add("is-active");
-                    document.body.classList.add("warehouse-table-interacting", "warehouse-column-resizing");
-                    function resizeColumn(moveEvent) {
-                        view.widths[key] = Math.max(
-                            warehouseTableMinimumWidths[key],
-                            Math.min(
-                                warehouseTableMaximumWidths[key],
-                                Math.round(startWidth + moveEvent.clientX - startX)
-                            )
-                        );
-                        applyWarehouseTableWidths(table, view.widths);
-                    }
-                    function finishResize() {
-                        warehouseTableSuppressSortUntil = Date.now() + 350;
-                        handle.classList.remove("is-active");
-                        document.body.classList.remove("warehouse-table-interacting", "warehouse-column-resizing");
-                        saveWarehouseTableView(view);
-                        window.removeEventListener("pointermove", resizeColumn);
-                        window.removeEventListener("pointerup", finishResize);
-                        window.removeEventListener("pointercancel", finishResize);
-                    }
-                    window.addEventListener("pointermove", resizeColumn, { signal: viewSignal });
-                    window.addEventListener("pointerup", finishResize, { once: true, signal: viewSignal });
-                    window.addEventListener("pointercancel", finishResize, { once: true, signal: viewSignal });
-                });
-            });
-
-            let dragState = null;
-            table.querySelector("thead").addEventListener("pointerdown", function(event) {
-                if (event.button !== 0 || event.target.closest("input, button, form, label, .warehouse-column-resize-handle")) return;
-                const header = event.target.closest("th[data-column-key]");
-                if (header) {
-                    dragState = { header: header, startX: event.clientX, startY: event.clientY, dragging: false, target: null, after: false, preview: null };
-                }
-            });
-            window.addEventListener("pointermove", function(event) {
-                if (!dragState) return;
-                if (!dragState.dragging && Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY) < 6) return;
-                if (!dragState.dragging) {
-                    dragState.dragging = true;
-                    document.body.classList.add("warehouse-table-interacting");
-                    dragState.header.classList.add("erp-column-dragging");
-                    dragState.preview = document.createElement("div");
-                    dragState.preview.className = "erp-column-drag-preview";
-                    dragState.preview.textContent = dragState.header.textContent.trim();
-                    document.body.appendChild(dragState.preview);
-                }
-                event.preventDefault();
-                dragState.preview.style.left = event.clientX + 14 + "px";
-                dragState.preview.style.top = event.clientY + 14 + "px";
-                table.querySelectorAll(".warehouse-drop-before, .warehouse-drop-after").forEach(function(header) {
-                    header.classList.remove("warehouse-drop-before", "warehouse-drop-after");
-                });
-                const element = document.elementFromPoint(event.clientX, event.clientY);
-                const target = element ? element.closest("th[data-column-key]") : null;
-                if (!target || target.closest("table") !== table || target === dragState.header || target.hidden) {
-                    dragState.target = null;
-                    return;
-                }
-                const rect = target.getBoundingClientRect();
-                dragState.target = target;
-                dragState.after = event.clientX > rect.left + rect.width / 2;
-                target.classList.add(dragState.after ? "warehouse-drop-after" : "warehouse-drop-before");
-            }, { signal: viewSignal });
-            function finishColumnDrag() {
-                if (!dragState) return;
-                if (dragState.dragging) {
-                    warehouseTableSuppressSortUntil = Date.now() + 350;
-                    const sourceKey = dragState.header.dataset.columnKey;
-                    const targetKey = dragState.target ? dragState.target.dataset.columnKey : null;
-                    if (targetKey) {
-                        const order = view.order.filter((key) => key !== sourceKey);
-                        let targetIndex = order.indexOf(targetKey);
-                        if (dragState.after) targetIndex += 1;
-                        order.splice(targetIndex, 0, sourceKey);
-                        view.order = applyWarehouseColumnOrder(table, order);
-                        saveWarehouseTableView(view);
-                    }
-                    table.querySelectorAll(".warehouse-drop-before, .warehouse-drop-after").forEach(function(header) {
-                        header.classList.remove("warehouse-drop-before", "warehouse-drop-after");
-                    });
-                    document.body.classList.remove("warehouse-table-interacting");
-                    dragState.header.classList.remove("erp-column-dragging");
-                    if (dragState.preview) dragState.preview.remove();
-                }
-                dragState = null;
-            }
-            window.addEventListener("pointerup", finishColumnDrag, { signal: viewSignal });
-            window.addEventListener("pointercancel", finishColumnDrag, { signal: viewSignal });
-            table.addEventListener("click", function(event) {
-                if (Date.now() < warehouseTableSuppressSortUntil) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                }
-            }, true);
 
             let rowResizeState = null;
             const tableBody = table.querySelector("tbody");
@@ -9766,6 +9656,7 @@
             try {
                 if (sessionStorage.getItem("warehouseTableE2ePhase") !== "verify") {
                     localStorage.removeItem(warehouseTableStorageKey);
+                    localStorage.removeItem(warehouseTablePreviousStorageKey);
                     localStorage.setItem(
                         warehouseTableLegacyStorageKey,
                         JSON.stringify({
@@ -9786,14 +9677,15 @@
                     localStorage.getItem(warehouseTableStorageKey) || "{}"
                 );
                 result.migration = (
-                    migrated.order[0] === "name"
+                    migrated.order[0] === "photo"
+                    && migrated.order[1] === "name"
                     && migrated.widths.name === 500
                     && migrated.rowHeights["1001"] === 88
-                    && table.querySelector("thead th").dataset.columnKey === "name"
+                    && table.querySelector("thead th").dataset.columnKey === "photo"
                 );
                 result.sidebarIsolation = (
                     localStorage.getItem("ttt-erp-sidebar-collapsed") === "1"
-                    && migrated.order[0] === "name"
+                    && migrated.order[0] === "photo"
                 );
                 result.photoFallback = Boolean(
                     table.querySelector(".warehouse-product-thumb")
@@ -9804,8 +9696,9 @@
                     && document.getElementById("warehouseMobileSort")
                 );
                 result.orderPersistence = (
-                    migrated.order[0] === "name"
-                    && table.querySelector("thead th").dataset.columnKey === "name"
+                    migrated.order[0] === "photo"
+                    && migrated.order[1] === "name"
+                    && table.querySelector("thead th").dataset.columnKey === "photo"
                 );
                 result.viewport = (
                     document.documentElement.clientWidth >= 380
@@ -9849,7 +9742,7 @@
 
                 const nameHeader = table.querySelector('th[data-column-key="name"]');
                 const resizeHandle = nameHeader.querySelector(
-                    ".warehouse-column-resize-handle"
+                    ".sales-column-resize-handle"
                 );
                 resizeHandle.dispatchEvent(new PointerEvent("pointerdown", {
                     bubbles: true, button: 0, clientX: 100
@@ -9888,20 +9781,21 @@
                             : priceHeader.hidden
                     )
                 );
-                result.mandatoryColumns = ["photo", "name", "actions"].every(
+                result.mandatoryColumns = ["photo", "name"].every(
                     (key) => settingsPanel.querySelector(
                         'input[data-column-key="' + key + '"]'
                     ).disabled
-                );
+                ) && !settingsPanel.querySelector('input[data-column-key="actions"]');
 
                 document.getElementById("warehouseTableReset").click();
                 result.reset = (
                     localStorage.getItem(warehouseTableStorageKey) === null
+                    && localStorage.getItem(warehouseTablePreviousStorageKey) === null
                     && localStorage.getItem(warehouseTableLegacyStorageKey) === null
                     && table.querySelector("thead th").dataset.columnKey === "photo"
-                    && table.querySelector(
+                    && Number.parseFloat(table.querySelector(
                         'col[data-column-key="name"]'
-                    ).style.width === warehouseTableDefaults.widths.name + "px"
+                    ).style.width) >= warehouseTableMinimumWidths.name
                     && !table.querySelector(
                         'th[data-column-key="price"]'
                     ).hidden

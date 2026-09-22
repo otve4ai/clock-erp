@@ -58,8 +58,11 @@ combobox: доступные значения загружаются теми ж
 
 ## Таблицы и пагинация
 
-- товары, продажи и приходы используют `.erp-data-table`, но собственные
-  колонки, sort whitelist, column settings и client scripts;
+- товары и продажи используют `.erp-data-table` и единый
+  `erp-native-table-columns.js` для порядка, resize/drag, вычисления ширин,
+  relayout и фиксированной action-column, но сохраняют собственные колонки,
+  storage key, sort whitelist и настройки видимости;
+- приходы используют `.erp-data-table` со своим column controller;
 - ремонты имеют desktop table и отдельные mobile cards;
 - общий `_pagination.html` показывает диапазон, страницы, предыдущую/следующую
   ссылку и выбор размера с сохранением остальных query-параметров;
