@@ -64,6 +64,18 @@ class SettingsDesignSystemContractTest(unittest.TestCase):
         self.assertIn('"ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"', theme_script)
         self.assertIn("applyTheme(nextOption.dataset.themeOption)", theme_script)
 
+    def test_dark_table_contrast_is_scoped_away_from_classic_theme(self):
+        themes_css = self.source("app/static/css/themes.css")
+        contrast_contract = themes_css.split(
+            "Keep dense product and sales tables readable", 1
+        )[1].split("html[data-theme] tbody tr.receipt-row-error", 1)[0]
+        self.assertIn('html[data-theme="dark"]', contrast_contract)
+        self.assertIn(".warehouse-products-table.erp-data-table", contrast_contract)
+        self.assertIn(".sales-table.erp-data-table", contrast_contract)
+        self.assertIn("color: var(--theme-text) !important", contrast_contract)
+        self.assertIn("color: var(--theme-text-muted) !important", contrast_contract)
+        self.assertNotIn('html[data-theme="classic"]', contrast_contract)
+
     def test_save_states_errors_and_double_submit_guard_are_explicit(self):
         script = self.source("app/static/js/settings.js")
         for marker in (
