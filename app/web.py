@@ -6566,7 +6566,8 @@ def warehouse_edit_product():
     brand_id = request.form.get("brand_id", "").strip() or None
     category_id = request.form.get("category_id", "").strip() or None
     cell = request.form.get("cell", "").strip()
-    stock = request.form.get("stock", "").strip()
+    stock = request.form.get("stock")
+    stock = stock.strip() if stock is not None else None
     stock_reason = request.form.get("stock_reason", "").strip()
 
     if not product_id:
@@ -6574,6 +6575,9 @@ def warehouse_edit_product():
 
     if not name:
         return edit_redirect("error", "Название товара обязательно")
+
+    if stock is not None and not _manual_product_stock_edit_allowed():
+        abort(403)
 
     try:
         ExcelProductCatalog().update_product(
@@ -17249,6 +17253,12 @@ def _product_force_delete_allowed():
     return str(user.get("role") or "").strip() == "admin"
 
 
+def _manual_product_stock_edit_allowed():
+    if not auth_is_enabled():
+        return True
+    return _product_force_delete_allowed()
+
+
 def _product_force_delete_requested(payload):
     return str((payload or {}).get("force") or "").strip().lower() in {
         "1", "true", "yes", "on",
@@ -18381,6 +18391,7 @@ NAVIGATION_DEFINITIONS = [
         "key": "journal",
         "label": "Журнал",
         "description": "История изменений ERP.",
+        "roles": ("admin",),
         "icon": "journal",
         "href": "/app/journal",
         "mobile_href": "/app/journal",
@@ -18459,6 +18470,7 @@ NAVIGATION_DEFINITIONS = [
         "key": "team",
         "label": "Команда",
         "description": "Сотрудники и присутствие в ERP.",
+        "roles": ("admin",),
         "icon": "team",
         "href": "/app/team",
         "mobile_href": "/app/team",
@@ -18749,7 +18761,8 @@ def inject_sidebar_navigation():
     ):
         return {"sms_permissions": sms_permissions()}  # Keep card permissions; the shell remains mounted.
     team = []
-    if current_auth_user():
+    user = current_auth_user() or {}
+    if user and user.get("role") == "admin":
         try:
             team = _team_presence_now()
         except (MigrationRequiredError, sqlite3.Error):
@@ -18793,6 +18806,11 @@ def _team_presence_now(now=None):
             user["current_section"] = str(session.get("current_section") or "")
             break
     return users
+
+
+def _require_admin_section():
+    if auth_is_enabled() and (current_auth_user() or {}).get("role") != "admin":
+        abort(403)
 
 
 @app.before_request
@@ -19417,6 +19435,7 @@ def api_team_delete_user(user_id):
 
 @app.post("/api/v1/presence/heartbeat")
 def presence_heartbeat():
+    _require_admin_section()
     payload = request.get_json(silent=True) or {}
     requested = str(payload.get("section") or "")
     if requested in SECTION_LABELS.values():
@@ -19776,6 +19795,7 @@ def journal_query_arguments():
 @app.route("/journal")
 @app.route("/app/journal")
 def journal_page():
+    _require_admin_section()
     journal = AuditJournal()
     filters = journal_query_arguments()
     listing = journal.list_events(**filters, limit=30)
@@ -19793,6 +19813,7 @@ def journal_page():
 @app.route("/api/journal")
 @app.route("/api/v1/journal")
 def api_journal_collection():
+    _require_admin_section()
     filters = journal_query_arguments()
     journal = AuditJournal()
     listing = journal.list_events(**filters, limit=30)
@@ -19807,6 +19828,7 @@ def api_journal_collection():
 @app.route("/api/journal/<int:event_id>")
 @app.route("/api/v1/journal/<int:event_id>")
 def api_journal_event(event_id):
+    _require_admin_section()
     journal = AuditJournal()
     event = journal.get_event(event_id)
     if event is None:
@@ -20539,6 +20561,12 @@ def api_product_resource(product_id):
                 "Переданы неизвестные поля.",
                 422,
                 {"payload": sorted(unknown_fields)},
+            )
+        if "stock" in payload and not _manual_product_stock_edit_allowed():
+            return api_error(
+                "PRODUCT_STOCK_PERMISSION_DENIED",
+                "Остаток изменяется через приход, расход или инвентаризацию.",
+                403,
             )
         if not payload and image_action == "keep":
             return api_error(

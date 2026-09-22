@@ -5540,7 +5540,8 @@
                 <div class="product-detail-label">Остаток</div>
                 <div id="detailStock" class="product-detail-value">—</div>
                 <div id="bundleAvailability" role="status"></div>
-                <input id="editStock" class="product-detail-input" type="number" min="0" step="1" name="stock" aria-label="Остаток товара" required>
+                <input id="editStock" class="product-detail-input" type="number" min="0" step="1" aria-label="Остаток товара" required
+                    {% if current_user and current_user.role != "admin" %}readonly aria-readonly="true"{% else %}name="stock"{% endif %}>
             </div>
 
             <div class="product-detail-card">
