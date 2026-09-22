@@ -54,6 +54,13 @@ class InventoryScopeComboboxUiTest(unittest.TestCase):
         self.assertIn("margin-left: auto", self.styles)
         self.assertIn("0 ед.", (ROOT / "tests/fixtures/inventory_scope_combobox_e2e.html").read_text(encoding="utf-8"))
 
+    def test_inventory_scope_shows_positions_next_to_stock(self):
+        self.assertIn('data-catalog-option-count="positions-and-stock"', self.template)
+        self.assertIn("option_count_mode='positions_and_stock'", self.template)
+        self.assertIn('optionCountMode === "positions-and-stock"', self.script)
+        self.assertIn('item.product_count || 0', self.script)
+        self.assertIn("поз. ·", self.component)
+
 
 if __name__ == "__main__":
     unittest.main()

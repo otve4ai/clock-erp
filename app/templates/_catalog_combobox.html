@@ -1,4 +1,4 @@
-{% macro render_catalog_combobox(component_id, input_name, options, selected_value="", include_all=false, item_label="значение", all_label="Все", disabled=false, prefix_search=true, empty_label="Ничего не найдено", component_class="", clear_selection_on_search_clear=false, input_id="", search_enabled=true, form_id="", action_kind="", action_label="", all_count=none, shared_catalog_kind="", selected_id="", id_input_name="", selected_label="", selected_item=none, search_placeholder="", floating_layer=false, dropdown_max_height=340, required=false) %}
+{% macro render_catalog_combobox(component_id, input_name, options, selected_value="", include_all=false, item_label="значение", all_label="Все", disabled=false, prefix_search=true, empty_label="Ничего не найдено", component_class="", clear_selection_on_search_clear=false, input_id="", search_enabled=true, form_id="", action_kind="", action_label="", all_count=none, shared_catalog_kind="", selected_id="", id_input_name="", selected_label="", selected_item=none, search_placeholder="", floating_layer=false, dropdown_max_height=340, required=false, option_count_mode="stock") %}
     <div
         id="{{ component_id }}"
         class="brand-combobox{% if component_class %} {{ component_class }}{% endif %}"
@@ -113,7 +113,11 @@
                 {% endif %}
                 {% for option in options %}
                     {% set option_value = option.value|default(option.name) %}
-                    {% set option_stat = (option.stock_display ~ ' ед.') if option.stock_display is defined else option.count %}
+                    {% if option_count_mode == 'positions_and_stock' and option.product_count is defined %}
+                        {% set option_stat = option.product_count ~ ' поз. · ' ~ option.stock_display ~ ' ед.' %}
+                    {% else %}
+                        {% set option_stat = (option.stock_display ~ ' ед.') if option.stock_display is defined else option.count %}
+                    {% endif %}
                     <button
                         class="brand-combobox-option{% if selected_value == option_value %} active{% endif %}"
                         type="button"

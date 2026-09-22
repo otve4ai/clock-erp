@@ -157,7 +157,6 @@ class BrandInventory:
     def _snapshot_products(connection, scope):
         where = [
             "p.active = 1", "p.brand_id = ?",
-            "(" + PHYSICAL_STOCK_SQL + " > 0 OR EXISTS(SELECT 1 FROM erp_component_inventory ci WHERE ci.product_id=p.id))",
             "NOT EXISTS(SELECT 1 FROM erp_product_bundles b WHERE b.product_id=p.id)",
         ]
         parameters = [int(scope["brand"]["id"])]
