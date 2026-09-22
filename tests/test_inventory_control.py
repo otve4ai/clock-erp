@@ -56,6 +56,7 @@ class InventoryControlTest(unittest.TestCase):
             self.inventory.confirm(
                 session["id"], item["id"], actual, "Максим",
                 "control-{}".format(item["id"]),
+                confirm_zero=actual == 0,
             )
         self.inventory.complete(session["id"], "Максим", confirmation=True)
         return session, next(item for item in items if item["product_id"] == self.first["id"])
