@@ -27,7 +27,7 @@ import requests
 from decimal import Decimal, InvalidOperation
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache, wraps
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from app.time_ranking import erp_timestamp, parse_erp_datetime, receipt_business_timestamp
 from app.clients.moysklad import MoySkladClient
 from app.clients.smsbliss import (
@@ -6056,6 +6056,44 @@ def warehouse_page():
     pagination = build_erp_pagination(
         "warehouse_page", catalog["total"], page, per_page
     )
+    export_filter_labels = []
+    if query:
+        export_filter_labels.append("Поиск: {}".format(query))
+    if selected_brand_id or selected_brand:
+        export_filter_labels.append("Бренд: {}".format(
+            selected_brand or "Без бренда"
+        ))
+    if selected_category_id or selected_category:
+        export_filter_labels.append("Категория: {}".format(
+            selected_category or "Без категории"
+        ))
+    if selected_model_id or selected_model:
+        export_filter_labels.append("Модель: {}".format(selected_model))
+    if selected_cell:
+        export_filter_labels.append("Ячейка: {}".format(selected_cell))
+    if created_date_from or created_date_to:
+        export_filter_labels.append("Период: {} — {}".format(
+            created_date_from or "…", created_date_to or "…"
+        ))
+    if stock_state != "all":
+        export_filter_labels.append(
+            "Наличие: {}".format(
+                "В наличии" if stock_state == "in" else "Нет в наличии"
+            )
+        )
+    if check_state != "all":
+        export_filter_labels.append("Статус проверки: {}".format({
+            "unchecked": "Не проверены",
+            "partial": "Проверены частично",
+            "complete": "Проверены полностью",
+        }[check_state]))
+    product_exporter = ProductExcelExport(product_catalog.database)
+    try:
+        export_warehouses = product_exporter.available_warehouses()
+    except AttributeError:
+        # Route-level test doubles predating configurable export do not expose
+        # a real database connection. Production catalog instances always do.
+        export_warehouses = []
     rendered = render_template(
             "warehouse.html",
             partial_only=partial_requested,
@@ -6086,6 +6124,15 @@ def warehouse_page():
                    if key not in {"page", "scope"}}
             ),
             export_all_url=url_for("warehouse_products_export", scope="all"),
+            export_all_count=int(tab_counts.get("positions") or 0),
+            export_filtered_count=int(catalog["total"]),
+            export_filter_labels=export_filter_labels,
+            export_filters_applied=bool(export_filter_labels),
+            export_field_groups=product_exporter.field_groups(),
+            export_warehouses=export_warehouses,
+            export_default_filename="Товары_{}.xlsx".format(
+                datetime.now(ERP_TIMEZONE).date().isoformat()
+            ),
             warehouse_active_filter_count=warehouse_active_filter_count,
             warehouse_active_filter_label=warehouse_active_filter_label,
             open_add=False,
@@ -6154,71 +6201,208 @@ def warehouse_page():
     return response
 
 
-@app.route("/app/products/export.xlsx")
+def _product_export_filters(values):
+    """Parse the same catalogue filters used by the products workspace."""
+    view = (values.get("view") or "products").strip()
+    check_state = (values.get("check_state") or "all").strip()
+    if check_state not in {"all", "unchecked", "partial", "complete"}:
+        check_state = "all"
+    sort_by = (values.get("sort_by") or "created_at").strip()
+    if sort_by not in {
+        "name", "article", "brand", "category", "stock", "created_at",
+        "cell", "model",
+    }:
+        sort_by = "created_at"
+    sort_dir = (values.get("sort_dir") or (
+        "desc" if sort_by == "created_at" else "asc"
+    )).strip()
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "desc" if sort_by == "created_at" else "asc"
+    created_from = (values.get("date_from") or "").strip()
+    created_to = (values.get("date_to") or "").strip()
+    for value_name, value in (("from", created_from), ("to", created_to)):
+        try:
+            time.strptime(value, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            if value_name == "from":
+                created_from = ""
+            else:
+                created_to = ""
+    if created_from and created_to and created_from > created_to:
+        created_from, created_to = created_to, created_from
+    brand = (values.get("brand") or "").strip()
+    category = (values.get("category") or "").strip()
+    model = (values.get("model") or "").strip()
+    brand_id = (values.get("brand_id") or "").strip()
+    category_id = (values.get("category_id") or "").strip()
+    model_id = (values.get("model_id") or "").strip()
+    # Normalize taxonomy identifiers exactly as the products page does. This
+    # matters for stale bookmarked URLs: the page discards an invalid or
+    # impossible brand/category/model chain, so the export must discard it too.
+    shared_catalog = SharedCatalog()
+    shared_brands = shared_catalog.list_brands(limit=200)
+    if not brand_id and brand:
+        match = next((
+            item for item in shared_brands
+            if str(item.get("name") or "").strip().casefold() == brand.casefold()
+        ), None)
+        if match:
+            brand_id = str(match["id"])
+    if brand_id:
+        match = next((
+            item for item in shared_brands
+            if str(item.get("id") if item.get("id") is not None else "") == brand_id
+        ), None)
+        if match:
+            brand = match["name"]
+        else:
+            brand_id = ""
+            brand = ""
+    if not category_id and category and brand_id:
+        match = next((
+            item for item in shared_catalog.list_category_options(
+                brand_id=brand_id, limit=200, only_used_by_brand=True
+            )
+            if str(item.get("name") or "").strip().casefold() == category.casefold()
+        ), None)
+        if match:
+            category_id = str(match["id"])
+    if category_id == "0" and not brand_id:
+        category = "Без категории"
+    elif category_id:
+        match = next((
+            item for item in shared_catalog.list_category_options(
+                brand_id=brand_id or None, limit=200,
+                only_used_by_brand=bool(brand_id),
+            )
+            if category_id in {
+                str(item.get("id") if item.get("id") is not None else ""),
+                *(str(value) for value in item.get("category_ids", [])),
+            }
+        ), None)
+        if match:
+            category = match["name"]
+        else:
+            category_id = ""
+            category = ""
+            model_id = ""
+            model = ""
+    if not brand_id:
+        if category_id != "0":
+            category_id = ""
+            category = ""
+        model_id = ""
+        model = ""
+    if (model_id or model) and brand_id and category_id:
+        match = next((
+            item for item in shared_catalog.list_model_options(
+                brand_id, category_id, limit=200
+            )
+            if (
+                str(item.get("id") or "") == model_id if model_id else
+                str(item.get("name") or "").strip().casefold() == model.casefold()
+            )
+        ), None)
+        if match:
+            model_id = str(match["id"])
+            model = match["name"]
+        else:
+            model_id = ""
+            model = ""
+    elif not category_id:
+        model_id = ""
+        model = ""
+    stock_state = (values.get("stock_state") or "all").strip()
+    if view == "out_of_stock":
+        stock_state = "out"
+    elif view == "in_stock":
+        stock_state = "in"
+    if stock_state not in {"all", "in", "out"}:
+        stock_state = "all"
+    if stock_state != "out":
+        check_state = "all"
+    return {
+        "query": (values.get("q") or "").strip(),
+        "brand": "" if brand_id else brand,
+        "category": "" if category_id else category,
+        "model": "" if model_id else model,
+        "model_id": model_id or None,
+        "cell": (values.get("cell") or "").strip(),
+        "hide_zero": False,
+        "sort_by": sort_by,
+        "sort_dir": sort_dir,
+        "created_from": created_from,
+        "created_to": created_to,
+        "brand_id": brand_id or None,
+        "category_id": category_id or None,
+        "stock_state": stock_state,
+        "check_state": check_state,
+    }
+
+
+def _safe_product_export_filename(value):
+    default = "Товары_{}.xlsx".format(datetime.now(ERP_TIMEZONE).date().isoformat())
+    name = str(value or default).strip()
+    name = "".join(character for character in name if ord(character) >= 32)
+    name = name.replace("/", "_").replace("\\", "_")[:120].strip(" .")
+    if not name:
+        name = default
+    if not name.lower().endswith(".xlsx"):
+        name += ".xlsx"
+    return name
+
+
+@app.route("/app/products/export.xlsx", methods=["GET", "POST"])
 def warehouse_products_export():
-    scope = (request.args.get("scope") or "filtered").strip()
-    if scope not in {"filtered", "all"}:
+    values = request.values
+    scope = (values.get("scope") or "filtered").strip()
+    if scope not in {"filtered", "all", "selected"}:
         return jsonify(ok=False, message="Неизвестный режим экспорта."), 400
 
-    filters = {}
+    filters = {"sort_by": "name", "sort_dir": "asc"}
+    selected_product_ids = []
     if scope == "filtered":
-        view = (request.args.get("view") or "products").strip()
-        check_state = (request.args.get("check_state") or "all").strip()
-        if check_state not in {"all", "unchecked", "partial", "complete"}:
-            check_state = "all"
-        sort_by = (request.args.get("sort_by") or "created_at").strip()
-        if sort_by not in {
-            "name", "article", "brand", "category", "stock", "created_at",
-            "cell", "model",
-        }:
-            sort_by = "created_at"
-        sort_dir = (request.args.get("sort_dir") or (
-            "desc" if sort_by == "created_at" else "asc"
-        )).strip()
-        if sort_dir not in {"asc", "desc"}:
-            sort_dir = "desc" if sort_by == "created_at" else "asc"
-        created_from = (request.args.get("date_from") or "").strip()
-        created_to = (request.args.get("date_to") or "").strip()
-        for value_name, value in (("from", created_from), ("to", created_to)):
-            try:
-                time.strptime(value, "%Y-%m-%d")
-            except (TypeError, ValueError):
-                if value_name == "from":
-                    created_from = ""
-                else:
-                    created_to = ""
-        if created_from and created_to and created_from > created_to:
-            created_from, created_to = created_to, created_from
-        brand_id = (request.args.get("brand_id") or "").strip()
-        category_id = (request.args.get("category_id") or "").strip()
-        model_id = (request.args.get("model_id") or "").strip()
-        filters = {
-            "query": (request.args.get("q") or "").strip(),
-            "brand": "" if brand_id.isdigit() else (request.args.get("brand") or "").strip(),
-            "category": "" if category_id.isdigit() else (request.args.get("category") or "").strip(),
-            "model": (request.args.get("model") or "").strip(),
-            "model_id": model_id if model_id.isdigit() else None,
-            "cell": (request.args.get("cell") or "").strip(),
-            "hide_zero": request.args.get("in_stock") == "1",
-            "sort_by": sort_by,
-            "sort_dir": sort_dir,
-            "created_from": created_from,
-            "created_to": created_to,
-            "brand_id": brand_id if brand_id.isdigit() else None,
-            "category_id": category_id if category_id.isdigit() else None,
-            "stock_state": "out" if view == "out_of_stock" else "all",
-            "check_state": check_state if view == "out_of_stock" else "all",
-        }
-    else:
-        filters = {"sort_by": "name", "sort_dir": "asc"}
+        filters = _product_export_filters(values)
+    elif scope == "selected":
+        raw_ids = values.getlist("selected_ids")
+        if len(raw_ids) == 1 and "," in raw_ids[0]:
+            raw_ids = raw_ids[0].split(",")
+        if not raw_ids or any(not str(value).strip().isdigit() for value in raw_ids):
+            return jsonify(ok=False, message="Выберите хотя бы один товар."), 400
+        selected_product_ids = list(dict.fromkeys(int(value) for value in raw_ids))
 
     catalog = ExcelProductCatalog()
-    page_size = 1000
-    first = catalog.list_products(
-        page=1, per_page=page_size, include_facets=False,
-        include_cell_item_names=False, **filters
-    )
     exporter = ProductExcelExport(catalog.database)
+    warehouses = exporter.available_warehouses()
+    requested_fields = values.getlist("fields")
+    if len(requested_fields) == 1 and "," in requested_fields[0]:
+        requested_fields = requested_fields[0].split(",")
+    if request.method == "POST" and not requested_fields:
+        return jsonify(
+            ok=False, message="Выберите хотя бы одно поле для экспорта."
+        ), 400
+    try:
+        selected_fields = exporter.validate_fields(requested_fields, warehouses)
+    except ValueError as error:
+        return jsonify(ok=False, message=str(error)), 400
+    page_size = 1000
+    selected_items = []
+    if scope == "selected":
+        for start in range(0, len(selected_product_ids), 400):
+            result = catalog.list_products(
+                page=1, per_page=400, include_facets=False,
+                include_cell_item_names=False,
+                product_ids=selected_product_ids[start:start + 400], **filters
+            )
+            selected_items.extend(result["items"])
+        first = {"total": len(selected_items), "items": selected_items, "pages": 1}
+        if not first["total"]:
+            return jsonify(ok=False, message="Выбранные товары больше недоступны."), 400
+    else:
+        first = catalog.list_products(
+            page=1, per_page=page_size, include_facets=False,
+            include_cell_item_names=False, **filters
+        )
 
     def products():
         page = 1
@@ -6235,17 +6419,26 @@ def warehouse_products_export():
                 include_cell_item_names=False, **filters
             )
 
-    payload = exporter.build(products(), first["total"])
-    filename = "products-{}-{}.xlsx".format(
-        "filtered" if scope == "filtered" else "all",
-        datetime.now(ERP_TIMEZONE).date().isoformat(),
+    payload = exporter.build(
+        products(), first["total"], selected_fields, warehouses
+    )
+    filename = _safe_product_export_filename(values.get("filename"))
+    fallback_name = "products-{}.xlsx".format(
+        datetime.now(ERP_TIMEZONE).date().isoformat()
     )
     response = Response(
         payload,
         mimetype=(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
-        headers={"Content-Disposition": 'attachment; filename="{}"'.format(filename)},
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="{}"; filename*=UTF-8\'\'{}'.format(
+                    fallback_name, quote(filename)
+                )
+            ),
+            "X-Export-Count": str(first["total"]),
+        },
     )
     response.headers["Cache-Control"] = "no-store"
     return response
