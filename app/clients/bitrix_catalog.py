@@ -346,6 +346,7 @@ def normalize_product(raw, base_url=""):
         "available_quantity",
         "AVAILABLE_QUANTITY",
     ))
+    raw_active = _first(raw, "active", "ACTIVE")
     product = {
         "external_source": "bitrix",
         "external_product_id": _text(_first(raw, "id", "ID", "product_id", "PRODUCT_ID")),
@@ -359,7 +360,8 @@ def normalize_product(raw, base_url=""):
         "detail_text": _text(_first(raw, "detail_text", "DETAIL_TEXT", "description")),
         "preview_text_type": _text(_first(raw, "preview_text_type", "PREVIEW_TEXT_TYPE")) or "text",
         "detail_text_type": _text(_first(raw, "detail_text_type", "description_type", "DETAIL_TEXT_TYPE")) or "text",
-        "active": _boolean(_first(raw, "active", "ACTIVE"), True),
+        "active": _boolean(raw_active, True),
+        "active_known": raw_active is not None,
         "created_at": _first(raw, "created_at", "DATE_CREATE"),
         "updated_at": _first(raw, "updated_at", "TIMESTAMP_X", "DATE_UPDATE"),
         "sort": int(_number(_first(raw, "sort", "SORT")) or 500),
