@@ -98,6 +98,19 @@
     </form>
 </dialog>
 {% endif %}
+{% if is_owner %}
+<dialog class="service-dialog" id="serviceAccessRevokeDialog" aria-labelledby="serviceAccessRevokeTitle">
+    <form method="dialog">
+        <header><div><h2 id="serviceAccessRevokeTitle">Отозвать все доступы сотрудника?</h2><p data-revoke-employee></p></div><button type="button" class="dialog-close" data-revoke-close aria-label="Закрыть">×</button></header>
+        <div class="service-form-body">
+            <p>Сотрудник сразу перестанет получать логины и пароли сервисов.</p>
+            <div data-revoke-result hidden><strong>После увольнения рекомендуется сменить пароли следующих сервисов:</strong><ul data-revoke-passwords></ul></div>
+            <p class="form-status" role="alert"></p>
+        </div>
+        <footer><button type="button" class="services-secondary" data-revoke-close>Отмена</button><button type="button" class="services-danger" data-revoke-confirm>Отозвать все доступы</button></footer>
+    </form>
+</dialog>
+{% endif %}
 <div class="services-toast" id="servicesToast" role="status" aria-live="polite"></div>
 <script>
 window.SERVICES_BOOTSTRAP = {{ {

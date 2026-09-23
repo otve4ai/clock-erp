@@ -74,6 +74,7 @@ class TeamManagementTest(unittest.TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertIn("Профиль и доступ", detail.get_data(as_text=True))
         self.assertIn("Журнал действий", detail.get_data(as_text=True))
+        self.assertIn("Доступы к сервисам", detail.get_data(as_text=True))
         self.session_as(self.employee)
         self.assertEqual(self.client.get("/app/team").status_code, 403)
 

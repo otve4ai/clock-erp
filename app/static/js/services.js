@@ -49,7 +49,12 @@
         return '<div class="service-account"><div class="service-account-title">' + escapeHtml(account.label) + '</div>' + login + password + '</div>';
     }
     function accessMarkup(service) {
-        if (!state.viewUserId) return '<div class="service-access">' + (service.permissions.can_view_password ? 'Доступ к реквизитам разрешён' : 'Доступ ограничен') + '</div>';
+        if (!state.viewUserId) {
+            if (typeof service.access_count === "number") {
+                return '<div class="service-access">Доступ имеют: ' + service.access_count + ' сотрудников</div>';
+            }
+            return '<div class="service-access">' + (service.permissions.can_view_password ? 'Доступ к реквизитам разрешён' : 'Доступ ограничен') + '</div>';
+        }
         var labels = [["can_open","Открывает"],["can_view_login","Видит логин"],["can_copy_login","Копирует логин"],["can_view_password","Видит пароль"],["can_copy_password","Копирует пароль"]];
         var chips = labels.filter(function(item) { return service.permissions[item[0]]; }).map(function(item) { return '<span>' + item[1] + '</span>'; }).join("");
         return '<div class="employee-access"><strong>Доступ сотрудника</strong><div>' + (chips || '<span>Только видит карточку</span>') + '</div></div>';
@@ -63,7 +68,7 @@
             (service.permissions.can_archive ? '<button class="minor" type="button" data-restore="' + service.id + '">Восстановить</button>' : '') +
             (boot.isOwner ? '<button class="minor danger" type="button" data-delete-permanent="' + service.id + '">Удалить навсегда</button>' : '') :
             (service.permissions.can_open ? '<button class="service-open service-action-primary" type="button" data-open="' + service.id + '">Открыть</button>' : '') +
-            (service.permissions.can_edit ? '<button class="minor service-action-secondary" type="button" data-edit="' + service.id + '">Изменить</button>' : '') + overflow;
+            (service.permissions.can_edit ? '<button class="minor service-action-secondary" type="button" data-edit="' + service.id + '">' + (service.permissions.can_manage_access ? 'Управлять' : 'Изменить') + '</button>' : '') + overflow;
         var move = !state.viewUserId && !service.archived && state.filter === "all" && !state.query ? '<button class="move-button" type="button" data-move="up" data-id="' + service.id + '" aria-label="Переместить выше" ' + (index === 0 ? 'disabled' : '') + '>↑</button><button class="move-button" type="button" data-move="down" data-id="' + service.id + '" aria-label="Переместить ниже">↓</button>' : '';
         return '<article class="service-card' + (service.archived ? ' is-archived' : '') + '" data-id="' + service.id + '"><div class="service-card-head"><div class="service-icon">' + iconMarkup(service) + '</div><div><h2>' + escapeHtml(service.name) + '</h2><span class="service-domain" title="' + escapeHtml(service.url) + '">' + escapeHtml(service.domain) + '</span></div>' + (!service.archived && !state.viewUserId ? '<button type="button" class="favorite-button' + (service.favorite ? ' is-active' : '') + '" data-favorite="' + service.id + '" aria-label="' + (service.favorite ? 'Удалить из избранного' : 'Добавить в избранное') + '" title="' + (service.favorite ? 'Удалить из избранного' : 'Добавить в избранное') + '">' + (service.favorite ? '★' : '☆') + '</button>' : '<span></span>') + '</div><p class="service-description">' + escapeHtml(service.description || "Без описания") + '</p><span class="service-category">' + escapeHtml(categoryLabel(service.category)) + '</span>' + accounts + accessMarkup(service) + '<div class="service-card-actions">' + move + controls + '</div></article>';
     }
@@ -280,9 +285,46 @@
             var term = this.value.trim().toLocaleLowerCase("ru");
             employeeOptions.querySelectorAll(".employee-option").forEach(function(option) { option.hidden = Boolean(term) && option.textContent.toLocaleLowerCase("ru").indexOf(term) === -1; });
         });
-        revokeAccess.addEventListener("click", async function() {
-            if (!state.viewUser || !window.confirm("Отозвать все доступы сотрудника «" + state.viewUser.display_name + "»?")) return;
-            try { await api("/api/services/access/users/" + state.viewUser.id + "/revoke", {method:"POST"}); notify("Все доступы сотрудника отозваны"); await refresh(); } catch (error) { notify(error.message, true); }
+        var revokeDialog = document.getElementById("serviceAccessRevokeDialog");
+        revokeAccess.addEventListener("click", function() {
+            if (!state.viewUser || !revokeDialog) return;
+            revokeDialog.querySelector("[data-revoke-employee]").textContent = state.viewUser.display_name;
+            revokeDialog.querySelector("[data-revoke-result]").hidden = true;
+            revokeDialog.querySelector("[data-revoke-passwords]").replaceChildren();
+            revokeDialog.querySelector(".form-status").textContent = "";
+            revokeDialog.querySelector("[data-revoke-confirm]").hidden = false;
+            revokeDialog.querySelectorAll("[data-revoke-close]").forEach(function(button) { button.textContent = button.classList.contains("dialog-close") ? "×" : "Отмена"; });
+            revokeDialog.showModal();
+        });
+        revokeDialog.querySelectorAll("[data-revoke-close]").forEach(function(button) { button.addEventListener("click", function() { revokeDialog.close(); }); });
+        revokeDialog.querySelector("[data-revoke-confirm]").addEventListener("click", async function() {
+            var button = this;
+            if (!state.viewUser) return;
+            button.disabled = true;
+            try {
+                var payload = await api("/api/services/access/users/" + state.viewUser.id + "/revoke", {method:"POST"});
+                var list = revokeDialog.querySelector("[data-revoke-passwords]");
+                (payload.access.passwords || []).forEach(function(item) {
+                    var row = document.createElement("li");
+                    row.textContent = item.service_name + " — " + item.account_label;
+                    list.appendChild(row);
+                });
+                if (!list.children.length) {
+                    var emptyItem = document.createElement("li");
+                    emptyItem.textContent = "Парольные реквизиты не были доступны.";
+                    list.appendChild(emptyItem);
+                }
+                revokeDialog.querySelector("[data-revoke-result]").hidden = false;
+                button.hidden = true;
+                var closeButton = Array.from(revokeDialog.querySelectorAll("[data-revoke-close]")).find(function(item) { return !item.classList.contains("dialog-close"); });
+                if (closeButton) closeButton.textContent = "Готово";
+                notify("Все доступы сотрудника отозваны");
+                await refresh();
+            } catch (error) {
+                revokeDialog.querySelector(".form-status").textContent = error.message;
+            } finally {
+                button.disabled = false;
+            }
         });
     }
     document.addEventListener("click", function() { closeDropdowns(); closeServiceOverflow(); });
