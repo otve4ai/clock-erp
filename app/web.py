@@ -25717,6 +25717,25 @@ def api_backups_create():
         return api_error("BACKUP_FAILED", "Не удалось создать бэкап.", 503)
 
 
+@app.delete("/api/v1/backups/<backup_id>")
+def api_backup_delete(backup_id):
+    _backup_owner_required()
+    require_csrf_when_authenticated()
+    try:
+        return api_success(
+            _backup_admin_service().delete_manual_backup(_backup_actor(), backup_id)
+        )
+    except BackupNotFoundError as error:
+        return api_error("BACKUP_NOT_FOUND", str(error), 404)
+    except BackupBusyError as error:
+        return api_error("BACKUP_BUSY", str(error), 409)
+    except BackupAdminError as error:
+        return api_error("BACKUP_DELETE_BLOCKED", str(error), 409)
+    except Exception:
+        app.logger.exception("Manual backup could not be deleted")
+        return api_error("BACKUP_DELETE_FAILED", "Не удалось удалить ручной бэкап.", 503)
+
+
 @app.post("/api/v1/backups/<backup_id>/restore")
 def api_backup_restore(backup_id):
     _backup_owner_required()

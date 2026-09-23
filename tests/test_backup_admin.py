@@ -14,6 +14,7 @@ from werkzeug.security import generate_password_hash
 
 from app import auth, web
 from app.services.backup_admin import (
+    BackupAdminError,
     BackupAdminService,
     BackupBusyError,
     BackupNotFoundError,
@@ -122,7 +123,7 @@ class BackupAdminServiceTest(unittest.TestCase):
         )
         self.assertEqual(
             [item["type"] for item in listing],
-            ["manual", "automatic"],
+            ["manual", "daily"],
         )
         self.assertTrue(all(not item["metadata"] for item in listing))
 
@@ -259,6 +260,31 @@ class BackupAdminServiceTest(unittest.TestCase):
         self.assertEqual(backup["status"], "verified")
         self.assertEqual(backup["git_commit"], "a" * 40)
         self.assertEqual(backup["schema_versions"]["auth.db"], 7)
+        self.assertEqual(backup["reason"], "manual")
+        self.assertEqual(backup["retention_categories"], ["manual"])
+
+    def test_only_manual_backup_can_be_deleted(self):
+        manual = self.archive_at(
+            self.backups / "manual",
+            "clock-erp-manual-20260916-121500-"
+            "0123456789abcdef0123456789abcdef.tar.gz",
+        )
+        daily = self.archive("clock-erp-daily-20260915-031701.tar.gz")
+        listing = self.service.list_backups()
+        manual_id = next(item["backup_id"] for item in listing if item["type"] == "manual")
+        daily_id = next(item["backup_id"] for item in listing if item["type"] == "daily")
+
+        result = self.service.delete_manual_backup(
+            {"id": 1, "email": "owner@example.com"}, manual_id
+        )
+
+        self.assertTrue(result["deleted"])
+        self.assertFalse(manual.exists())
+        self.assertTrue(daily.exists())
+        with self.assertRaises(BackupAdminError):
+            self.service.delete_manual_backup(
+                {"id": 1, "email": "owner@example.com"}, daily_id
+            )
 
     def test_schedule_is_read_from_cron(self):
         self.service.cron_path.write_text(

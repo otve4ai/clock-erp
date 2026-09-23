@@ -12,6 +12,7 @@ from unittest import mock
 from scripts.retain_erp_backups import (
     _backup_sqlite_database,
     apply_plan,
+    combined_retention_plan,
     create_backup,
     discover_backups,
     retention_plan,
@@ -41,20 +42,60 @@ class BackupRetentionTest(unittest.TestCase):
             backup.addfile(member, io.BytesIO(payload))
         return path
 
-    def test_daily_policy_keeps_one_per_day_for_seven_calendar_days(self):
+    def test_daily_policy_keeps_latest_fourteen_daily_copies(self):
         now = dt.datetime(2026, 8, 21, 16, 0, 0)
         same_day_old = self.full_backup(dt.datetime(2026, 8, 21, 10, 0, 0))
         same_day_new = self.full_backup(dt.datetime(2026, 8, 21, 15, 0, 0))
-        within_window = self.full_backup(dt.datetime(2026, 8, 15, 15, 0, 0))
-        expired = self.full_backup(dt.datetime(2026, 8, 14, 23, 59, 59))
+        retained = [self.full_backup(now - dt.timedelta(days=offset)) for offset in range(1, 14)]
+        expired = self.full_backup(now - dt.timedelta(days=14))
 
         actions = retention_plan(discover_backups(self.root)["daily"], now)
         by_path = {path: action for action, _timestamp, path in actions}
 
         self.assertEqual(by_path[same_day_new], "KEEP")
         self.assertEqual(by_path[same_day_old], "DELETE")
-        self.assertEqual(by_path[within_window], "KEEP")
+        self.assertTrue(all(by_path[path] == "KEEP" for path in retained))
         self.assertEqual(by_path[expired], "DELETE")
+
+    def test_shared_archive_is_kept_until_every_category_expires(self):
+        now = dt.datetime(2026, 9, 23, 16, 0, 0)
+        monthly = self.full_backup(dt.datetime(2026, 9, 1, 3, 17, 0),
+                                   self.root / "daily", "clock-erp-daily")
+        for offset in range(14):
+            self.full_backup(now - dt.timedelta(days=offset), self.root / "daily",
+                             "clock-erp-daily")
+
+        actions = combined_retention_plan(discover_backups(self.root), now)
+        by_path = {path: action for action, _timestamp, path in actions}
+
+        self.assertEqual(by_path[monthly], "KEEP")
+
+    def test_weekly_and_monthly_limits_are_independent(self):
+        now = dt.datetime(2026, 9, 23, 16, 0, 0)
+        weekly = []
+        for offset in range(9):
+            weekly.append(self.full_backup(
+                dt.datetime(2026, 9, 20, 3, 17, 0) - dt.timedelta(weeks=offset),
+                self.root / "daily", "clock-erp-daily",
+            ))
+        monthly = []
+        for offset in range(13):
+            month_index = 2026 * 12 + 8 - offset
+            year = month_index // 12
+            month = month_index % 12 + 1
+            monthly.append(self.full_backup(
+                dt.datetime(year, month, 1, 3, 17, 0),
+                self.root / "daily", "clock-erp-daily",
+            ))
+        streams = discover_backups(self.root)
+        weekly_actions = {path: action for action, _timestamp, path in
+                          retention_plan(streams["weekly"], now, "weekly")}
+        monthly_actions = {path: action for action, _timestamp, path in
+                           retention_plan(streams["monthly"], now, "monthly")}
+        self.assertEqual(weekly_actions[weekly[0]], "KEEP")
+        self.assertEqual(weekly_actions[weekly[-1]], "DELETE")
+        self.assertEqual(monthly_actions[monthly[0]], "KEEP")
+        self.assertEqual(monthly_actions[monthly[-1]], "DELETE")
 
     def test_manual_backups_are_never_rotated(self):
         manual = self.root / "manual"
@@ -76,6 +117,20 @@ class BackupRetentionTest(unittest.TestCase):
         self.assertEqual(actions[0][0], "KEEP")
         apply_plan(actions, self.root, apply_changes=True)
         self.assertTrue(target.is_file())
+
+    def test_safety_backups_are_never_rotated(self):
+        safety = self.root / "safety"
+        backup = self.full_backup(
+            dt.datetime(2020, 1, 1, 12, 0, 0), safety, "clock-erp-safety"
+        )
+        target = safety / (
+            "clock-erp-safety-20200101-120000-"
+            "0123456789abcdef0123456789abcdef.tar.gz"
+        )
+        backup.rename(target)
+        actions = retention_plan(discover_backups(self.root)["safety"],
+                                 dt.datetime(2026, 8, 21), "safety")
+        self.assertEqual(actions[0][0], "KEEP")
 
     def test_unknown_and_invalid_files_are_never_delete_candidates(self):
         unknown = self.root / "site-backup-20260821.tar.gz"
@@ -233,13 +288,22 @@ class BackupRetentionTest(unittest.TestCase):
             "daily", apply_changes=True,
         )
 
-        write_recovery_metadata(project, self.root, archive, "automatic")
+        write_recovery_metadata(
+            project, self.root, archive, "daily", reason="scheduled",
+            retention_categories=["daily"],
+        )
 
         metadata_files = list((self.root / "metadata").glob("*.json"))
         self.assertEqual(len(metadata_files), 1)
         metadata = json.loads(metadata_files[0].read_text(encoding="utf-8"))
         self.assertEqual(metadata["metadata_version"], 2)
-        self.assertEqual(metadata["type"], "automatic")
+        self.assertEqual(metadata["type"], "daily")
+        self.assertEqual(metadata["backup_type"], "daily")
+        self.assertEqual(metadata["retention_categories"], ["daily"])
+        self.assertEqual(metadata["reason"], "scheduled")
+        self.assertEqual(metadata["created_at"], metadata["timestamp"])
+        self.assertEqual(metadata["status"], "verified")
+        self.assertRegex(metadata["checksum_sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(metadata["integrity_status"], "verified")
         self.assertEqual(metadata["git_branch"], "main")
         self.assertIn("catalog.db", metadata["database_manifest"])

@@ -22,6 +22,9 @@ LEGACY_DAILY_RE = re.compile(r"^clock-erp-(\d{8})-(\d{6})\.tar\.gz$")
 MANUAL_RE = re.compile(
     r"^clock-erp-manual-(\d{8})-(\d{6})-([0-9a-f]{32})\.tar\.gz$"
 )
+SAFETY_RE = re.compile(
+    r"^clock-erp-safety-(\d{8})-(\d{6})-([0-9a-f]{32})\.tar\.gz$"
+)
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 
@@ -70,6 +73,17 @@ def _atomic_json_write(path, value):
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class BackupAdminService:
@@ -151,9 +165,10 @@ class BackupAdminService:
     def _backup_candidates(self):
         candidates = []
         locations = (
-            (self.backup_root / "daily", "automatic", (DAILY_RE,)),
-            (self.backup_root, "automatic", (LEGACY_DAILY_RE,)),
+            (self.backup_root / "daily", "daily", (DAILY_RE,)),
+            (self.backup_root, "daily", (LEGACY_DAILY_RE,)),
             (self.backup_root / "manual", "manual", (MANUAL_RE,)),
+            (self.backup_root / "safety", "safety", (SAFETY_RE,)),
         )
         for directory, default_type, patterns in locations:
             try:
@@ -179,13 +194,34 @@ class BackupAdminService:
                     continue
                 backup_id = self._backup_id(relative)
                 metadata = _safe_json_read(self._metadata_path(backup_id)) or {}
+                explicit_type = metadata.get("backup_type") or metadata.get("type")
+                if explicit_type == "automatic":
+                    explicit_type = "daily"
+                inferred_categories = [default_type]
+                parsed_timestamp = dt.datetime.strptime(
+                    match.group(1) + match.group(2), "%Y%m%d%H%M%S"
+                )
+                if default_type == "daily":
+                    if parsed_timestamp.weekday() == 6:
+                        inferred_categories.append("weekly")
+                    if parsed_timestamp.day == 1:
+                        inferred_categories.append("monthly")
+                categories = metadata.get("retention_categories") or inferred_categories
                 metadata_valid = (
                     metadata.get("backup_id") == backup_id
                     and metadata.get("timestamp") == timestamp
                     and metadata.get("size") == stat.st_size
-                    and metadata.get("type") in ("automatic", "manual")
+                    and explicit_type in ("daily", "weekly", "monthly", "manual", "safety")
+                    and isinstance(categories, list)
+                    and bool(categories)
+                    and all(item in ("daily", "weekly", "monthly", "manual", "safety")
+                            for item in categories)
                     and metadata.get("integrity_status") in ("verified", "failed", "not_checked")
                     and isinstance(metadata.get("schema_versions"), dict)
+                    and (
+                        metadata.get("checksum_sha256") is None
+                        or bool(re.fullmatch(r"[0-9a-f]{64}", str(metadata.get("checksum_sha256"))))
+                    )
                     and (
                         metadata.get("git_commit") is None
                         or bool(re.fullmatch(r"[0-9a-f]{40}", str(metadata.get("git_commit"))))
@@ -193,6 +229,8 @@ class BackupAdminService:
                 )
                 if metadata and not metadata_valid:
                     metadata = {}
+                    explicit_type = default_type
+                    categories = inferred_categories
                 integrity = str(metadata.get("integrity_status") or "not_checked")
                 archive_readable = self._archive_is_readable(path)
                 status = "verified" if integrity == "verified" else "not_checked"
@@ -202,13 +240,22 @@ class BackupAdminService:
                 candidates.append({
                     "backup_id": backup_id,
                     "timestamp": timestamp,
+                    "created_at": str(metadata.get("created_at") or timestamp),
                     "created_epoch": time.mktime(
                         dt.datetime.strptime(
                             match.group(1) + match.group(2), "%Y%m%d%H%M%S"
                         ).timetuple()
                     ),
                     "size": stat.st_size,
-                    "type": str(metadata.get("type") or backup_type),
+                    "type": str(explicit_type or backup_type),
+                    "backup_type": str(explicit_type or backup_type),
+                    "retention_categories": list(categories),
+                    "reason": str(metadata.get("reason") or (
+                        "manual" if default_type == "manual" else
+                        "pre_restore" if default_type == "safety" else
+                        "scheduled"
+                    )),
+                    "checksum_sha256": metadata.get("checksum_sha256"),
                     "status": status,
                     "integrity_status": integrity,
                     "git_commit": metadata.get("git_commit"),
@@ -844,6 +891,10 @@ class BackupAdminService:
                 "metadata_version": 2 if contract_hash and database_manifest else 1,
                 "backup_id": backup["backup_id"],
                 "timestamp": backup["timestamp"], "type": "manual",
+                "created_at": backup["timestamp"], "status": "verified",
+                "backup_type": "manual", "retention_categories": ["manual"],
+                "reason": "manual",
+                "checksum_sha256": _sha256_file(backup["_path"]),
                 "size": backup["size"], "git_commit": git.get("commit"),
                 "git_branch": git.get("branch"), "app_version": git.get("short"),
                 "schema_versions": self._capture_schema_versions(),
@@ -869,7 +920,10 @@ class BackupAdminService:
                         "metadata_version": 1,
                         "backup_id": backup["backup_id"],
                         "timestamp": backup["timestamp"],
-                        "type": "manual", "size": backup["size"],
+                        "created_at": backup["timestamp"], "status": "failed",
+                        "type": "manual", "backup_type": "manual",
+                        "retention_categories": ["manual"], "reason": "manual",
+                        "size": backup["size"],
                         "git_commit": git.get("commit"),
                         "git_branch": git.get("branch"),
                         "schema_versions": self._capture_schema_versions(),
@@ -927,6 +981,42 @@ class BackupAdminService:
         thread.start()
         self._audit(actor, "manual_backup", "started", operation_id=operation["id"])
         return operation
+
+    def delete_manual_backup(self, actor, backup_id):
+        self.backup_root.mkdir(parents=True, exist_ok=True)
+        operation_guard = self.operation_guard_path.open("a+")
+        retention_guard = (self.backup_root / ".retention.lock").open("a+")
+        try:
+            try:
+                fcntl.flock(operation_guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(retention_guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                raise BackupBusyError("Другая backup/recovery операция уже выполняется")
+            if self.operation_status().get("active"):
+                raise BackupBusyError("Другая backup/recovery операция уже выполняется")
+            backup = self.resolve_backup(backup_id)
+            if backup.get("backup_type") != "manual":
+                raise BackupAdminError("Удалять через интерфейс можно только ручные бэкапы")
+            path = backup["_path"]
+            resolved = path.resolve()
+            if self.backup_root not in resolved.parents or path.is_symlink():
+                raise BackupAdminError("Небезопасный путь бэкапа")
+            path.unlink()
+            metadata_path = self._metadata_path(backup_id)
+            if metadata_path.is_file() and not metadata_path.is_symlink():
+                metadata_path.unlink()
+            self._size_cache.clear()
+            self._audit(actor, "manual_backup_delete", "success", backup_id=backup_id)
+            return {"backup_id": backup_id, "deleted": True}
+        except (BackupAdminError, BackupBusyError, BackupNotFoundError):
+            raise
+        except OSError as error:
+            self._audit(actor, "manual_backup_delete", "error", backup_id=backup_id,
+                        error=type(error).__name__)
+            raise BackupAdminError("Не удалось удалить ручной бэкап")
+        finally:
+            retention_guard.close()
+            operation_guard.close()
 
     def blocked_restore_attempt(self, actor, action, backup_id=None, target_commit=None):
         source_commit = self.git_status(history_limit=1).get("commit")
