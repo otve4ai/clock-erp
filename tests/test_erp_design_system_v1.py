@@ -81,6 +81,17 @@ class ErpDesignSystemV1Test(unittest.TestCase):
         self.assertIn("box-shadow: none", focus)
         self.assertNotIn("0 0 0 4px", focus)
 
+    def test_global_text_selection_is_high_contrast_in_every_theme(self):
+        themes = self.source("app/static/css/themes.css")
+        selection = themes.split("::selection {", 1)[1].split("}", 1)[0]
+        moz_selection = themes.split("::-moz-selection {", 1)[1].split(
+            "}", 1
+        )[0]
+        for rule in (selection, moz_selection):
+            self.assertIn("background: #1d4ed8", rule)
+            self.assertIn("color: #fff", rule)
+        self.assertNotIn("html[data-theme] ::selection", themes)
+
     def test_mobile_product_toolbar_has_one_bounded_grid_track(self):
         css = self.source("app/static/css/erp-components.css")
         mobile = css.split("@media (max-width: 767px) {", 1)[1]

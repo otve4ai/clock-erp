@@ -14,6 +14,7 @@ from app.services.repair_cases import (
     load_repair_file,
     migrate_repair_file,
     repair_attention_key,
+    repair_created_key,
 )
 
 
@@ -511,6 +512,37 @@ class RepairsFullCycleTest(unittest.TestCase):
         self.assertIn('href="/app/repairs"', html)
         ordered = sorted(load_repair_file(self.store), key=repair_attention_key)
         self.assertEqual(ordered[0]["id"], overdue["id"])
+
+    def test_default_lists_newest_repairs_first_with_stable_id_tiebreaker(self):
+        first = self.create(client_name="Старый ремонт")
+        second = self.create(client_name="Новый ремонт A")
+        third = self.create(client_name="Новый ремонт B")
+        cases = load_repair_file(self.store)
+        timestamps = {
+            first["id"]: "2026-09-20T10:00:00+03:00",
+            second["id"]: "2026-09-23T12:00:00+03:00",
+            third["id"]: "2026-09-23T12:00:00+03:00",
+        }
+        for case in cases:
+            case["created_at"] = timestamps[case["id"]]
+        web.save_repair_cases(cases)
+
+        expected = [
+            case["id"]
+            for case in sorted(cases, key=repair_created_key, reverse=True)
+        ]
+        response = self.client.get("/api/v1/repairs?view=all")
+        self.assertEqual(
+            [case["id"] for case in response.get_json()["data"]], expected
+        )
+        page = self.client.get("/app/repairs")
+        html = page.get_data(as_text=True)
+        expected_names = [
+            next(case["client_name"] for case in cases if case["id"] == case_id)
+            for case_id in expected
+        ]
+        self.assertLess(html.index(expected_names[0]), html.index(expected_names[1]))
+        self.assertLess(html.index(expected_names[1]), html.index(expected_names[2]))
 
     def test_control_date_today_filter(self):
         repair = self.create(control_date=date.today().isoformat(), waiting_for="customer")
