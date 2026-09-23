@@ -33,9 +33,10 @@
     margin: 0;
     padding: 0;
     border: 0;
-    border-radius: 6px;
+    border-color: transparent !important;
+    border-radius: 6px !important;
     background: transparent !important;
-    color: var(--theme-text-muted, #56657a);
+    color: var(--theme-text-muted, #56657a) !important;
     font: inherit;
     text-align: left;
     box-shadow: none !important;
@@ -46,7 +47,7 @@
     :focus-visible,
     .is-active
 ) {
-    color: #2563eb;
+    color: #2563eb !important;
 }
 
 .erp-native-columns-table.erp-data-table .erp-sort-label:focus-visible {
