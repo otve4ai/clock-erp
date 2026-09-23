@@ -64,7 +64,6 @@ test('manual and Bitrix products are available in a new supply before posting', 
   await page.waitForLoadState('networkidle');
 
   await page.goto('/app/receipts?tab=supplies');
-  await page.locator('.add-menu summary').click();
   await page.locator('#new-supply').click();
   await expect(page.locator('#add-item')).toBeVisible();
   await page.locator('#title').fill('Smoke manual supply');
@@ -125,7 +124,6 @@ test('manual and Bitrix products are available in a new supply before posting', 
   expect(await stock(inline.id)).toBe(6);
   expect(await stock(bitrixCardId)).toBe(4);
   await page.locator('#close-supply').click();
-  await page.locator('.add-menu summary').click();
   await page.locator('#new-supply').click();
   await page.locator('#title').fill('Responsive smoke');
   await page.locator('#add-item').click();

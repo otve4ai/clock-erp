@@ -34,7 +34,7 @@ class BaseLayoutRegressionTest(unittest.TestCase):
                 ("sales", "Продажи", "/app/sales"),
                 ("analytics", "Аналитика", "/app/analytics"),
                 ("inventory", "Инвентаризация", "/app/inventory"),
-                ("receipts", "Поступления", "/app/receipts"),
+                ("receipts", "Приход", "/app/receipts"),
                 ("journal", "Журнал", "/app/journal"),
                 ("inbox", "Входящие", "/app/inbox"),
                 ("repair", "Ремонт", "/app/repairs"),

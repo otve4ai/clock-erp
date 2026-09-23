@@ -4774,7 +4774,6 @@
                                     </div>
                                 </th>
                                 <th data-column-key="name">
-                                    <input type="checkbox" data-export-select-page aria-label="Выбрать все товары на странице">
                                     <span
                                         class="warehouse-sort-label erp-sort-label{% if sort_by == 'name' %} is-active{% endif %}"
                                         data-sort-field="name"
@@ -4937,7 +4936,6 @@
 
                                     <td data-column-key="name">
                                         <div class="warehouse-product-name-cell">
-                                            <input type="checkbox" data-export-select="{{ item.id }}" aria-label="Выбрать товар {{ item.name|e }} для экспорта">
                                             <div class="name warehouse-ellipsis" title="{{ item.name|e }}">{{ item.name }}</div>
                                         </div>
                                     </td>
@@ -5115,10 +5113,6 @@
                     {% else %}
                         <div class="product-export-filters is-empty" data-export-current-filters>Фильтры не применены — выборка совпадает со всем каталогом.</div>
                     {% endif %}
-                    <label class="product-export-option">
-                        <input type="radio" name="scope" value="selected" disabled>
-                        <span><strong>Только выбранные</strong><small data-export-selected-count>0 товаров выбрано</small></span>
-                    </label>
                 </section>
 
                 <section class="product-export-section" aria-labelledby="productExportFieldsTitle">
