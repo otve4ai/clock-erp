@@ -5,8 +5,11 @@
     "catalog.db": [
       "catalog_excel_products",
       "catalog_stock_movements",
+      "erp_document_sequences",
       "erp_sales",
-      "erp_receipts"
+      "erp_receipts",
+      "erp_warehouse_stocks",
+      "erp_warehouses"
     ],
     "customers.db": ["customers", "registry_meta"],
     "mail.db": ["mail_messages", "mail_threads"],
