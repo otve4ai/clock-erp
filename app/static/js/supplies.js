@@ -816,7 +816,6 @@
       current = result;
       items = result.items.map((item) => ({ ...item }));
       $("add-item-dialog").close();
-      renderItems();
       message(success, true);
       await load();
     } catch (error) {
