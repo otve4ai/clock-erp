@@ -2959,6 +2959,7 @@
                         hidden
                     ></p>
                     <h3 class="erp-form-section-title field-wide sale-section-title">Товар</h3>
+                    <div class="field"><label for="saleWarehouse">Склад *</label><select id="saleWarehouse" class="control" name="warehouse_id" data-operational-warehouse required><option value="">Загрузка…</option></select></div>
                     <div class="field sale-catalog-field">
                         <label for="saleBrandTrigger">Бренд</label>
                         {{ render_catalog_combobox(
@@ -9026,6 +9027,7 @@
     })();
 </script>
 {% endif %}
+<script src="{{ url_for('static', filename='js/warehouse-operation-selectors.js') }}"></script>
 </body>
 {% if pagination_e2e %}<script src="{{ url_for('static', filename='js/pagination-e2e.js') }}"></script>{% endif %}
 </html>

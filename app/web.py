@@ -120,6 +120,9 @@ from app.services.excel_product_catalog import (
     ExcelProductCatalog,
     ProductDeleteBlockedError,
 )
+from app.services.warehouse_stock import (
+    WarehouseStockError, WarehouseStockService, require_warehouse,
+)
 from app.services.excel_receipt_import import (
     MAX_EXCEL_FILE_SIZE,
     ExcelDraftBlockedError,
@@ -3354,9 +3357,13 @@ def automatic_sale_stock_snapshot(inventory, product_ids):
     placeholders = ",".join("?" for _ in ids)
     with inventory.database.connect() as connection:
         rows = connection.execute(
-            "SELECT id,stock,excel_name_raw AS name,local_image_path,"
+            "SELECT p.id,COALESCE((SELECT ws.quantity "
+            "FROM erp_product_warehouse_stock ws JOIN erp_warehouses w "
+            "ON w.id=ws.warehouse_id WHERE ws.product_id=p.id "
+            "AND w.code='udelnaya'),0) AS stock,"
+            "p.excel_name_raw AS name,p.local_image_path,"
             "bitrix_thumbnail_url,bitrix_primary_image_url "
-            "FROM catalog_excel_products WHERE active=1 AND id IN ({})".format(
+            "FROM catalog_excel_products p WHERE p.active=1 AND p.id IN ({})".format(
                 placeholders
             ),
             ids,
@@ -5100,6 +5107,7 @@ def build_excel_warehouse_items(products):
             "stock_display": format_stock_number(stock),
             "reserve": 0,
             "quantity": stock,
+            "warehouse_breakdown": list(product.get("warehouse_breakdown") or []),
             "created_at": created_at,
             "created_at_display": created_at_display,
             "local_image_url": local_image_url,
@@ -5513,6 +5521,7 @@ def inventory_start_api():
             category_id=payload.get("category_id"),
             model_id=payload.get("model_id"),
             idempotency_key=payload.get("idempotency_key", ""),
+            warehouse_id=payload.get("warehouse_id"),
         )
         return {
             "ok": True,
@@ -5623,6 +5632,128 @@ def inventory_cancel_api(inventory_id):
     })
 
 
+def _warehouse_user_id():
+    return str((current_auth_user() or {}).get("id") or "anonymous")
+
+
+def _warehouse_api_error(error):
+    return jsonify({"ok": False, "message": str(error)}), 400
+
+
+@app.route("/api/v1/warehouses", methods=["GET", "POST"])
+def warehouses_api():
+    service = WarehouseStockService()
+    if request.method == "GET":
+        return jsonify({"ok": True, "warehouses": service.list_for_user(_warehouse_user_id())})
+    _require_admin_section()
+    require_csrf_when_authenticated()
+    payload = request.get_json(silent=True) or {}
+    user = current_auth_user() or {}
+    try:
+        warehouse = service.create_warehouse(
+            payload.get("name"), payload.get("code"),
+            actor={"actor_id": user.get("id"), "actor_name": user.get("login")},
+        )
+        return jsonify({"ok": True, "warehouse": warehouse}), 201
+    except WarehouseStockError as error:
+        return _warehouse_api_error(error)
+
+
+@app.route("/api/v1/warehouse-preferences", methods=["PUT"])
+def warehouse_preferences_api():
+    require_csrf_when_authenticated()
+    payload = request.get_json(silent=True) or {}
+    try:
+        selected = WarehouseStockService().set_selected_warehouses(
+            _warehouse_user_id(), payload.get("warehouse_ids") or []
+        )
+        return jsonify({"ok": True, "warehouse_ids": selected})
+    except WarehouseStockError as error:
+        return _warehouse_api_error(error)
+
+
+@app.route("/api/v1/warehouses/<int:warehouse_id>", methods=["PATCH"])
+def warehouse_update_api(warehouse_id):
+    _require_admin_section()
+    require_csrf_when_authenticated()
+    user = current_auth_user() or {}
+    try:
+        warehouse = WarehouseStockService().rename_warehouse(
+            warehouse_id, (request.get_json(silent=True) or {}).get("name"),
+            actor={"actor_id": user.get("id"), "actor_name": user.get("login")},
+        )
+        return jsonify({"ok": True, "warehouse": warehouse})
+    except WarehouseStockError as error:
+        return _warehouse_api_error(error)
+
+
+@app.route("/api/v1/warehouses/<int:warehouse_id>/archive", methods=["POST"])
+def warehouse_archive_api(warehouse_id):
+    _require_admin_section()
+    require_csrf_when_authenticated()
+    user = current_auth_user() or {}
+    try:
+        WarehouseStockService().archive_warehouse(
+            warehouse_id,
+            actor={"actor_id": user.get("id"), "actor_name": user.get("login")},
+        )
+        return jsonify({"ok": True})
+    except WarehouseStockError as error:
+        return _warehouse_api_error(error)
+
+
+@app.route("/api/v1/products/<int:product_id>/warehouse-stock")
+def product_warehouse_stock_api(product_id):
+    service = WarehouseStockService()
+    warehouse_ids = service.selected_warehouse_ids(_warehouse_user_id())
+    result = ExcelProductCatalog().list_products(
+        product_id=product_id, per_page=1, include_facets=False,
+        warehouse_ids=warehouse_ids,
+    )
+    if not result["items"]:
+        return jsonify({"ok": False, "message": "Товар не найден."}), 404
+    product = result["items"][0]
+    return jsonify({"ok": True, "product_id": product_id,
+                    "total": float(product.get("stock") or 0),
+                    "warehouses": product.get("warehouse_breakdown") or []})
+
+
+@app.route("/api/v1/warehouse-products/search")
+def warehouse_products_search_api():
+    try:
+        warehouse_id = int(request.args.get("warehouse_id") or 0)
+        items = ExcelProductCatalog().list_products(
+            query=(request.args.get("q") or "").strip(), per_page=20,
+            include_facets=False, warehouse_ids=[warehouse_id],
+        )["items"]
+        return jsonify({"ok": True, "items": [{
+            "id": item["id"], "name": item.get("excel_name_raw") or "",
+            "article": item.get("excel_article") or "",
+            "stock": float(item.get("stock") or 0),
+            "is_bundle": bool(item.get("is_bundle")),
+        } for item in items]})
+    except (ValueError, WarehouseStockError) as error:
+        return _warehouse_api_error(error)
+
+
+@app.route("/api/v1/warehouse-transfers", methods=["POST"])
+def warehouse_transfers_api():
+    require_csrf_when_authenticated()
+    payload = request.get_json(silent=True) or {}
+    user = current_auth_user() or {}
+    try:
+        transfer = WarehouseStockService().transfer(
+            payload.get("product_id"), payload.get("from_warehouse_id"),
+            payload.get("to_warehouse_id"), payload.get("quantity"),
+            actor={"actor_id": user.get("id"), "actor_name": user.get("login")},
+            comment=payload.get("comment") or "",
+            idempotency_key=payload.get("idempotency_key") or "",
+        )
+        return jsonify({"ok": True, "transfer": transfer}), 201
+    except WarehouseStockError as error:
+        return _warehouse_api_error(error)
+
+
 @app.route("/warehouse")
 @app.route("/app/products")
 def warehouse_page():
@@ -5631,7 +5762,14 @@ def warehouse_page():
         request.headers.get("X-ERP-Partial") == "products-v1"
     )
     product_catalog = ExcelProductCatalog()
-    tab_counts = product_catalog.stock_tab_counts()
+    warehouse_service = WarehouseStockService()
+    warehouse_user_id = str((current_auth_user() or {}).get("id") or "anonymous")
+    selected_warehouse_ids = warehouse_service.selected_warehouse_ids(warehouse_user_id)
+    warehouses = warehouse_service.list_for_user(warehouse_user_id)
+    try:
+        tab_counts = product_catalog.stock_tab_counts(selected_warehouse_ids)
+    except TypeError:
+        tab_counts = product_catalog.stock_tab_counts()
     if not isinstance(tab_counts, dict):
         # Keeps route-level test doubles and extensions that predate tab counts
         # compatible while the real catalog service always returns this shape.
@@ -5653,7 +5791,7 @@ def warehouse_page():
     }
     if warehouse_view == "analytics":
         stock_analytics = product_catalog.stock_analytics(
-            request.args.get("category_id")
+            request.args.get("category_id"), warehouse_ids=selected_warehouse_ids
         )
         selected_brand_key = (request.args.get("brand") or "").strip()
         selected_brand = next((
@@ -5662,7 +5800,9 @@ def warehouse_page():
         ), None)
         return render_template(
             "warehouse_analytics.html",
-            analytics=product_catalog.product_analytics(),
+            analytics=product_catalog.product_analytics(
+                warehouse_ids=selected_warehouse_ids
+            ),
             stock_analytics=stock_analytics,
             analytics_mode=(
                 request.args.get("mode")
@@ -5953,6 +6093,7 @@ def warehouse_page():
         include_facets=False,
         stock_state=stock_state,
         check_state=check_state if out_of_stock else "all",
+        warehouse_ids=selected_warehouse_ids,
     )
     catalog_stats = catalog.get("stats") or {}
     product_metrics = {
@@ -6080,7 +6221,9 @@ def warehouse_page():
         }[check_state]))
     product_exporter = ProductExcelExport(product_catalog.database)
     try:
-        export_warehouses = product_exporter.available_warehouses()
+        export_warehouses = product_exporter.available_warehouses(
+            selected_warehouse_ids
+        )
     except AttributeError:
         # Route-level test doubles predating configurable export do not expose
         # a real database connection. Production catalog instances always do.
@@ -6158,6 +6301,12 @@ def warehouse_page():
             total_found=catalog["total"],
             pagination=pagination,
             active_brand_inventory=active_brand_inventory,
+            warehouses=warehouses,
+            selected_warehouse_ids=selected_warehouse_ids,
+            can_manage_warehouses=(
+                not auth_is_enabled()
+                or (current_auth_user() or {}).get("role") == "admin"
+            ),
             warehouse_table_ui_e2e=(
                 app.testing
                 and request.args.get("table_ui_e2e") == "1"
@@ -6355,8 +6504,12 @@ def warehouse_products_export():
         filters = _product_export_filters(values)
 
     catalog = ExcelProductCatalog()
+    warehouse_service = WarehouseStockService()
+    selected_warehouse_ids = warehouse_service.selected_warehouse_ids(
+        _warehouse_user_id()
+    )
     exporter = ProductExcelExport(catalog.database)
-    warehouses = exporter.available_warehouses()
+    warehouses = exporter.available_warehouses(selected_warehouse_ids)
     requested_fields = values.getlist("fields")
     if len(requested_fields) == 1 and "," in requested_fields[0]:
         requested_fields = requested_fields[0].split(",")
@@ -6371,14 +6524,17 @@ def warehouse_products_export():
     page_size = 1000
     first = catalog.list_products(
         page=1, per_page=page_size, include_facets=False,
-        include_cell_item_names=False, **filters
+        include_cell_item_names=False,
+        warehouse_ids=selected_warehouse_ids, **filters
     )
 
     def products():
         page = 1
         result = first
         while True:
-            items = exporter.enrich(result["items"])
+            items = exporter.enrich(
+                result["items"], warehouse_ids=selected_warehouse_ids
+            )
             for item in items:
                 yield item
             if page >= result["pages"]:
@@ -6386,7 +6542,8 @@ def warehouse_products_export():
             page += 1
             result = catalog.list_products(
                 page=page, per_page=page_size, include_facets=False,
-                include_cell_item_names=False, **filters
+                include_cell_item_names=False,
+                warehouse_ids=selected_warehouse_ids, **filters
             )
 
     payload = exporter.build(
@@ -11120,6 +11277,7 @@ def manual_sale_add():
         "category": catalog_product["category"],
         "brand_id": catalog_product.get("brand_id"),
         "category_id": catalog_product.get("category_id"),
+        "warehouse_id": request.form.get("warehouse_id"),
         "quantity": quantity,
         **pricing,
         "unit_price": unit_price,
@@ -15928,6 +16086,18 @@ def receipt_create():
     if "__new__" in request.form.getlist("product_id"):
         return warehouse_add_product()
 
+    receipt_database = CatalogDatabase(cache_initialization=True)
+    try:
+        with receipt_database.connect() as connection:
+            warehouse_id = require_warehouse(
+                connection, request.form.get("warehouse_id")
+            )
+    except WarehouseStockError as error:
+        return redirect(url_for(
+            "receipts_page", notice="error", message=str(error),
+            open_receipt_modal="1",
+        ))
+
     try:
         product_image = read_product_image_upload(
             request.files.get("product_image")
@@ -16439,6 +16609,33 @@ def receipt_create():
             message="Добавьте хотя бы один товар",
         ))
 
+    shared_catalog = SharedCatalog(receipt_database)
+    direct_products = shared_catalog.products_by_ids(
+        [position["product_id"] for position in positions],
+        include_archived=False,
+    )
+    moysklad_products = shared_catalog.products_by_moysklad_ids(
+        [position["product_id"] for position in positions]
+    )
+    inventory_positions = []
+    for position in positions:
+        product_key = str(position["product_id"])
+        canonical = direct_products.get(product_key)
+        if canonical is None:
+            matches = moysklad_products.get(product_key) or []
+            canonical = matches[0] if len(matches) == 1 else None
+        if canonical is None:
+            return redirect(url_for(
+                "receipts_page", notice="error",
+                message="Товар не связан с канонической карточкой ERP.",
+                open_receipt_modal="1",
+            ))
+        inventory_positions.append({
+            **position, "product_id": int(canonical["id"]),
+            "brand_id": canonical.get("brand_id"),
+            "category_id": canonical.get("category_id"),
+        })
+
     try:
         with CatalogDatabase(cache_initialization=True).connect() as connection:
             assert_product_references_unlocked(
@@ -16525,6 +16722,7 @@ def receipt_create():
             "note": note,
             "status": "posted",
             "status_label": "Проведён",
+            "warehouse_id": warehouse_id,
             "positions": positions,
             "positions_count": len(positions),
             "total_quantity": total_quantity,
@@ -16536,54 +16734,22 @@ def receipt_create():
             ),
         }
 
-        receipts.insert(0, receipt)
-        save_receipts(receipts)
-
         partial_warnings = []
-        if catalog_product_id and len(positions) == 1:
-            try:
-                ExcelProductCatalog().update_product(
-                    catalog_product_id,
-                    stock=positions[0]["quantity"],
-                    stock_reason=(
-                        "Приход " + receipt_number
-                    ),
-                )
-            except (TypeError, ValueError):
-                app.logger.exception(
-                    "Не удалось обновить остаток новой "
-                    "локальной карточки товара"
-                )
-                partial_warnings.append(
-                    "локальный остаток товара требует проверки"
-                )
-
-        for position in positions:
-            add_stock_operation({
-                "id": str(uuid.uuid4()),
-                "created_at": created_at,
-                "product_id": position["product_id"],
-                "product_name": position["product_name"],
-                "type": "enter",
-                "label": "Приход",
-                "quantity": position["quantity"],
-                "stock_before": position["stock_before"],
-                "stock_after": position["stock_after"],
-                "diff": position["quantity"],
-                "source": "Приход",
-                "reason": reason,
-                "status": "success",
-                "receipt_id": receipt_id,
-                "receipt_number": receipt_number,
-                "brand": position.get("brand") or "",
-                "category": position.get("category") or "",
-                "supplier": "",
-                "invoice_number": "",
-                "purchase_price": position["purchase_price"],
-                "moysklad_document_id": receipt["moysklad_document_id"],
-                "moysklad_document_name": receipt["moysklad_document_name"],
-                "moysklad_document_url": receipt["moysklad_document_url"],
-            })
+        receipt["inventory_managed"] = True
+        try:
+            persist_api_receipt(
+                receipt, inventory_positions, receipts, receipt_id,
+                created_at, reason,
+                receipt_inventory=ReceiptInventory(receipt_database),
+            )
+        except Exception:
+            app.logger.exception("Receipt form local persistence failed")
+            rollback_remote_receipt(client, moysklad_document)
+            return redirect(url_for(
+                "receipts_page", notice="error",
+                message="Ошибка сохранения прихода в ERP.",
+                open_receipt_modal="1",
+            ))
 
         if product_image and not created_new_product:
             image_product_id = str(product_ids[0] or "").strip()
@@ -17413,7 +17579,12 @@ def legacy_analytics_page():
 
 def _analytics_context(section=None):
     filters = parse_filters(request.args)
-    context = BusinessAnalytics(purchase_store=purchase_store()).context(
+    context = BusinessAnalytics(
+        purchase_store=purchase_store(),
+        warehouse_ids=WarehouseStockService().selected_warehouse_ids(
+            _warehouse_user_id()
+        ),
+    ).context(
         section or (request.args.get("section") or "summary").strip(),
         filters,
     )
@@ -17441,7 +17612,7 @@ def analytics_section():
 @app.route("/app/analytics/export.csv")
 def analytics_export_csv():
     context = _analytics_context()
-    rows = BusinessAnalytics(purchase_store=purchase_store()).csv_rows(context)
+    rows = BusinessAnalytics().csv_rows(context)
     output = io.StringIO()
     fieldnames = sorted({key for row in rows for key in row})
     writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
@@ -18267,7 +18438,7 @@ def excel_receipt_draft_page(draft_id):
 def excel_receipt_post(draft_id):
     service = ExcelReceiptImportService()
     try:
-        receipt = service.post(draft_id)
+        receipt = service.post(draft_id, warehouse_id=request.form.get("warehouse_id"))
     except ExcelDraftBlockedError as error:
         _publish_system_event(
             "receipt_import:error:{}:{}".format(draft_id, getattr(g, "operation_id", "") or uuid.uuid4().hex),
@@ -20749,6 +20920,14 @@ def product_bundle_page(product_id):
     if product is None:
         abort(404)
     service = ProductBundles(catalog.database)
+    warehouse_service = WarehouseStockService(catalog.database)
+    selected_warehouse_ids = warehouse_service.selected_warehouse_ids(
+        _warehouse_user_id()
+    )
+    product["stock"] = warehouse_service.selected_total(
+        product_id, selected_warehouse_ids
+    )
+    active_warehouses = warehouse_service.list_warehouses()
     error = ""
     notice = ""
     if request.method == "POST":
@@ -20757,10 +20936,20 @@ def product_bundle_page(product_id):
             if request.form.get("action") == "confirm_physical":
                 from app.services.component_inventory import ComponentInventory
                 component_id = int(request.form.get("physical_product_id") or 0)
-                if component_id not in {part["component_id"] for part in service.get(product_id)["components"]}:
+                if component_id not in {
+                    part["component_id"]
+                    for part in service.get(
+                        product_id, warehouse_ids=selected_warehouse_ids
+                    )["components"]
+                }:
                     raise ValueError("Компонент не входит в сохранённый состав.")
-                ComponentInventory(catalog.database).confirm(component_id, request.form.get("physical_stock"), actor=current_audit_actor().get("actor_name", ""))
-                notice = "Физический остаток подтверждён. Legacy-значение сохранено."
+                ComponentInventory(catalog.database).confirm(
+                    component_id,
+                    request.form.get("physical_stock"),
+                    actor=current_audit_actor().get("actor_name", ""),
+                    warehouse_id=request.form.get("warehouse_id"),
+                )
+                notice = "Физический остаток выбранного склада подтверждён."
             elif request.form.get("action") == "create_component":
                 component = catalog.create_product(
                     name=request.form.get("name"), article=request.form.get("article"),
@@ -20783,7 +20972,11 @@ def product_bundle_page(product_id):
         except ValueError as failure:
             error = str(failure)
     return render_template("product_bundle.html", product=product,
-                           bundle=service.get(product_id), error=error,
+                           bundle=service.get(
+                               product_id,
+                               warehouse_ids=selected_warehouse_ids,
+                           ), warehouses=active_warehouses,
+                           selected_warehouse_ids=selected_warehouse_ids, error=error,
                            notice=notice or ("Состав сохранён." if request.args.get("saved") else "")), 422 if error else 200
 
 
@@ -22202,6 +22395,11 @@ def api_receipts_collection():
         receipt_inventory = ReceiptInventory(receipt_database)
         try:
             payload, product_image = api_receipt_request_payload()
+            with receipt_database.connect() as connection:
+                warehouse_id = require_warehouse(
+                    connection, payload.get("warehouse_id"),
+                    allow_legacy_default=not request.path.startswith("/api/v1/"),
+                )
             request_idempotency_key = str(
                 request.headers.get("Idempotency-Key")
                 or payload.get("idempotency_key")
@@ -22376,6 +22574,7 @@ def api_receipts_collection():
             "note": note,
             "status": "posted",
             "status_label": "Проведён",
+            "warehouse_id": warehouse_id,
             "positions": positions,
             "positions_count": len(positions),
             "total_quantity": sum(item["quantity"] for item in positions),

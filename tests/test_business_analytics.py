@@ -198,7 +198,10 @@ class BusinessAnalyticsTest(unittest.TestCase):
             self.product["id"], 1, 100,
         )
         with self.database.connect() as connection:
-            connection.execute("UPDATE catalog_excel_products SET stock=0 WHERE id=?", (self.product["id"],))
+            connection.execute(
+                "UPDATE erp_product_warehouse_stock SET quantity=0 WHERE product_id=?",
+                (self.product["id"],),
+            )
             connection.commit()
         service = BusinessAnalytics(self.database)
         isolated = service.context("stock", self.filters(horizon="60"))["rows"][0]
@@ -207,7 +210,10 @@ class BusinessAnalyticsTest(unittest.TestCase):
         self.assertTrue(isolated["preliminary"])
 
         with self.database.connect() as connection:
-            connection.execute("UPDATE catalog_excel_products SET stock=1 WHERE id=?", (self.product["id"],))
+            connection.execute(
+                "UPDATE erp_product_warehouse_stock SET quantity=1 WHERE product_id=?",
+                (self.product["id"],),
+            )
             connection.commit()
         self.sales.create_sale({"source": "manual", "created_at": "2026-08-20T12:00:00+03:00"}, self.product["id"], 1, 100)
         repeated = service.context("stock", self.filters(horizon="60"))["rows"][0]

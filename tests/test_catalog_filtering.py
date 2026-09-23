@@ -254,13 +254,13 @@ class CatalogFilteringTest(unittest.TestCase):
             "category_id={}".format(empty_category["id"]), category_all
         )
 
-    def test_stock_filter_preserves_fractional_and_legacy_value_semantics(self):
+    def test_stock_filter_preserves_fractional_and_nonnegative_semantics(self):
         with self.database.transaction() as connection:
             ids = [row[0] for row in connection.execute(
                 "SELECT id FROM catalog_excel_products WHERE brand_id = ? "
                 "ORDER BY id LIMIT 5", (self.brand["id"],)
             ).fetchall()]
-            values = (0.5, 2.5, 0, -1, "legacy-invalid")
+            values = (0.5, 2.5, 0, 0, 0)
             connection.executemany(
                 "UPDATE catalog_excel_products SET stock = ? WHERE id = ?",
                 list(zip(values, ids)),
@@ -384,7 +384,9 @@ class CatalogFilteringTest(unittest.TestCase):
         self.assertIn("Бренд: 666 Barcelona", html)
         self.assertIn("Категория:   НАРУЧНЫЕ ЧАСЫ  ", html)
         self.assertIn("Сбросить всё", html)
-        self.assertEqual(html.count('data-product-id="'), 100)
+        self.assertEqual(len(re.findall(
+            r'<tr\b[^>]*data-product-id="', html
+        )), 100)
 
     def test_warehouse_missing_brand_and_category_filter_matrix(self):
         fixtures = (
@@ -562,7 +564,9 @@ class CatalogFilteringTest(unittest.TestCase):
         self.assertNotIn("Статус проверки: Не проверены", html)
         self.assertNotIn('name="check_state" value="unchecked"', toolbar)
         self.assertNotIn('class="erp-filter-count"', html)
-        self.assertEqual(html.count('data-product-id="'), 4)
+        self.assertEqual(len(re.findall(
+            r'<tr\b[^>]*data-product-id="', html
+        )), 4)
 
     def test_sales_uses_positive_stock_while_receipts_keep_full_catalog(self):
         query = "brand_id={}&category_id={}&limit=200".format(

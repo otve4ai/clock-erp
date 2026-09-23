@@ -1,6 +1,5 @@
 """Configurable, read-only XLSX export for the canonical product catalogue."""
 
-import json
 from collections import OrderedDict
 from datetime import timezone
 from decimal import Decimal, InvalidOperation
@@ -67,47 +66,6 @@ def excel_datetime(value):
     return result
 
 
-def _warehouse_rows(payload):
-    """Normalize supported Bitrix warehouse payload shapes without fixed names."""
-    try:
-        source = json.loads(payload) if isinstance(payload, str) else payload
-    except (TypeError, ValueError):
-        return []
-    source = source if isinstance(source, dict) else {}
-    stocks = source.get("warehouse_stocks") or source.get("STORES") or []
-    if isinstance(stocks, dict):
-        rows = []
-        for key, value in stocks.items():
-            if isinstance(value, dict):
-                row = dict(value)
-                row.setdefault("name", key)
-            else:
-                row = {"name": key, "quantity": value}
-            rows.append(row)
-        return rows
-    return [row for row in stocks if isinstance(row, dict)]
-
-
-def warehouse_values(payload):
-    result = {}
-    for row in _warehouse_rows(payload):
-        name = next((
-            str(row.get(key) or "").strip()
-            for key in ("name", "warehouse_name", "store_name", "title", "NAME")
-            if str(row.get(key) or "").strip()
-        ), "")
-        if not name:
-            continue
-        raw_quantity = next((
-            row.get(key) for key in
-            ("quantity", "stock", "amount", "available", "value", "QUANTITY")
-            if row.get(key) not in (None, "")
-        ), 0)
-        quantity = excel_number(raw_quantity)
-        result[name] = quantity if quantity is not None else 0
-    return result
-
-
 class ProductExcelExport:
     def __init__(self, database=None):
         self.database = database or CatalogDatabase(cache_initialization=True)
@@ -122,19 +80,25 @@ class ProductExcelExport:
             for label, fields in FIELD_GROUPS
         ]
 
-    def available_warehouses(self):
-        names = set()
+    def available_warehouses(self, warehouse_ids=None):
+        parameters = []
+        condition = "is_active=1"
+        if warehouse_ids is not None:
+            warehouse_ids = [int(value) for value in warehouse_ids]
+            if not warehouse_ids:
+                return []
+            condition += " AND id IN ({})".format(
+                ",".join("?" for _ in warehouse_ids)
+            )
+            parameters.extend(warehouse_ids)
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT cp.normalized_payload_json FROM catalog_excel_products p "
-                "JOIN catalog_excel_batches b ON b.id=p.current_batch_id "
-                "JOIN catalog_products cp ON cp.id=p.bitrix_catalog_product_id "
-                "WHERE p.active=1 AND (p.source_key LIKE 'bitrix:%' "
-                "OR (b.status='active' AND p.current_batch_id=b.id))"
+                "SELECT name FROM erp_warehouses WHERE {} ORDER BY id".format(
+                    condition
+                ),
+                parameters,
             ).fetchall()
-        for row in rows:
-            names.update(warehouse_values(row["normalized_payload_json"]))
-        return sorted(names, key=str.casefold)
+        return [str(row["name"]) for row in rows]
 
     def validate_fields(self, requested_fields, available_warehouses):
         requested = list(dict.fromkeys(str(value) for value in requested_fields or []))
@@ -155,31 +119,45 @@ class ProductExcelExport:
             raise ValueError("Выберите хотя бы одно поле для экспорта.")
         return validated
 
-    def enrich(self, products):
-        """Attach synchronized per-warehouse balances with bounded queries."""
+    def enrich(self, products, warehouse_ids=None):
+        """Attach canonical per-warehouse balances with bounded queries."""
         products = list(products)
         ids = [int(product["id"]) for product in products]
         if not ids:
             return products
-        payloads = {}
+        balances = {product_id: {} for product_id in ids}
+        selected_ids = (
+            [int(value) for value in warehouse_ids]
+            if warehouse_ids is not None else None
+        )
         with self.database.connect() as connection:
             for start in range(0, len(ids), 400):
                 chunk = ids[start:start + 400]
                 placeholders = ", ".join("?" for _ in chunk)
+                parameters = list(chunk)
+                warehouse_filter = ""
+                if selected_ids is not None:
+                    if not selected_ids:
+                        continue
+                    warehouse_filter = " AND w.id IN ({})".format(
+                        ",".join("?" for _ in selected_ids)
+                    )
+                    parameters.extend(selected_ids)
                 rows = connection.execute(
-                    "SELECT p.id AS product_id,cp.normalized_payload_json "
-                    "FROM catalog_excel_products p LEFT JOIN catalog_products cp "
-                    "ON cp.id=p.bitrix_catalog_product_id "
-                    "WHERE p.id IN ({})".format(placeholders), chunk,
+                    "SELECT s.product_id,w.name,s.quantity "
+                    "FROM erp_product_warehouse_stock s "
+                    "JOIN erp_warehouses w ON w.id=s.warehouse_id "
+                    "WHERE s.product_id IN ({}){}".format(
+                        placeholders, warehouse_filter
+                    ),
+                    parameters,
                 ).fetchall()
-                payloads.update({
-                    int(row["product_id"]): row["normalized_payload_json"]
-                    for row in rows if row["normalized_payload_json"]
-                })
+                for row in rows:
+                    balances[int(row["product_id"])][str(row["name"])] = (
+                        excel_number(row["quantity"]) or 0
+                    )
         for product in products:
-            product["_export_warehouses"] = warehouse_values(
-                payloads.get(int(product["id"]))
-            )
+            product["_export_warehouses"] = balances.get(int(product["id"]), {})
         return products
 
     def build(self, products, total, fields=None, available_warehouses=None):

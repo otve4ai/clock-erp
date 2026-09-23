@@ -321,7 +321,10 @@ class InventoryControl:
         self.initialize(); today = datetime.now(timezone.utc).date()
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT b.id,b.name brand_name,COALESCE(SUM(CASE WHEN p.active=1 AND p.stock>0 THEN 1 ELSE 0 END),0) in_stock,"
+                "SELECT b.id,b.name brand_name,COALESCE(SUM(CASE WHEN p.active=1 AND "
+                "COALESCE((SELECT SUM(ws.quantity) FROM erp_product_warehouse_stock ws "
+                "JOIN erp_warehouses w ON w.id=ws.warehouse_id WHERE ws.product_id=p.id "
+                "AND w.is_active=1),0)>0 THEN 1 ELSE 0 END),0) in_stock,"
                 "bc.enabled,COALESCE(bc.interval_days,90) interval_days,bc.assignee_user_id,bc.assignee_name,"
                 "EXISTS(SELECT 1 FROM erp_inventory_sessions ax WHERE ax.brand_id=b.id AND ax.status='active') has_active "
                 "FROM erp_brands b LEFT JOIN catalog_excel_products p ON p.brand_id=b.id LEFT JOIN erp_inventory_brand_controls bc ON bc.brand_id=b.id WHERE b.active=1 GROUP BY b.id ORDER BY b.name COLLATE NOCASE"

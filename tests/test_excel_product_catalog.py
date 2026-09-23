@@ -415,8 +415,9 @@ class ExcelProductCatalogTest(unittest.TestCase):
                 "WHERE excel_name_raw = 'Empty'"
             )
             connection.execute(
-                "UPDATE catalog_excel_products SET stock = -2 "
-                "WHERE excel_name_raw = 'Negative'"
+                "UPDATE erp_product_warehouse_stock SET quantity = 0 "
+                "WHERE product_id = (SELECT id FROM catalog_excel_products "
+                "WHERE excel_name_raw = 'Negative')"
             )
             null_is_positive = connection.execute(
                 "SELECT CAST(NULL AS REAL) > 0"

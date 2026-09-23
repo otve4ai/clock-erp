@@ -5,9 +5,14 @@ import uuid
 
 from app.catalog_db import CatalogDatabase
 from app.services.audit_journal import AuditJournal
-from app.services.component_inventory import balance, write_balance
 from app.services.inventory_lock import assert_products_unlocked
 from app.services.receipt_inventory import ReceiptInventory, ReceiptInventoryError, utc_now
+from app.services.warehouse_stock import (
+    decrease,
+    get_balance,
+    increase,
+    set_balance,
+)
 
 
 REASONS = {
@@ -31,17 +36,23 @@ class ManualReceipts:
         self.database.initialize()
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT id,code,name,active,is_default FROM erp_warehouses "
-                + ("" if include_inactive else "WHERE active=1 ")
+                "SELECT id,code,name,is_active AS active,"
+                "CASE WHEN code='udelnaya' THEN 1 ELSE 0 END AS is_default "
+                "FROM erp_warehouses "
+                + ("" if include_inactive else "WHERE is_active=1 ")
                 + "ORDER BY is_default DESC,name COLLATE NOCASE"
             ).fetchall()
-        return [dict(row) for row in rows]
+        result = [dict(row) for row in rows]
+        for warehouse in result:
+            warehouse["id"] = int(warehouse["id"])
+        return result
 
     @staticmethod
     def _warehouse(connection, warehouse_id, active=True):
         row = connection.execute(
-            "SELECT * FROM erp_warehouses WHERE id=?" + (" AND active=1" if active else ""),
-            (str(warehouse_id or ""),),
+            "SELECT *,CASE WHEN code='udelnaya' THEN 1 ELSE 0 END AS is_default "
+            "FROM erp_warehouses WHERE id=?" + (" AND is_active=1" if active else ""),
+            (warehouse_id,),
         ).fetchone()
         if row is None:
             raise ManualReceiptError("Выберите существующий активный склад.")
@@ -80,26 +91,14 @@ class ManualReceipts:
 
     @staticmethod
     def _warehouse_balance(connection, warehouse, product_id, now):
-        row = connection.execute(
-            "SELECT quantity FROM erp_warehouse_stocks WHERE warehouse_id=? AND product_id=?",
-            (warehouse["id"], int(product_id)),
-        ).fetchone()
-        if row is not None:
-            return float(row[0] or 0)
-        initial = balance(connection, product_id, require_initialized=False) if warehouse["is_default"] else 0.0
-        connection.execute(
-            "INSERT INTO erp_warehouse_stocks(warehouse_id,product_id,quantity,updated_at) "
-            "VALUES(?,?,?,?)", (warehouse["id"], int(product_id), initial, now)
+        del now
+        return get_balance(
+            connection, product_id, warehouse["id"], require_initialized=False
         )
-        return initial
 
     @staticmethod
     def _set_warehouse_balance(connection, warehouse_id, product_id, quantity, now):
-        connection.execute(
-            "UPDATE erp_warehouse_stocks SET quantity=?,updated_at=? "
-            "WHERE warehouse_id=? AND product_id=?",
-            (quantity, now, warehouse_id, int(product_id)),
-        )
+        return set_balance(connection, product_id, warehouse_id, quantity, timestamp=now)
 
     def create(self, warehouse_id, reason_code, items, comment="", actor="", key=""):
         prepared = self._positions(items)
@@ -202,19 +201,9 @@ class ManualReceipts:
             for item in items:
                 product_id = int(item["product_id"])
                 quantity = float(item["quantity"])
-                if not warehouse["is_default"]:
-                    default_warehouse = connection.execute(
-                        "SELECT * FROM erp_warehouses WHERE active=1 AND is_default=1"
-                    ).fetchone()
-                    if default_warehouse is None:
-                        raise ManualReceiptError("Основной склад не настроен.")
-                    self._warehouse_balance(connection, default_warehouse, product_id, now)
-                warehouse_before = self._warehouse_balance(connection, warehouse, product_id, now)
-                warehouse_after = warehouse_before + quantity
-                total_before = balance(connection, product_id, ("receipt", receipt_id), False)
-                total_after = total_before + quantity
-                self._set_warehouse_balance(connection, warehouse["id"], product_id, warehouse_after, now)
-                write_balance(connection, product_id, total_after, "manual_receipt", now, ("receipt", receipt_id))
+                stock_before, stock_after = increase(
+                    connection, product_id, warehouse["id"], quantity, now
+                )
                 connection.execute(
                     "INSERT INTO catalog_stock_movements "
                     "(id,product_id,movement_type,quantity_delta,stock_before,stock_after,receipt_id,"
@@ -222,7 +211,7 @@ class ManualReceipts:
                     "operation_kind,source_number,source,user_name,comment,created_at,warehouse_id) "
                     "VALUES(?,?,'receipt',?,?,?,?,? ,?,'default','manual_receipt',?,?,'post',?,"
                     "'Приход',?,?,?,?)",
-                    (uuid.uuid4().hex, product_id, quantity, total_before, total_after, receipt_id,
+                    (uuid.uuid4().hex, product_id, quantity, stock_before, stock_after, receipt_id,
                      item["id"], "manual-receipt-post:{}:{}".format(receipt_id, item["id"]),
                      receipt_id, str(item["id"]), receipt["number"], actor or receipt["user_name"],
                      receipt["comment"], now, warehouse["id"]),
@@ -270,11 +259,9 @@ class ManualReceipts:
                             int(quantity) if quantity.is_integer() else quantity,
                         )
                     )
-                total_before = balance(connection, product_id, ("receipt", receipt_id), False)
-                if total_before + 0.000001 < quantity:
-                    raise ManualReceiptError("Невозможно отменить приход: суммарного остатка недостаточно.")
-                self._set_warehouse_balance(connection, warehouse["id"], product_id, available - quantity, now)
-                write_balance(connection, product_id, total_before - quantity, "manual_receipt_cancel", now, ("receipt", receipt_id))
+                stock_before, stock_after = decrease(
+                    connection, product_id, warehouse["id"], quantity, now
+                )
                 connection.execute(
                     "INSERT INTO catalog_stock_movements "
                     "(id,product_id,movement_type,quantity_delta,stock_before,stock_after,receipt_id,"
@@ -282,7 +269,7 @@ class ManualReceipts:
                     "source_number,source,user_name,comment,created_at,warehouse_id) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (uuid.uuid4().hex, product_id, "cancellation", -quantity,
-                     total_before, total_before - quantity, receipt_id,
+                     stock_before, stock_after, receipt_id,
                      "manual-receipt-cancel:{}:{}".format(receipt_id, product_id),
                      "default", "manual_receipt_reversal", receipt_id,
                      "product:{}".format(product_id), "cancel", receipt["number"],
@@ -338,6 +325,7 @@ class ManualReceipts:
         if receipt is None:
             raise ManualReceiptError("Приход не найден.")
         result = dict(receipt)
+        result["warehouse_id"] = int(result["warehouse_id"])
         result["reason_label"] = REASONS.get(result["reason_code"], result["reason_code"] or "—")
         result["created_by"] = result.get("user_name") or ""
         result["items"] = []
@@ -350,11 +338,10 @@ class ManualReceipts:
         ).fetchall()
         for row in rows:
             item = dict(row)
-            stock = connection.execute(
-                "SELECT quantity FROM erp_warehouse_stocks WHERE warehouse_id=? AND product_id=?",
-                (receipt["warehouse_id"], row["product_id"]),
-            ).fetchone()
-            item["stock"] = float(stock[0] or 0) if stock else 0
+            item["stock"] = get_balance(
+                connection, row["product_id"], receipt["warehouse_id"],
+                require_initialized=False,
+            )
             quantity = float(item["quantity"])
             if result["status"] == "draft":
                 item["stock_before"] = item["stock"]

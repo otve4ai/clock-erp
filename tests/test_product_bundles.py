@@ -314,7 +314,12 @@ class ProductBundlesTest(unittest.TestCase):
 
     def test_additive_upgrade_of_existing_catalog_keeps_entire_product_row(self):
         import sqlite3
-        from app.schema_migrations import apply_migrations, BUNDLE_MIGRATION_ID, COMPONENT_MIGRATION_ID
+        from app.schema_migrations import (
+            apply_migrations,
+            BUNDLE_MIGRATION_ID,
+            COMPONENT_MIGRATION_ID,
+            MULTIWAREHOUSE_MIGRATION_ID,
+        )
         product = self.create_product(17)
         with sqlite3.connect(str(self.database.path)) as connection:
             before = connection.execute('SELECT * FROM catalog_excel_products WHERE id=?', (product['id'],)).fetchone()
@@ -325,6 +330,10 @@ class ProductBundlesTest(unittest.TestCase):
             for table in ('erp_sale_component_snapshots','erp_bundle_components','erp_product_bundles','erp_local_components'):
                 connection.execute('DROP TABLE '+table)
             connection.execute('DELETE FROM erp_migration_ledger WHERE migration_id=?', (BUNDLE_MIGRATION_ID,))
+            connection.execute(
+                'DELETE FROM erp_migration_ledger WHERE migration_id=?',
+                (MULTIWAREHOUSE_MIGRATION_ID,),
+            )
         apply_migrations(self.database.path, app_commit='upgrade-test')
         with self.database.connect() as connection:
             self.assertEqual(tuple(connection.execute('SELECT * FROM catalog_excel_products WHERE id=?', (product['id'],)).fetchone()), before)

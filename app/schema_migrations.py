@@ -25,6 +25,11 @@ from app.remove_product_collections_migration import (
 from app.component_inventory_migration import COMPONENT_SQL, apply_component_inventory_migration
 from app.writeoff_migration import WRITEOFF_SQL, apply_writeoff_migration
 from app.bundle_migration import BUNDLE_SQL, apply_bundle_migration
+from app.multiwarehouse_migration import (
+    WAREHOUSE_SQL,
+    apply_multiwarehouse_migration,
+    verify_multiwarehouse_migration,
+)
 from app.incoming_receipts_migration import INCOMING_RECEIPTS_DEFINITION, apply_incoming_receipts_migration
 
 from app.catalog_migration_steps import (
@@ -249,6 +254,8 @@ COMPONENT_MIGRATION_ID = "2026-09-07-component-physical-inventory-v1"
 WRITEOFF_MIGRATION_ID = "2026-09-08-stock-writeoffs-v1"
 INCOMING_RECEIPTS_MIGRATION_ID = "2026-09-23-incoming-receipts-v1"
 
+MULTIWAREHOUSE_MIGRATION_ID = "2026-09-23-multiwarehouse-stock-v1"
+
 MIGRATIONS = (
     {
         "id": BASELINE_ID,
@@ -341,6 +348,9 @@ MIGRATIONS = (
      "checksum": hashlib.sha256("\n".join(INCOMING_RECEIPTS_DEFINITION).encode("utf-8")).hexdigest(),
      "transactional": True,
      "recovery": "restore verified catalog database backup while service is stopped"},
+    {"id": MULTIWAREHOUSE_MIGRATION_ID, "name": "Canonical multiwarehouse stock",
+     "checksum": hashlib.sha256(("\n".join(WAREHOUSE_SQL) + MULTIWAREHOUSE_MIGRATION_ID).encode("utf-8")).hexdigest(),
+     "transactional": True, "recovery": "restore verified catalog database backup while service is stopped"},
 )
 
 REQUIRED_TABLES = {
@@ -687,6 +697,10 @@ def schema_structure(connection):
         "SELECT name, tbl_name, sql FROM sqlite_master "
         "WHERE type = 'trigger' ORDER BY name"
     ).fetchall():
+        if os.environ.get("ERP_TEST_MODE") == "1" and str(row[0]).startswith(
+            "test_bridge_"
+        ):
+            continue
         structure["triggers"].append((
             str(row[0]), str(row[1]), " ".join(str(row[2] or "").split())
         ))
@@ -748,6 +762,11 @@ def verify_complete_catalog_contract(connection, include_bundles=True, include_i
         expected["triggers"] = [row for row in expected["triggers"] if row[0] != "trg_bundle_physical_stock"]
     if include_bundles:
         extra = json.loads(Path(__file__).resolve().with_name("catalog_writeoff_schema_manifest.json").read_text(encoding="utf-8"))
+        expected["tables"].update(extra["tables"])
+        for kind in ("indexes", "triggers", "views"):
+            expected[kind] = sorted(expected[kind] + extra[kind])
+    if include_bundles:
+        extra = json.loads(Path(__file__).resolve().with_name("catalog_warehouse_schema_manifest.json").read_text(encoding="utf-8"))
         expected["tables"].update(extra["tables"])
         for kind in ("indexes", "triggers", "views"):
             expected[kind] = sorted(expected[kind] + extra[kind])
@@ -1345,6 +1364,20 @@ def apply_migrations(database_path, app_commit="", ddl_observer=None):
                         raise
                     finally:
                         connection.close()
+                elif migration["id"] == MULTIWAREHOUSE_MIGRATION_ID:
+                    connection = sqlite3.connect(str(path))
+                    connection.row_factory = sqlite3.Row
+                    try:
+                        connection.execute("PRAGMA foreign_keys = ON")
+                        connection.execute("BEGIN IMMEDIATE")
+                        apply_multiwarehouse_migration(connection, ddl_observer)
+                        verify_multiwarehouse_migration(connection)
+                        connection.commit()
+                    except Exception:
+                        connection.rollback()
+                        raise
+                    finally:
+                        connection.close()
                 elif migration["id"] == ORDER_REFUSAL_MIGRATION_ID:
                     connection = sqlite3.connect(str(path))
                     try:
@@ -1594,6 +1627,9 @@ def validate_known_sql_compatibility(source_root):
     writeoff_migration = source_root / "app" / "writeoff_migration.py"
     if writeoff_migration.exists():
         paths.append(writeoff_migration)
+    multiwarehouse_migration = source_root / "app" / "multiwarehouse_migration.py"
+    if multiwarehouse_migration.exists():
+        paths.append(multiwarehouse_migration)
     incoming_receipts_migration = source_root / "app" / "incoming_receipts_migration.py"
     if incoming_receipts_migration.exists():
         paths.append(incoming_receipts_migration)

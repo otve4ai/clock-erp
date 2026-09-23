@@ -88,13 +88,21 @@ class WriteoffsTest(unittest.TestCase):
 
     def test_upgrade_is_repeatable_preserves_stock(self):
         import sqlite3
-        from app.schema_migrations import apply_migrations, WRITEOFF_MIGRATION_ID
+        from app.schema_migrations import (
+            apply_migrations,
+            MULTIWAREHOUSE_MIGRATION_ID,
+            WRITEOFF_MIGRATION_ID,
+        )
         p=self.create_product(7)
         with sqlite3.connect(str(self.database.path)) as c:
             before=c.execute('SELECT * FROM catalog_excel_products ORDER BY id').fetchall()
             c.execute('DROP TABLE erp_writeoff_items')
             c.execute('DROP TABLE erp_writeoffs')
             c.execute('DELETE FROM erp_migration_ledger WHERE migration_id=?',(WRITEOFF_MIGRATION_ID,))
+            c.execute(
+                'DELETE FROM erp_migration_ledger WHERE migration_id=?',
+                (MULTIWAREHOUSE_MIGRATION_ID,),
+            )
         for _ in range(2): apply_migrations(self.database.path,app_commit='writeoff-upgrade-test')
         with self.database.connect() as c:
             self.assertEqual([tuple(r) for r in c.execute('SELECT * FROM catalog_excel_products ORDER BY id')],before)

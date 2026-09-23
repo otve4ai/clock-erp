@@ -11,15 +11,27 @@ from app.services.audit_journal import AuditJournal
 from app.services.inventory_lock import unlocked_product_sql
 
 
+DEFAULT_STOCK_SQL = (
+    "COALESCE((SELECT ws.quantity FROM erp_product_warehouse_stock ws "
+    "JOIN erp_warehouses w ON w.id=ws.warehouse_id "
+    "WHERE ws.product_id=p.id AND w.code='udelnaya' AND w.is_active=1),0)"
+)
+ALL_ACTIVE_STOCK_SQL = (
+    "COALESCE((SELECT SUM(ws.quantity) FROM erp_product_warehouse_stock ws "
+    "JOIN erp_warehouses w ON w.id=ws.warehouse_id "
+    "WHERE ws.product_id=p.id AND w.is_active=1),0)"
+)
 ASSEMBLABLE_STOCK_SQL = (
     "((NOT EXISTS(SELECT 1 FROM erp_product_bundles b WHERE b.product_id=p.id) AND "
-    "CASE WHEN EXISTS(SELECT 1 FROM erp_component_inventory ci WHERE ci.product_id=p.id) "
-    "THEN COALESCE((SELECT physical_stock FROM erp_component_inventory ci WHERE ci.product_id=p.id),0) ELSE p.stock END>0) "
+    + DEFAULT_STOCK_SQL + ">0) "
     "OR (EXISTS(SELECT 1 FROM erp_bundle_components bc WHERE bc.product_id=p.id) "
     "AND NOT EXISTS(SELECT 1 FROM erp_bundle_components bc "
     "JOIN catalog_excel_products component ON component.id=bc.component_id "
-    "LEFT JOIN erp_component_inventory ci ON ci.product_id=bc.component_id "
-    "WHERE bc.product_id=p.id AND (component.active=0 OR ci.physical_stock IS NULL OR ci.physical_stock<bc.quantity))))"
+    "LEFT JOIN erp_warehouses w ON w.code='udelnaya' AND w.is_active=1 "
+    "LEFT JOIN erp_product_warehouse_stock ws ON ws.product_id=bc.component_id "
+    "AND ws.warehouse_id=w.id "
+    "WHERE bc.product_id=p.id AND (component.active=0 OR ws.initialized_at IS NULL "
+    "OR ws.quantity<bc.quantity))))"
 )
 
 
@@ -400,7 +412,7 @@ class SharedCatalog:
                 "SELECT id, name, active, product_count, stock_total FROM ("
                 "SELECT b.id, b.name, b.normalized_name, b.active, "
                 "COUNT(p.id) AS product_count, "
-                "COALESCE(SUM(p.stock), 0) AS stock_total "
+                "COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total "
                 "FROM erp_brands b LEFT JOIN catalog_excel_products p "
                 "ON p.brand_id = b.id AND p.active = 1 "
                 + product_availability_sql
@@ -412,7 +424,7 @@ class SharedCatalog:
                 "SELECT 0 AS id, 'Без бренда' AS name, "
                 "'без бренда' AS normalized_name, 1 AS active, "
                 "COUNT(p.id) AS product_count, "
-                "COALESCE(SUM(p.stock), 0) AS stock_total "
+                "COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total "
                 "FROM catalog_excel_products p "
                 "LEFT JOIN erp_categories c ON c.id = p.category_id "
                 "WHERE p.active = 1 AND p.brand_id IS NULL"
@@ -476,8 +488,8 @@ class SharedCatalog:
                 "SELECT b.id, b.name, b.active, b.bitrix_brand_id, b.image_path, "
                 "b.image_source, b.image_sha256, b.image_external_id, "
                 "b.image_updated_at, COUNT(p.id) AS product_count, "
-                "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
-                "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
+                "COALESCE(SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " > 0 THEN 1 ELSE 0 END), 0) "
+                "AS nonzero_count, COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total "
                 "FROM erp_brands b LEFT JOIN catalog_excel_products p "
                 "ON p.brand_id = b.id AND p.active = 1 " + where +
                 " GROUP BY b.id ORDER BY b.name COLLATE NOCASE LIMIT ?",
@@ -491,8 +503,8 @@ class SharedCatalog:
                 category_rows = connection.execute(
                     "SELECT bc.brand_id, c.id, c.name, c.normalized_name, "
                     "COUNT(p.id) AS product_count, "
-                    "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
-                    "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total, "
+                    "COALESCE(SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " > 0 THEN 1 ELSE 0 END), 0) "
+                    "AS nonzero_count, COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total, "
                     "(SELECT COUNT(DISTINCT all_bc.brand_id) "
                     "FROM erp_brand_categories all_bc "
                     "JOIN erp_categories all_c "
@@ -517,8 +529,8 @@ class SharedCatalog:
                 ).fetchall()
                 uncategorized_rows = connection.execute(
                     "SELECT p.brand_id, COUNT(p.id) AS product_count, "
-                    "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
-                    "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
+                    "COALESCE(SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " > 0 THEN 1 ELSE 0 END), 0) "
+                    "AS nonzero_count, COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total "
                     "FROM catalog_excel_products p "
                     "WHERE p.active = 1 AND p.category_id IS NULL "
                     "AND p.brand_id IN ({}) GROUP BY p.brand_id".format(
@@ -607,8 +619,8 @@ class SharedCatalog:
                 "b.image_external_id AS image_external_id, "
                 "b.image_updated_at AS image_updated_at, "
                 "COUNT(p.id) AS product_count, "
-                "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
-                "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
+                "COALESCE(SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " > 0 THEN 1 ELSE 0 END), 0) "
+                "AS nonzero_count, COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total "
                 "FROM erp_brands b LEFT JOIN catalog_excel_products p "
                 "ON p.brand_id = b.id AND p.active = 1 " + where +
                 " GROUP BY b.id ORDER BY b.name COLLATE NOCASE LIMIT ?",
@@ -739,7 +751,7 @@ class SharedCatalog:
             rows = connection.execute(
                 "SELECT c.id, c.brand_id, c.name, c.active, "
                 "b.name AS brand_name, COUNT(p.id) AS product_count, "
-                "COALESCE(SUM(p.stock), 0) AS stock_total "
+                "COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total "
                 "FROM erp_categories c "
                 "JOIN erp_brands b ON b.id = c.brand_id "
                 "LEFT JOIN catalog_excel_products p "
@@ -782,8 +794,8 @@ class SharedCatalog:
             "name": "c.name COLLATE NOCASE",
             "brands": "COALESCE(MAX(category_relations.brand_count), 0)",
             "products": "COUNT(p.id)",
-            "in_stock": "SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END)",
-            "stock": "SUM(COALESCE(p.stock, 0))",
+            "in_stock": "SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " > 0 THEN 1 ELSE 0 END)",
+            "stock": "SUM(COALESCE(" + ALL_ACTIVE_STOCK_SQL + ", 0))",
         }
         if sort_by in sort_expressions:
             order_sql = "{} {}, c.name COLLATE NOCASE ASC".format(
@@ -812,8 +824,8 @@ class SharedCatalog:
                     "1 AS active, 1 AS duplicate_count, "
                     "COUNT(p.id) AS product_count, "
                     "COUNT(DISTINCT COALESCE(p.brand_id, 0)) AS brand_count, "
-                    "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
-                    "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
+                    "COALESCE(SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " > 0 THEN 1 ELSE 0 END), 0) "
+                    "AS nonzero_count, COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total "
                     "FROM catalog_excel_products p "
                     "WHERE p.active = 1 AND p.category_id IS NULL"
                 ).fetchone()
@@ -888,8 +900,8 @@ class SharedCatalog:
                     "COUNT(p.id) AS product_count, "
                     "COALESCE(MAX(category_relations.brand_count), 0) "
                     "AS brand_count, "
-                    "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
-                    "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
+                    "COALESCE(SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " > 0 THEN 1 ELSE 0 END), 0) "
+                    "AS nonzero_count, COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total "
                     "FROM erp_categories c LEFT JOIN catalog_excel_products p "
                     "ON p.category_id = c.id AND p.active = 1 "
                     "LEFT JOIN (SELECT category_id, COUNT(*) AS brand_count "
@@ -918,8 +930,8 @@ class SharedCatalog:
                     "SELECT pairs.category_id, pairs.brand_id AS id, "
                     "COALESCE(b.name, 'Без бренда') AS name, "
                     "COUNT(p.id) AS product_count, "
-                    "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
-                    "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total, "
+                    "COALESCE(SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " > 0 THEN 1 ELSE 0 END), 0) "
+                    "AS nonzero_count, COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total, "
                     "EXISTS (SELECT 1 FROM erp_brand_categories relation "
                     "WHERE relation.category_id = pairs.category_id "
                     "AND relation.brand_id = pairs.brand_id) AS explicit_relation "
@@ -942,9 +954,9 @@ class SharedCatalog:
                 brand_rows.extend(connection.execute(
                     "SELECT 0 AS category_id, COALESCE(b.id, 0) AS id, "
                     "COALESCE(b.name, 'Без бренда') AS name, COUNT(p.id) "
-                    "AS product_count, COALESCE(SUM(CASE WHEN p.stock > 0 "
+                    "AS product_count, COALESCE(SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " > 0 "
                     "THEN 1 ELSE 0 END), 0) AS nonzero_count, "
-                    "COALESCE(SUM(p.stock), 0) AS stock_total, "
+                    "COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total, "
                     "0 AS explicit_relation "
                     "FROM catalog_excel_products p LEFT JOIN erp_brands b "
                     "ON b.id = p.brand_id WHERE p.active = 1 "
@@ -1405,10 +1417,10 @@ class SharedCatalog:
                 "COALESCE(SUM(CASE WHEN p.brand_id = ? "
                 "OR (? = 0 AND p.brand_id IS NULL) "
                 "THEN 1 ELSE 0 END), 0) AS selected_product_count, "
-                "COALESCE(SUM(p.stock), 0) AS global_stock_total, "
+                "COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS global_stock_total, "
                 "COALESCE(SUM(CASE WHEN p.brand_id = ? "
                 "OR (? = 0 AND p.brand_id IS NULL) "
-                "THEN p.stock ELSE 0 END), 0) AS selected_stock_total, "
+                "THEN " + ALL_ACTIVE_STOCK_SQL + " ELSE 0 END), 0) AS selected_stock_total, "
                 "MAX(CASE WHEN p.brand_id = ? "
                 "OR (? = 0 AND p.brand_id IS NULL) "
                 "THEN 1 ELSE 0 END)"
@@ -1428,10 +1440,10 @@ class SharedCatalog:
                 "COALESCE(SUM(CASE WHEN p.brand_id = ? "
                 "OR (? = 0 AND p.brand_id IS NULL) "
                 "THEN 1 ELSE 0 END), 0) AS selected_product_count, "
-                "COALESCE(SUM(p.stock), 0) AS global_stock_total, "
+                "COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS global_stock_total, "
                 "COALESCE(SUM(CASE WHEN p.brand_id = ? "
                 "OR (? = 0 AND p.brand_id IS NULL) "
-                "THEN p.stock ELSE 0 END), 0) AS selected_stock_total, "
+                "THEN " + ALL_ACTIVE_STOCK_SQL + " ELSE 0 END), 0) AS selected_stock_total, "
                 "MAX(CASE WHEN p.brand_id = ? "
                 "OR (? = 0 AND p.brand_id IS NULL) "
                 "THEN 1 ELSE 0 END) AS used_by_brand "
@@ -1538,7 +1550,7 @@ class SharedCatalog:
             parameters.append(max(1, min(int(limit), 200)))
             rows = connection.execute(
                 "SELECT m.id, m.brand_id, m.name, COUNT(p.id) AS product_count, "
-                "COALESCE(SUM(p.stock), 0) AS stock_total "
+                "COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total "
                 "FROM catalog_excel_products p JOIN erp_models m ON m.id = p.model_id "
                 "WHERE " + " AND ".join(where) +
                 " GROUP BY m.id ORDER BY m.name COLLATE NOCASE, m.id LIMIT ?",
@@ -1624,7 +1636,7 @@ class SharedCatalog:
             if include_assemblable:
                 where.append(ASSEMBLABLE_STOCK_SQL)
             else:
-                where.append("p.stock > 0")
+                where.append(DEFAULT_STOCK_SQL + " > 0")
         if product_kind:
             where.append(product_kind_sql("c", product_kind))
         query = catalog_search_key(query)
@@ -1712,7 +1724,8 @@ class SharedCatalog:
                 "p.brand_id, p.category_id, "
                 "COALESCE(b.name, '') AS brand, "
                 "COALESCE(c.name, '') AS category, "
-                "COALESCE(p.cell, '') AS cell, p.stock, p.active, p.deleted_at, "
+                "COALESCE(p.cell, '') AS cell, " + DEFAULT_STOCK_SQL + " AS stock, "
+                "p.active, p.deleted_at, "
                 "COALESCE(p.bitrix_thumbnail_url, "
                 "p.bitrix_primary_image_url, '') AS bitrix_image_url "
                 "FROM catalog_excel_products p "
@@ -1784,7 +1797,8 @@ class SharedCatalog:
                 "p.brand_id, p.category_id, "
                 "COALESCE(b.name, '') AS brand, "
                 "COALESCE(c.name, '') AS category, "
-                "COALESCE(p.cell, '') AS cell, p.stock, p.active, p.deleted_at, "
+                "COALESCE(p.cell, '') AS cell, " + DEFAULT_STOCK_SQL + " AS stock, "
+                "p.active, p.deleted_at, "
                 "COALESCE(p.bitrix_thumbnail_url, "
                 "p.bitrix_primary_image_url, '') AS bitrix_image_url "
                 "FROM catalog_excel_products p "
@@ -1831,7 +1845,7 @@ class SharedCatalog:
                     "p.brand_id, p.category_id, "
                     "COALESCE(b.name, '') AS brand, "
                     "COALESCE(c.name, '') AS category, "
-                    "COALESCE(p.cell, '') AS cell, p.stock, p.active, "
+                    "COALESCE(p.cell, '') AS cell, " + DEFAULT_STOCK_SQL + " AS stock, p.active, "
                     "COALESCE(p.bitrix_thumbnail_url, "
                     "p.bitrix_primary_image_url, '') AS bitrix_image_url "
                     "FROM catalog_excel_products p "

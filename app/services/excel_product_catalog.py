@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.catalog_db import CatalogDatabase
+from app.services.warehouse_stock import default_warehouse_id, get_balance, set_balance
 from app.services.audit_journal import AuditJournal
 from app.services.brand_values import is_numeric_brand, normalize_brand
 from app.services.inventory_lock import (
@@ -71,6 +72,61 @@ PRODUCT_MUTABLE_COLUMNS = (
 )
 
 UNSET = object()
+
+ALL_ACTIVE_PHYSICAL_STOCK_SQL = (
+    "CASE WHEN EXISTS(SELECT 1 FROM erp_product_bundles bundle_guard "
+    "WHERE bundle_guard.product_id=p.id) THEN 0 ELSE "
+    "COALESCE((SELECT SUM(ws.quantity) FROM erp_product_warehouse_stock ws "
+    "JOIN erp_warehouses warehouse_guard ON warehouse_guard.id=ws.warehouse_id "
+    "WHERE ws.product_id=p.id AND warehouse_guard.is_active=1),0) END"
+)
+
+
+def warehouse_stock_cte(warehouse_ids):
+    """Build the canonical selected-warehouse stock read model."""
+    warehouse_ids = sorted({int(value) for value in warehouse_ids})
+    if not warehouse_ids:
+        raise ValueError("At least one warehouse is required")
+    values = ",".join("(?)" for _ in warehouse_ids)
+    sql = """WITH selected_warehouses(warehouse_id) AS (VALUES {values}),
+ordinary_stock AS (
+    SELECT p.id AS product_id, COALESCE(SUM(s.quantity),0) AS quantity
+    FROM catalog_excel_products p CROSS JOIN selected_warehouses sw
+    LEFT JOIN erp_product_warehouse_stock s
+      ON s.product_id=p.id AND s.warehouse_id=sw.warehouse_id
+    GROUP BY p.id
+),
+bundle_per_warehouse AS (
+    SELECT bundle.product_id, sw.warehouse_id,
+      CASE WHEN COUNT(component.component_id)=0 THEN 0
+           WHEN SUM(CASE WHEN physical.active<>1 OR stock.initialized_at IS NULL
+                         THEN 1 ELSE 0 END)>0 THEN 0
+           ELSE MIN(CAST(COALESCE(stock.quantity,0) / component.quantity AS INTEGER)) END
+      AS quantity
+    FROM erp_product_bundles bundle CROSS JOIN selected_warehouses sw
+    LEFT JOIN erp_bundle_components component
+      ON component.product_id=bundle.product_id
+    LEFT JOIN catalog_excel_products physical ON physical.id=component.component_id
+    LEFT JOIN erp_product_warehouse_stock stock
+      ON stock.product_id=component.component_id AND stock.warehouse_id=sw.warehouse_id
+    GROUP BY bundle.product_id,sw.warehouse_id
+),
+bundle_stock AS (
+    SELECT product_id,COALESCE(SUM(quantity),0) AS quantity
+    FROM bundle_per_warehouse GROUP BY product_id
+),
+warehouse_stock_view AS (
+    SELECT p.id AS product_id,
+      CASE WHEN bundle.product_id IS NULL THEN ordinary.quantity
+           ELSE COALESCE(bundle_stock.quantity,0) END AS quantity,
+      CASE WHEN bundle.product_id IS NULL THEN 0 ELSE 1 END AS is_bundle
+    FROM catalog_excel_products p
+    LEFT JOIN ordinary_stock ordinary ON ordinary.product_id=p.id
+    LEFT JOIN erp_product_bundles bundle ON bundle.product_id=p.id
+    LEFT JOIN bundle_stock ON bundle_stock.product_id=p.id
+)
+""".format(values=values)
+    return sql, warehouse_ids
 
 
 def canonical_model_text(value):
@@ -193,16 +249,18 @@ def parse_initial_stock(value):
 
 
 def _record_manual_stock_adjustment(
-        connection, product_id, stock_before, stock_after, reason):
+        connection, product_id, stock_before, stock_after, reason,
+        warehouse_id=None):
     if stock_after == stock_before:
         return
+    warehouse_id = warehouse_id or default_warehouse_id(connection)
     connection.execute(
         "INSERT INTO catalog_excel_manual_stock_operations ("
         "id, product_id, stock_before, stock_after, stock_difference, "
-        "reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "reason, created_at, warehouse_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             str(uuid.uuid4()), int(product_id), stock_before, stock_after,
-            stock_after - stock_before, text(reason) or None, utc_now(),
+            stock_after - stock_before, text(reason) or None, utc_now(), warehouse_id,
         ),
     )
 
@@ -315,12 +373,10 @@ def _matching_snapshot(row):
 
 
 def _restore_columns(connection, product_id, state, columns):
-    if "stock" in columns:
-        from app.services.component_inventory import physical
-        if physical(connection, product_id):
-            legacy = connection.execute("SELECT stock FROM catalog_excel_products WHERE id=?", (int(product_id),)).fetchone()
-            if legacy is not None and state.get("stock") != legacy[0]:
-                raise ValueError("Для компонента используйте физическую инвентаризацию или приход; замена legacy-остатка импортом запрещена.")
+    columns = tuple(
+        column for column in columns
+        if column not in ("stock", "stock_source")
+    )
     assignments = ", ".join("{} = ?".format(column) for column in columns)
     connection.execute(
         "UPDATE catalog_excel_products SET {} WHERE id = ?".format(assignments),
@@ -465,6 +521,7 @@ class ExcelProductBatchService:
             active_products = connection.execute(
                 "SELECT * FROM catalog_excel_products WHERE active = 1"
             ).fetchall()
+            warehouse_id = default_warehouse_id(connection)
             for product in active_products:
                 if (
                     product["source_key"] in incoming_keys
@@ -472,12 +529,17 @@ class ExcelProductBatchService:
                 ):
                     continue
                 before = _snapshot(product)
+                before["stock"] = get_balance(
+                    connection, product["id"], warehouse_id,
+                    require_initialized=False,
+                )
                 after = dict(before)
                 after.update({
                     "active": 0, "current_batch_id": batch_id, "stock": 0.0,
                     "updated_at": now,
                 })
                 _restore_columns(connection, product["id"], after, PRODUCT_MUTABLE_COLUMNS)
+                set_balance(connection, product["id"], warehouse_id, 0, now)
                 self._record_change(
                     connection, batch_id, product["id"], product["source_key"], None,
                     "deactivated", False, before, after, product["stock"], 0.0,
@@ -515,12 +577,20 @@ class ExcelProductBatchService:
                             (source_key, product["id"]),
                         )
                 before = _snapshot(product)
+                if before is not None:
+                    before["stock"] = get_balance(
+                        connection, product["id"], warehouse_id,
+                        require_initialized=False,
+                    )
                 state = self._state_for_result(
                     connection, result, batch_id, file_sha256, now, product,
                 )
                 if product is None:
                     columns = ("source_key", "created_batch_id", "created_at") + PRODUCT_MUTABLE_COLUMNS
-                    values = [source_key, batch_id, now] + [state[column] for column in PRODUCT_MUTABLE_COLUMNS]
+                    values = [source_key, batch_id, now] + [
+                        0.0 if column == "stock" else state[column]
+                        for column in PRODUCT_MUTABLE_COLUMNS
+                    ]
                     placeholders = ", ".join("?" for _ in columns)
                     connection.execute(
                         "INSERT INTO catalog_excel_products ({}) VALUES ({})".format(
@@ -534,8 +604,15 @@ class ExcelProductBatchService:
                 else:
                     product_id = product["id"]
                     created_product = False
-                    stock_before = float(product["stock"])
+                    stock_before = get_balance(
+                        connection, product_id, warehouse_id,
+                        require_initialized=False,
+                    )
                     _restore_columns(connection, product_id, state, PRODUCT_MUTABLE_COLUMNS)
+                set_balance(
+                    connection, product_id, warehouse_id,
+                    float(result.get("stock") or 0), now,
+                )
                 assign_product_taxonomy(
                     connection,
                     product_id,
@@ -580,7 +657,11 @@ class ExcelProductBatchService:
                 ).fetchone()
                 if product is None:
                     continue
-                stock_before = float(product["stock"])
+                warehouse_id = default_warehouse_id(connection)
+                stock_before = get_balance(
+                    connection, product["id"], warehouse_id,
+                    require_initialized=False,
+                )
                 previous = _load_json(change["previous_state_json"], None)
                 original_operation = connection.execute(
                     "SELECT id FROM catalog_excel_stock_operations "
@@ -600,6 +681,10 @@ class ExcelProductBatchService:
                     connection, product["id"], batch_id
                 ):
                     connection.execute(
+                        "DELETE FROM erp_product_warehouse_stock WHERE product_id=?",
+                        (product["id"],),
+                    )
+                    connection.execute(
                         "DELETE FROM catalog_excel_products WHERE id = ?", (product["id"],)
                     )
                 elif change["created_product"]:
@@ -608,9 +693,14 @@ class ExcelProductBatchService:
                     _restore_columns(
                         connection, product["id"], retained, PRODUCT_MUTABLE_COLUMNS
                     )
+                    set_balance(connection, product["id"], warehouse_id, 0, now)
                 elif previous is not None:
                     _restore_columns(
                         connection, product["id"], previous, PRODUCT_MUTABLE_COLUMNS
+                    )
+                    set_balance(
+                        connection, product["id"], warehouse_id,
+                        float(previous.get("stock") or 0), now,
                     )
             connection.execute(
                 "UPDATE catalog_excel_batches SET status = 'rolled_back', rolled_back_at = ? "
@@ -711,8 +801,8 @@ class ExcelProductBatchService:
             "batch_id, product_id, source_key, excel_row, row_kind, created_product, "
             "previous_state_json, applied_state_json, stock_before, stock_after, "
             "stock_difference, match_status, bitrix_link_cardinality, "
-            "shared_bitrix_row_count, bitrix_xml_id, operation_result, created_at"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "shared_bitrix_row_count, bitrix_xml_id, operation_result, created_at,warehouse_id"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 batch_id, product_id, source_key, excel_row, row_kind,
                 int(bool(created_product)), _json(before) if before is not None else None,
@@ -720,6 +810,7 @@ class ExcelProductBatchService:
                 match_status, after.get("bitrix_link_cardinality"),
                 int(after.get("shared_bitrix_row_count") or 0), after.get("bitrix_xml_id"),
                 "adjusted" if difference else "already_at_target", now,
+                default_warehouse_id(connection),
             ),
         )
         if difference:
@@ -756,12 +847,13 @@ class ExcelProductBatchService:
         connection.execute(
             "INSERT INTO catalog_excel_stock_operations ("
             "id, batch_id, product_id, operation_type, stock_before, stock_after, "
-            "stock_difference, reversal_of, created_at, details_json"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "stock_difference, reversal_of, created_at, details_json,warehouse_id"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 str(uuid.uuid4()), batch_id, product_id, operation_type,
                 float(stock_before), float(stock_after),
                 float(stock_after) - float(stock_before), reversal_of, now, _json(details),
+                default_warehouse_id(connection),
             ),
         )
 
@@ -772,8 +864,11 @@ class ExcelProductBatchService:
         batch["active_cards"] = connection.execute(
             "SELECT COUNT(*) FROM catalog_excel_products WHERE active = 1"
         ).fetchone()[0]
+        warehouse_id = default_warehouse_id(connection)
         batch["active_stock"] = connection.execute(
-            "SELECT COALESCE(SUM(stock), 0) FROM catalog_excel_products WHERE active = 1"
+            "SELECT COALESCE(SUM(ws.quantity),0) FROM catalog_excel_products p "
+            "JOIN erp_product_warehouse_stock ws ON ws.product_id=p.id "
+            "WHERE p.active=1 AND ws.warehouse_id=?", (warehouse_id,)
         ).fetchone()[0]
         batch["operation_rows"] = connection.execute(
             "SELECT COUNT(*) FROM catalog_excel_stock_operations WHERE batch_id = ?",
@@ -796,9 +891,15 @@ class ExcelProductCatalog:
                       product_ids=None,
                       include_cell_item_names=True, include_facets=True,
                       include_inventory_locked=False, stock_state="all",
-                      check_state="all"):
+                      check_state="all", warehouse_ids=None):
         self.database.initialize()
-        if stock_state == "out" or check_state != "all":
+        warehouse_selection_provided = warehouse_ids is not None
+        if warehouse_ids is None:
+            with self.database.connect() as connection:
+                warehouse_ids = [default_warehouse_id(connection)]
+        stock_cte, stock_parameters = warehouse_stock_cte(warehouse_ids)
+        if not warehouse_selection_provided and (
+                stock_state == "out" or check_state != "all"):
             OutOfStockChecks(self.database).sync()
         page = max(1, int(page))
         per_page = max(1, min(int(per_page), 100000))
@@ -808,7 +909,7 @@ class ExcelProductCatalog:
             "article": "COALESCE(p.excel_article, '')",
             "brand": "COALESCE(p.excel_brand, '')",
             "category": "COALESCE(p.excel_category, '')",
-            "stock": "p.stock",
+            "stock": "warehouse_stock_view.quantity",
             "cell": "COALESCE(p.cell, '')",
             "created_at": "p.created_at",
             "price": "CAST(NULLIF(p.bitrix_price_amount, '') AS REAL)",
@@ -875,11 +976,11 @@ class ExcelProductCatalog:
                 where.append("trim(COALESCE(p.cell, '')) = ?")
                 parameters.append(cell)
         if hide_zero:
-            where.append("p.stock > 0 AND CAST(p.stock AS REAL) > 0")
+            where.append("warehouse_stock_view.quantity > 0")
         if stock_state == "out":
-            where.append("p.stock = 0")
+            where.append("warehouse_stock_view.quantity = 0")
         elif stock_state == "in":
-            where.append("p.stock > 0")
+            where.append("warehouse_stock_view.quantity > 0")
         if check_state in {"unchecked", "partial", "complete"}:
             count_sql = (
                 "SELECT COUNT(*) FROM erp_out_of_stock_checks k "
@@ -921,14 +1022,17 @@ class ExcelProductCatalog:
             " WHERE " + " AND ".join(brand_facet_where)
         )
         select_sql = (
-            "SELECT p.*, c.name AS category_name, cp.barcode AS bitrix_barcode, "
+            "SELECT p.*, warehouse_stock_view.quantity AS warehouse_stock, "
+            "warehouse_stock_view.is_bundle AS is_bundle, "
+            "c.name AS category_name, cp.barcode AS bitrix_barcode, "
             "b.source_filename, b.applied_at, b.row_count AS batch_row_count "
             "FROM catalog_excel_products p JOIN catalog_excel_batches b "
             "ON b.id = p.current_batch_id "
             "LEFT JOIN catalog_products cp "
             "ON cp.id = p.bitrix_catalog_product_id "
             "LEFT JOIN erp_categories c "
-            "ON c.id = p.category_id"
+            "ON c.id = p.category_id "
+            "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id"
         )
         with self.database.connect() as connection:
             if query or model:
@@ -938,28 +1042,32 @@ class ExcelProductCatalog:
                 "ORDER BY applied_at DESC LIMIT 1"
             ).fetchone()
             total = connection.execute(
-                "SELECT COUNT(*) FROM catalog_excel_products p "
+                stock_cte + "SELECT COUNT(*) FROM catalog_excel_products p "
                 "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
                 "LEFT JOIN catalog_products cp "
-                "ON cp.id = p.bitrix_catalog_product_id" + where_sql,
-                parameters,
+                "ON cp.id = p.bitrix_catalog_product_id "
+                "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id" + where_sql,
+                stock_parameters + parameters,
             ).fetchone()[0]
             pages = (total + per_page - 1) // per_page
             if pages and page > pages:
                 page = pages
             stats = dict(connection.execute(
-                "SELECT COUNT(*) AS positions, COALESCE(SUM(p.stock), 0) AS total_stock, "
-                "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
+                stock_cte + "SELECT COUNT(*) AS positions, "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.is_bundle=0 "
+                "THEN warehouse_stock_view.quantity ELSE 0 END),0) AS total_stock, "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity > 0 THEN 1 ELSE 0 END), 0) "
                 "AS positive_positions, "
-                "COALESCE(SUM(CASE WHEN p.stock = 0 THEN 1 ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity = 0 THEN 1 ELSE 0 END), 0) "
                 "AS zero_positions, "
                 "COALESCE(SUM(CASE WHEN p.bitrix_catalog_product_id IS NOT NULL "
                 "THEN 1 ELSE 0 END), 0) "
                 "AS matched_positions FROM catalog_excel_products p "
                 "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
                 "LEFT JOIN catalog_products cp "
-                "ON cp.id = p.bitrix_catalog_product_id" + where_sql,
-                parameters,
+                "ON cp.id = p.bitrix_catalog_product_id "
+                "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id" + where_sql,
+                stock_parameters + parameters,
             ).fetchone())
             missing_price_sql = (
                 "CASE WHEN NULLIF(p.bitrix_price_amount, '') IS NULL THEN 1 ELSE 0 END, "
@@ -979,9 +1087,9 @@ class ExcelProductCatalog:
                 )
                 stable_order_sql = ", p.excel_row ASC, p.id ASC"
             rows = connection.execute(
-                select_sql + where_sql + order_sql + stable_order_sql
+                stock_cte + select_sql + where_sql + order_sql + stable_order_sql
                 + " LIMIT ? OFFSET ?",
-                parameters + [per_page, (page - 1) * per_page],
+                stock_parameters + parameters + [per_page, (page - 1) * per_page],
             ).fetchall()
             brands = []
             categories = []
@@ -993,25 +1101,27 @@ class ExcelProductCatalog:
             status_counts = {}
             if include_facets:
                 brand_groups = [dict(row) for row in connection.execute(
-                    "SELECT trim(p.excel_brand) AS name, COUNT(*) AS count "
+                    stock_cte + "SELECT trim(p.excel_brand) AS name, COUNT(*) AS count "
                     "FROM catalog_excel_products p JOIN catalog_excel_batches b "
                     "ON b.id = p.current_batch_id "
                     "LEFT JOIN catalog_products cp "
-                    "ON cp.id = p.bitrix_catalog_product_id"
+                    "ON cp.id = p.bitrix_catalog_product_id "
+                    "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id"
                     + brand_facet_where_sql + " "
                     "AND trim(COALESCE(p.excel_brand, '')) <> '' "
                     "AND trim(p.excel_brand) GLOB '*[^0-9]*' "
                     "GROUP BY trim(p.excel_brand) COLLATE NOCASE "
                     "HAVING COUNT(*) > 0 ORDER BY name COLLATE NOCASE",
-                    brand_facet_parameters,
+                    stock_parameters + brand_facet_parameters,
                 ).fetchall()]
                 brand_all_count = connection.execute(
-                    "SELECT COUNT(*) FROM catalog_excel_products p "
+                    stock_cte + "SELECT COUNT(*) FROM catalog_excel_products p "
                     "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
                     "LEFT JOIN catalog_products cp "
-                    "ON cp.id = p.bitrix_catalog_product_id"
+                    "ON cp.id = p.bitrix_catalog_product_id "
+                    "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id"
                     + brand_facet_where_sql,
-                    brand_facet_parameters,
+                    stock_parameters + brand_facet_parameters,
                 ).fetchone()[0]
                 brands = [group["name"] for group in brand_groups]
                 categories = [row[0] for row in connection.execute(
@@ -1046,18 +1156,19 @@ class ExcelProductCatalog:
                     else ""
                 )
                 cell_groups = [dict(row) for row in connection.execute(
-                    "SELECT CASE WHEN trim(COALESCE(p.cell, '')) = '' THEN "
+                    stock_cte + "SELECT CASE WHEN trim(COALESCE(p.cell, '')) = '' THEN "
                     "'Без ячейки' ELSE trim(p.cell) END AS cell, "
-                    "COUNT(*) AS count, COALESCE(SUM(p.stock), 0) AS stock "
+                    "COUNT(*) AS count, COALESCE(SUM(warehouse_stock_view.quantity), 0) AS stock "
                     + cell_item_names_sql
                     + "FROM catalog_excel_products p "
                     "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
+                    "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id "
                     "WHERE p.active = 1 AND " + visible_cards_sql + " "
                     "GROUP BY CASE WHEN trim(COALESCE(p.cell, '')) = '' "
                     "THEN 'Без ячейки' ELSE trim(p.cell) END "
                     "ORDER BY CASE WHEN trim(COALESCE(p.cell, '')) = '' "
                     "THEN 1 ELSE 0 END, cell"
-                ).fetchall()]
+                , stock_parameters).fetchall()]
                 status_counts = {
                     row["match_status"]: row["count"]
                     for row in connection.execute(
@@ -1068,7 +1179,47 @@ class ExcelProductCatalog:
                         + visible_cards_sql + " GROUP BY p.match_status"
                     ).fetchall()
                 }
-        items = [self._prepare_product(dict(row)) for row in rows]
+            prepared_rows = []
+            for row in rows:
+                prepared = dict(row)
+                prepared["stock"] = float(prepared.pop("warehouse_stock") or 0)
+                prepared_rows.append(prepared)
+            product_ids = [int(row["id"]) for row in prepared_rows]
+            breakdown = {}
+            if product_ids:
+                product_marks = ",".join("?" for _ in product_ids)
+                warehouse_marks = ",".join("?" for _ in warehouse_ids)
+                detail_rows = connection.execute(
+                    "SELECT p.id AS product_id,w.id AS warehouse_id,w.name,"
+                    "CASE WHEN bundle.product_id IS NULL THEN COALESCE(stock.quantity,0) "
+                    "ELSE COALESCE((SELECT MIN(CASE WHEN physical.active<>1 "
+                    "OR component_stock.initialized_at IS NULL THEN 0 "
+                    "ELSE CAST(COALESCE(component_stock.quantity,0)/component.quantity AS INTEGER) END) "
+                    "FROM erp_bundle_components component "
+                    "LEFT JOIN catalog_excel_products physical ON physical.id=component.component_id "
+                    "LEFT JOIN erp_product_warehouse_stock component_stock "
+                    "ON component_stock.product_id=component.component_id "
+                    "AND component_stock.warehouse_id=w.id "
+                    "WHERE component.product_id=p.id),0) END AS quantity "
+                    "FROM catalog_excel_products p CROSS JOIN erp_warehouses w "
+                    "LEFT JOIN erp_product_bundles bundle ON bundle.product_id=p.id "
+                    "LEFT JOIN erp_product_warehouse_stock stock "
+                    "ON stock.product_id=p.id AND stock.warehouse_id=w.id "
+                    "WHERE p.id IN ({}) AND w.id IN ({}) "
+                    "ORDER BY p.id,w.id".format(product_marks, warehouse_marks),
+                    product_ids + list(warehouse_ids),
+                ).fetchall()
+                for detail in detail_rows:
+                    breakdown.setdefault(int(detail["product_id"]), []).append({
+                        "id": int(detail["warehouse_id"]),
+                        "name": detail["name"],
+                        "quantity": float(detail["quantity"] or 0),
+                    })
+        items = []
+        for row in prepared_rows:
+            item = self._prepare_product(row)
+            item["warehouse_breakdown"] = breakdown.get(int(row["id"]), [])
+            items.append(item)
         return {
             "items": items, "total": total, "page": page, "per_page": per_page,
             "pages": pages,
@@ -1081,19 +1232,26 @@ class ExcelProductCatalog:
             "active_batch": dict(active_batch) if active_batch else None,
         }
 
-    def stock_tab_counts(self):
+    def stock_tab_counts(self, warehouse_ids=None):
         """Return unfiltered active-product counts for persistent catalog tabs."""
         self.database.initialize()
         with self.database.connect() as connection:
+            if warehouse_ids is None:
+                warehouse_ids = [default_warehouse_id(connection)]
+            stock_cte, stock_parameters = warehouse_stock_cte(warehouse_ids)
             row = connection.execute(
-                "SELECT COUNT(*) AS positions, "
-                "COALESCE(SUM(CASE WHEN stock > 0 THEN 1 ELSE 0 END), 0) "
-                "AS in_stock, COALESCE(SUM(CASE WHEN stock = 0 THEN 1 ELSE 0 END), 0) "
-                "AS out_of_stock, COALESCE(SUM(CASE WHEN stock > 0 THEN stock ELSE 0 END), 0) "
-                "AS units_in_stock, COALESCE(SUM(stock), 0) AS units_total "
+                stock_cte + "SELECT COUNT(*) AS positions, "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity > 0 THEN 1 ELSE 0 END), 0) "
+                "AS in_stock, COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity = 0 THEN 1 ELSE 0 END), 0) "
+                "AS out_of_stock, COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity > 0 "
+                "AND warehouse_stock_view.is_bundle=0 THEN warehouse_stock_view.quantity ELSE 0 END), 0) "
+                "AS units_in_stock, COALESCE(SUM(CASE WHEN warehouse_stock_view.is_bundle=0 "
+                "THEN warehouse_stock_view.quantity ELSE 0 END), 0) AS units_total "
                 "FROM catalog_excel_products p "
                 "LEFT JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
-                "WHERE p.active = 1 AND " + VISIBLE_PRODUCT_SQL
+                "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id "
+                "WHERE p.active = 1 AND " + VISIBLE_PRODUCT_SQL,
+                stock_parameters,
             ).fetchone()
         return {
             "positions": int(row["positions"] or 0),
@@ -1103,8 +1261,8 @@ class ExcelProductCatalog:
             "units_total": float(row["units_total"] or 0),
         }
 
-    def product_analytics(self, limit=8):
-        """Return bounded read-only aggregates for the products dashboard."""
+    def product_analytics(self, limit=8, warehouse_ids=None):
+        """Return aggregates for the user's selected warehouses."""
         self.database.initialize()
         limit = max(1, min(int(limit), 20))
         visible_where = "p.active = 1 AND " + VISIBLE_PRODUCT_SQL
@@ -1126,53 +1284,60 @@ class ExcelProductCatalog:
 
         ranking_sql = (
             "SELECT {label} AS name, COUNT(*) AS positions, "
-            "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
-            "AS in_stock, COALESCE(SUM(p.stock), 0) AS units "
+            "COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity > 0 THEN 1 ELSE 0 END), 0) "
+            "AS in_stock, COALESCE(SUM(CASE WHEN warehouse_stock_view.is_bundle=0 "
+            "THEN warehouse_stock_view.quantity ELSE 0 END), 0) AS units "
             "FROM catalog_excel_products p "
             "LEFT JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
+            "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id "
             "WHERE " + visible_where + " GROUP BY {label} "
             "ORDER BY positions DESC, name COLLATE NOCASE LIMIT ?"
         )
         with self.database.connect() as connection:
+            if warehouse_ids is None:
+                warehouse_ids = [default_warehouse_id(connection)]
+            stock_cte, stock_parameters = warehouse_stock_cte(warehouse_ids)
             top_brands = prepare_ranking(connection.execute(
-                ranking_sql.format(
+                stock_cte + ranking_sql.format(
                     label=(
                         "COALESCE(NULLIF(trim(p.excel_brand), ''), 'Без бренда')"
                     )
                 ),
-                (limit,),
+                stock_parameters + [limit],
             ).fetchall())
             top_categories = prepare_ranking(connection.execute(
-                ranking_sql.format(
+                stock_cte + ranking_sql.format(
                     label=(
                         "COALESCE(NULLIF(trim(p.excel_category), ''), "
                         "'Без категории')"
                     )
                 ),
-                (limit,),
+                stock_parameters + [limit],
             ).fetchall())
             stock_row = connection.execute(
-                "SELECT "
-                "COALESCE(SUM(CASE WHEN p.stock = 0 THEN 1 ELSE 0 END), 0) "
+                stock_cte + "SELECT "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity = 0 THEN 1 ELSE 0 END), 0) "
                 "AS empty, "
-                "COALESCE(SUM(CASE WHEN p.stock = 1 THEN 1 ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity = 1 THEN 1 ELSE 0 END), 0) "
                 "AS single, "
-                "COALESCE(SUM(CASE WHEN p.stock BETWEEN 2 AND 5 THEN 1 ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity BETWEEN 2 AND 5 THEN 1 ELSE 0 END), 0) "
                 "AS regular, "
-                "COALESCE(SUM(CASE WHEN p.stock BETWEEN 6 AND 25 THEN 1 ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity BETWEEN 6 AND 25 THEN 1 ELSE 0 END), 0) "
                 "AS high, "
-                "COALESCE(SUM(CASE WHEN p.stock > 25 THEN 1 ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity > 25 THEN 1 ELSE 0 END), 0) "
                 "AS bulk FROM catalog_excel_products p "
                 "LEFT JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
-                "WHERE " + visible_where
+                "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id "
+                "WHERE " + visible_where,
+                stock_parameters,
             ).fetchone()
             top_cells = prepare_ranking(connection.execute(
-                ranking_sql.format(
+                stock_cte + ranking_sql.format(
                     label=(
                         "COALESCE(NULLIF(trim(p.cell), ''), 'Без ячейки')"
                     )
                 ),
-                (limit,),
+                stock_parameters + [limit],
             ).fetchall())
 
         stock_bands = [
@@ -1197,33 +1362,34 @@ class ExcelProductCatalog:
             "top_cells": top_cells,
         }
 
-    def stock_analytics(self, category_id=None):
-        """Return the current stock structure for one ERP category.
-
-        The product predicate intentionally matches ``list_products`` and the
-        existing catalog counters: active cards from the current visible
-        source are read directly from ``catalog_excel_products.stock``.
-        """
+    def stock_analytics(self, category_id=None, warehouse_ids=None):
+        """Return current stock structure for the user's selected warehouses."""
         self.database.initialize()
-        visible_products_sql = (
+        visible_products_body = (
             "SELECT p.id, p.excel_name_raw, p.model, p.excel_article, "
-            "p.excel_brand, p.brand_id, p.category_id, p.stock "
+            "p.excel_brand, p.brand_id, p.category_id, "
+            "warehouse_stock_view.quantity AS stock "
             "FROM catalog_excel_products p "
             "JOIN catalog_excel_batches batch ON batch.id = p.current_batch_id "
+            "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id "
             "WHERE p.active = 1 AND "
             + VISIBLE_PRODUCT_SQL.replace("b.", "batch.")
         )
 
         with self.database.connect() as connection:
+            if warehouse_ids is None:
+                warehouse_ids = [default_warehouse_id(connection)]
+            stock_cte, stock_parameters = warehouse_stock_cte(warehouse_ids)
+            visible_products_sql = stock_cte + visible_products_body
             category_rows = connection.execute(
                 "SELECT c.id, c.name, COUNT(visible.id) AS model_count "
                 "FROM erp_categories c LEFT JOIN (" + visible_products_sql + ") visible "
                 "ON visible.category_id = c.id WHERE c.active = 1 "
                 "GROUP BY c.id, c.name ORDER BY c.name COLLATE NOCASE, c.id"
-            ).fetchall()
+            , stock_parameters).fetchall()
             uncategorized = connection.execute(
                 "SELECT COUNT(*) AS model_count FROM (" + visible_products_sql + ") "
-                "visible WHERE visible.category_id IS NULL"
+                "visible WHERE visible.category_id IS NULL", stock_parameters
             ).fetchone()
 
             categories = [{
@@ -1280,7 +1446,7 @@ class ExcelProductCatalog:
                     + category_predicate
                     + " ORDER BY visible.stock DESC, "
                     "visible.excel_name_raw COLLATE NOCASE, visible.id",
-                    parameters,
+                    stock_parameters + parameters,
                 ).fetchall()
 
         models = []
@@ -1370,7 +1536,15 @@ class ExcelProductCatalog:
                 + VISIBLE_PRODUCT_SQL,
                 (int(product_id),),
             ).fetchone()
-        return self._prepare_product(dict(row)) if row else None
+            if row:
+                item = dict(row)
+                item["stock"] = get_balance(
+                    connection, item["id"], default_warehouse_id(connection),
+                    require_initialized=False,
+                )
+            else:
+                item = None
+        return self._prepare_product(item) if item else None
 
     def search_repair_catalog_items(self, query="", product_id=None, limit=20):
         """Search the repair selector without materializing the assortment."""
@@ -1562,7 +1736,7 @@ class ExcelProductCatalog:
                 article_quality(article), brand, category or None,
                 brand_row["id"] if brand_row else None,
                 category_row["id"] if category_row else None,
-                stock, cell or None,
+                0, cell or None,
                 "manual", batch["file_sha256"], "not_found", "manual_create", 0.0,
                 "unmatched", "[]", "unlinked", 0,
             ) + tuple(enrichment.values()) + (
@@ -1582,6 +1756,8 @@ class ExcelProductCatalog:
                 values,
             )
             product_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+            warehouse_id = default_warehouse_id(connection)
+            set_balance(connection, product_id, warehouse_id, stock, now)
             if local_component:
                 connection.execute("INSERT INTO erp_local_components(product_id) VALUES (?)", (product_id,))
             _record_manual_stock_adjustment(
@@ -1590,6 +1766,7 @@ class ExcelProductCatalog:
                 0,
                 stock,
                 "Начальный остаток при создании товара",
+                warehouse_id,
             )
             AuditJournal(self.database).record(
                 "product", product_id,
@@ -1733,7 +1910,11 @@ class ExcelProductCatalog:
                     values["bitrix_price_currency"] = (
                         values.get("bitrix_price_currency") or "RUB"
                     )
-            stock_before = float(values["stock"] or 0)
+            warehouse_id = default_warehouse_id(connection)
+            stock_before = get_balance(
+                connection, product_id, warehouse_id,
+                require_initialized=False,
+            )
             if stock is not None:
                 try:
                     stock_after = float(str(stock).replace(",", "."))
@@ -1742,7 +1923,6 @@ class ExcelProductCatalog:
                 if not math.isfinite(stock_after) or stock_after < 0:
                     raise ValueError("Остаток должен быть неотрицательным числом.")
                 values["stock"] = stock_after
-                values["stock_source"] = "manual"
             raw_excel = _load_json(values.get("raw_excel_json"), {})
             raw_excel.update({
                 "excel_name": values["excel_name_raw"],
@@ -1756,6 +1936,11 @@ class ExcelProductCatalog:
             values["raw_excel_json"] = _json(raw_excel)
             values["updated_at"] = utc_now()
             _restore_columns(connection, product_id, values, PRODUCT_MUTABLE_COLUMNS)
+            if stock is not None:
+                set_balance(
+                    connection, product_id, warehouse_id, stock_after,
+                    values["updated_at"],
+                )
             if model is not None or brand_changed:
                 values["model_id"] = get_or_create_model_record(
                     connection, values.get("brand_id"), values.get("model")
@@ -1779,6 +1964,7 @@ class ExcelProductCatalog:
                     stock_before,
                     stock_after,
                     stock_reason,
+                    warehouse_id,
                 )
             before = {
                 "name": product["excel_name_raw"],
@@ -1788,7 +1974,7 @@ class ExcelProductCatalog:
                 "category": product["excel_category"],
                 "price": product["bitrix_price_amount"],
                 "cell": product["cell"],
-                "stock": float(product["stock"] or 0),
+                "stock": stock_before,
             }
             after = {
                 "name": values["excel_name_raw"],
@@ -1798,7 +1984,7 @@ class ExcelProductCatalog:
                 "category": values["excel_category"],
                 "price": values.get("bitrix_price_amount"),
                 "cell": values["cell"],
-                "stock": float(values["stock"] or 0),
+                "stock": stock_after if stock is not None else stock_before,
             }
             if before != after:
                 AuditJournal(self.database).record(
@@ -1835,12 +2021,13 @@ class ExcelProductCatalog:
         self.database.initialize()
         with self.database.transaction() as connection:
             product = connection.execute(
-                "SELECT * FROM catalog_excel_products WHERE id = ? AND active = 1",
+                "SELECT p.*, " + ALL_ACTIVE_PHYSICAL_STOCK_SQL + " AS canonical_stock "
+                "FROM catalog_excel_products p WHERE p.id = ? AND p.active = 1",
                 (int(product_id),),
             ).fetchone()
             if product is None:
                 raise ValueError("Товар не найден.")
-            if float(product["stock"] or 0) != 0:
+            if float(product["canonical_stock"] or 0) != 0:
                 raise ProductDeleteBlockedError(
                     "Товар с ненулевым остатком нельзя удалить."
                 )
@@ -1862,11 +2049,14 @@ class ExcelProductCatalog:
         self.database.initialize()
         with self.database.transaction() as connection:
             product = connection.execute(
-                "SELECT * FROM catalog_excel_products WHERE id = ? AND active = 1",
+                "SELECT p.*, " + ALL_ACTIVE_PHYSICAL_STOCK_SQL + " AS canonical_stock "
+                "FROM catalog_excel_products p WHERE p.id = ? AND p.active = 1",
                 (int(product_id),),
             ).fetchone()
             if product is None:
                 raise ValueError("Товар не найден.")
+            product = dict(product)
+            product["stock"] = float(product.pop("canonical_stock") or 0)
             self._validate_products_for_delete([product], force)
             result = self._delete_product_in_transaction(
                 connection, product, force=force, actor_id=actor_id,
@@ -1944,10 +2134,15 @@ class ExcelProductCatalog:
                 product_where += " AND p.category_id = ?"
                 parameters.append(int(category_id))
             products = connection.execute(
-                "SELECT p.* FROM catalog_excel_products p WHERE " +
+                "SELECT p.*, " + ALL_ACTIVE_PHYSICAL_STOCK_SQL + " AS canonical_stock "
+                "FROM catalog_excel_products p WHERE " +
                 product_where + " ORDER BY p.id",
                 parameters,
             ).fetchall()
+            products = [
+                {**dict(row), "stock": float(row["canonical_stock"] or 0)}
+                for row in products
+            ]
             assert_products_unlocked(
                 connection, [row["id"] for row in products]
             )

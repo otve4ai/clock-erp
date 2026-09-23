@@ -4040,6 +4040,8 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/product-picker.css') }}">
     <link rel="stylesheet" href="{{ static_asset_url('css/erp-native-table-columns.css') }}">
     <script defer src="{{ url_for('static', filename='js/product-picker.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/warehouse-multiwarehouse.css') }}">
+    <style>@media(max-width:760px){.warehouse-selector-panel{bottom:76px;max-height:calc(100vh - 92px)}}</style>
 </head>
 <body class="warehouse-page">
     {% from "_catalog_combobox.html" import render_catalog_combobox, render_catalog_create_modal %}
@@ -4307,6 +4309,31 @@
                                 <option value="out"{% if stock_state == 'out' %} selected{% endif %}>Нет в наличии</option>
                             </select>
                         </label>
+                        <details class="warehouse-selector" id="warehouseSelector">
+                            <summary aria-label="Выбрать склады">🏭 Склады: {{ selected_warehouse_ids|length }} <span aria-hidden="true">▾</span></summary>
+                            <div class="warehouse-selector-panel" role="group" aria-label="Склады для расчёта остатков">
+                                <div class="warehouse-selector-title">Учитывать остатки</div>
+                                {% for warehouse in warehouses %}
+                                <div class="warehouse-selector-row" data-warehouse-row="{{ warehouse.id }}">
+                                    <label>
+                                        <input type="checkbox" value="{{ warehouse.id }}"{% if warehouse.selected %} checked{% endif %} data-warehouse-choice>
+                                        <span>{{ warehouse.name }}</span>
+                                        <small>{{ '%g'|format(warehouse.total) }} ед.</small>
+                                    </label>
+                                    {% if can_manage_warehouses %}<span class="warehouse-manage-actions">
+                                        <button type="button" data-warehouse-rename="{{ warehouse.id }}" data-name="{{ warehouse.name|e }}" aria-label="Переименовать {{ warehouse.name }}">✎</button>
+                                        {% if warehouse.code != 'udelnaya' %}<button type="button" data-warehouse-archive="{{ warehouse.id }}" aria-label="Архивировать {{ warehouse.name }}">×</button>{% endif %}
+                                    </span>{% endif %}
+                                </div>
+                                {% endfor %}
+                                <div class="warehouse-selector-error" id="warehouseSelectorError" role="alert"></div>
+                                {% if can_manage_warehouses %}<div class="warehouse-add-form" id="warehouseManagementAddForm">
+                                    <input name="name" aria-label="Название нового склада" placeholder="Новый склад" required>
+                                    <button type="button" id="warehouseManagementAddSubmit">Добавить</button>
+                                </div>{% endif %}
+                                <button class="warehouse-transfer-open" type="button" id="warehouseTransferOpen">Переместить товар</button>
+                            </div>
+                        </details>
                         <button
                             id="warehouseFilterTrigger"
                             class="search-tool-button erp-secondary-action erp-filter-trigger{% if warehouse_active_filter_count %} is-active{% endif %}"
@@ -4953,8 +4980,13 @@
 
                                     <td data-column-key="category"><span class="warehouse-ellipsis" title="{{ (item.category or 'Без категории')|e }}">{{ item.category or "Без категории" }}</span></td>
 
-                                    <td data-column-key="stock" class="{% if item.stock <= 0 %}stock-zero{% else %}stock-good{% endif %}">
-                                        {{ item.stock_display }}
+                                    <td data-column-key="stock" class="warehouse-stock-cell {% if item.stock <= 0 %}stock-zero{% else %}stock-good{% endif %}">
+                                        <button type="button" class="warehouse-stock-button" aria-haspopup="dialog" aria-label="Остаток {{ item.stock_display }}. Показать по складам" data-product-id="{{ item.id }}">{{ item.stock_display }}</button>
+                                        <div class="warehouse-stock-popover" role="dialog" aria-label="Остатки по складам" hidden>
+                                            <div><strong>Остатки по складам</strong><span aria-hidden="true">×</span></div>
+                                            {% for balance in item.warehouse_breakdown %}<div><span>{{ balance.name }}</span><strong class="{% if balance.quantity <= 0 %}stock-zero{% endif %}">{{ '%g'|format(balance.quantity) }}</strong></div>{% endfor %}
+                                            <div><strong>Итого</strong><strong>{{ item.stock_display }}</strong></div>
+                                        </div>
                                     </td>
 
                                     <td data-column-key="site_status">
@@ -10712,8 +10744,24 @@
         });
     </script>
     {% endif %}
+<dialog id="warehouseTransferDialog" class="warehouse-transfer-dialog" aria-labelledby="warehouseTransferTitle">
+    <form id="warehouseTransferForm">
+        <header><h2 id="warehouseTransferTitle">Перемещение товара</h2><button type="button" data-transfer-close aria-label="Закрыть">×</button></header>
+        <label>Товар <input name="product_query" autocomplete="off" placeholder="Название или артикул" required></label>
+        <input type="hidden" name="product_id">
+        <div id="warehouseTransferResults" class="warehouse-transfer-results"></div>
+        <label>Со склада <select name="from_warehouse_id" required>{% for warehouse in warehouses %}<option value="{{ warehouse.id }}">{{ warehouse.name }}</option>{% endfor %}</select></label>
+        <label>На склад <select name="to_warehouse_id" required>{% for warehouse in warehouses %}<option value="{{ warehouse.id }}">{{ warehouse.name }}</option>{% endfor %}</select></label>
+        <label>Количество <input name="quantity" type="number" min="0.001" step="0.001" required></label>
+        <label>Комментарий <input name="comment"></label>
+        <div class="warehouse-selector-error" data-transfer-error role="alert"></div>
+        <button type="submit">Переместить</button>
+    </form>
+</dialog>
 {% include "_manual_product.html" %}
 </body>
+<script>window.__warehouseCsrfToken = {{ csrf_token()|tojson }};</script>
+<script src="{{ url_for('static', filename='js/warehouse-multiwarehouse.js') }}"></script>
 {% if pagination_e2e %}<script src="{{ url_for('static', filename='js/pagination-e2e.js') }}"></script>{% endif %}
 </html>
 {% endif %}

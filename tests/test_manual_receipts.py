@@ -9,20 +9,23 @@ from app.catalog_db import CatalogDatabase
 from app.services.excel_product_catalog import ExcelProductCatalog
 from app.services.manual_receipts import ManualReceipts, ManualReceiptError
 from app.services.supplies import SupplyEngine
+from app.services.warehouse_stock import get_balance, selected_total, set_balance
+from app.schema_migrations import apply_migrations
 
 
 class ManualReceiptTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.db = CatalogDatabase(Path(self.temp.name) / "catalog.db")
-        self.db.initialize()
+        apply_migrations(self.db.path, app_commit="manual-receipts-test")
         self.manual = ManualReceipts(self.db)
         self.supplies = SupplyEngine(self.db)
-        with self.db.transaction() as connection:
-            connection.execute(
-                "INSERT INTO erp_warehouses(id,code,name,active,is_default,created_at,updated_at) "
-                "VALUES('hong-kong','HK','Гонконг',1,0,'2026-09-23','2026-09-23')"
-            )
+        with self.db.connect() as connection:
+            warehouses = dict(connection.execute(
+                "SELECT code,id FROM erp_warehouses WHERE is_active=1"
+            ).fetchall())
+        self.udelnaya = int(warehouses["udelnaya"])
+        self.hong_kong = int(warehouses["hong-kong"])
 
     def tearDown(self):
         self.temp.cleanup()
@@ -35,28 +38,24 @@ class ManualReceiptTest(unittest.TestCase):
             "brand": "Casio",
         })
         with self.db.transaction() as connection:
-            connection.execute(
-                "UPDATE catalog_excel_products SET stock=? WHERE id=?", (stock, product["id"])
-            )
+            set_balance(connection, product["id"], self.udelnaya, stock)
         return int(product["id"])
 
     def total(self, product_id):
         with self.db.connect() as connection:
-            return float(connection.execute(
-                "SELECT stock FROM catalog_excel_products WHERE id=?", (product_id,)
-            ).fetchone()[0])
+            return selected_total(
+                connection, product_id, [self.udelnaya, self.hong_kong]
+            )
 
     def warehouse(self, warehouse_id, product_id):
         with self.db.connect() as connection:
-            row = connection.execute(
-                "SELECT quantity FROM erp_warehouse_stocks WHERE warehouse_id=? AND product_id=?",
-                (warehouse_id, product_id),
-            ).fetchone()
-            return float(row[0]) if row else 0.0
+            return get_balance(
+                connection, product_id, warehouse_id, require_initialized=False
+            )
 
-    def draft(self, items, warehouse="hong-kong", reason="stock_adjustment", comment=""):
+    def draft(self, items, warehouse=None, reason="stock_adjustment", comment=""):
         return self.manual.create(
-            warehouse, reason,
+            self.hong_kong if warehouse is None else warehouse, reason,
             [{"product_id": product, "quantity": quantity} for product, quantity in items],
             comment, "Максим",
         )
@@ -65,9 +64,9 @@ class ManualReceiptTest(unittest.TestCase):
         product = self.product()
         receipt = self.draft([(product, 5)])
         self.assertEqual(self.total(product), 10)
-        self.assertEqual(self.warehouse("hong-kong", product), 0)
+        self.assertEqual(self.warehouse(self.hong_kong, product), 0)
         updated = self.manual.update(
-            receipt["id"], "hong-kong", "found",
+            receipt["id"], self.hong_kong, "found",
             [{"product_id": product, "quantity": 3}], "", "Editor",
         )
         self.assertEqual(updated["items"][0]["quantity"], 3)
@@ -84,14 +83,14 @@ class ManualReceiptTest(unittest.TestCase):
         self.manual.post(receipt["id"], "Poster")
         self.assertEqual(posted["status"], "posted")
         self.assertEqual((self.total(first), self.total(second)), (15, 6))
-        self.assertEqual((self.warehouse("hong-kong", first), self.warehouse("hong-kong", second)), (5, 2))
-        self.assertEqual(self.warehouse("default", first), 10)
+        self.assertEqual((self.warehouse(self.hong_kong, first), self.warehouse(self.hong_kong, second)), (5, 2))
+        self.assertEqual(self.warehouse(self.udelnaya, first), 10)
         with self.db.connect() as connection:
             movements = connection.execute(
                 "SELECT source_type,warehouse_id,COUNT(*) FROM catalog_stock_movements "
                 "WHERE receipt_id=? GROUP BY source_type,warehouse_id", (receipt["id"],)
             ).fetchone()
-        self.assertEqual(tuple(movements), ("manual_receipt", "hong-kong", 2))
+        self.assertEqual((movements[0], int(movements[1]), movements[2]), ("manual_receipt", self.hong_kong, 2))
 
     def test_double_submit_and_parallel_receipts_have_no_lost_update(self):
         product = self.product(stock=10)
@@ -106,32 +105,26 @@ class ManualReceiptTest(unittest.TestCase):
             for future in futures:
                 future.result()
         self.assertEqual(self.total(product), 18)
-        self.assertEqual(self.warehouse("hong-kong", product), 8)
+        self.assertEqual(self.warehouse(self.hong_kong, product), 8)
 
     def test_cancel_reverses_once_and_blocks_insufficient_warehouse_stock(self):
         product = self.product(stock=10)
         receipt = self.draft([(product, 5)])
         self.manual.post(receipt["id"])
         with self.db.transaction() as connection:
-            connection.execute(
-                "UPDATE erp_warehouse_stocks SET quantity=1 "
-                "WHERE warehouse_id='hong-kong' AND product_id=?", (product,)
-            )
+            set_balance(connection, product, self.hong_kong, 1)
         with self.assertRaisesRegex(ManualReceiptError, "доступно 1"):
             self.manual.cancel(receipt["id"])
-        self.assertEqual(self.total(product), 15)
+        self.assertEqual(self.total(product), 11)
         with self.db.transaction() as connection:
-            connection.execute(
-                "UPDATE erp_warehouse_stocks SET quantity=5 "
-                "WHERE warehouse_id='hong-kong' AND product_id=?", (product,)
-            )
+            set_balance(connection, product, self.hong_kong, 5)
         cancelled = self.manual.cancel(receipt["id"], "Canceller")
         self.manual.cancel(receipt["id"], "Canceller")
         self.assertEqual(cancelled["status"], "cancelled")
         self.assertEqual(self.total(product), 10)
-        self.assertEqual(self.warehouse("hong-kong", product), 0)
+        self.assertEqual(self.warehouse(self.hong_kong, product), 0)
         with self.assertRaises(ManualReceiptError):
-            self.manual.update(receipt["id"], "hong-kong", "found", [{"product_id": product, "quantity": 1}])
+            self.manual.update(receipt["id"], self.hong_kong, "found", [{"product_id": product, "quantity": 1}])
         with self.assertRaises(ManualReceiptError):
             self.manual.delete(receipt["id"])
 
@@ -143,7 +136,7 @@ class ManualReceiptTest(unittest.TestCase):
         with self.assertRaises(ManualReceiptError):
             self.manual.create("missing", "found", [{"product_id": product, "quantity": 1}])
         with self.assertRaises(ManualReceiptError):
-            self.manual.create("hong-kong", "other", [{"product_id": product, "quantity": 1}])
+            self.manual.create(self.hong_kong, "other", [{"product_id": product, "quantity": 1}])
         numbers = {self.draft([(product, 1)])["number"] for _ in range(3)}
         self.assertEqual(len(numbers), 3)
         with ThreadPoolExecutor(max_workers=4) as pool:
@@ -191,9 +184,9 @@ class ManualReceiptTest(unittest.TestCase):
                 movements = client.get("/api/v1/receipts/movements").get_json()["data"]
             self.assertIn("legacy:legacy-receipt:0", {row["id"] for row in movements})
             warehouses = client.get("/api/v1/receipts/warehouses").get_json()["data"]
-            self.assertEqual({row["id"] for row in warehouses}, {"default", "hong-kong"})
+            self.assertEqual({int(row["id"]) for row in warehouses}, {self.udelnaya, self.hong_kong})
             created = client.post("/api/v1/receipts/manual", json={
-                "warehouse_id": "hong-kong", "reason_code": "found",
+                "warehouse_id": self.hong_kong, "reason_code": "found",
                 "items": [{"product_id": product, "quantity": 2}],
             })
             self.assertEqual(created.status_code, 201, created.get_data(as_text=True))

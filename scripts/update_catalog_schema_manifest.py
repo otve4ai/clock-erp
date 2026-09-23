@@ -20,6 +20,11 @@ from app.schema_migrations import (  # noqa: E402
     apply_inventory_control_migration,
 )
 from app.incoming_receipts_migration import apply_incoming_receipts_migration  # noqa: E402
+from app.multiwarehouse_migration import apply_multiwarehouse_migration  # noqa: E402
+from app.bundle_migration import apply_bundle_migration  # noqa: E402
+from app.component_inventory_migration import apply_component_inventory_migration  # noqa: E402
+from app.writeoff_migration import apply_writeoff_migration  # noqa: E402
+from app.remove_product_collections_migration import apply_remove_collections_migration  # noqa: E402
 
 
 def main():
@@ -36,7 +41,13 @@ def main():
             apply_inventory_control_migration(connection)
             connection.commit()
             manifest = _json_structure(connection)
+            apply_bundle_migration(connection)
+            apply_component_inventory_migration(connection)
+            apply_writeoff_migration(connection)
+            apply_remove_collections_migration(connection)
             apply_incoming_receipts_migration(connection)
+            connection.commit()
+            apply_multiwarehouse_migration(connection)
             connection.commit()
             incoming_full = _json_structure(connection)
         finally:

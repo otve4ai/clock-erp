@@ -12,6 +12,7 @@ from app.catalog_db import CatalogDatabase
 from app.services.bitrix_catalog_importer import BitrixCatalogImporter
 from app.services.excel_product_catalog import ExcelProductCatalog
 from app.services.product_excel_export import ProductExcelExport
+from app.services.warehouse_stock import WarehouseStockService, set_balance
 
 
 class ProductExcelExportTest(unittest.TestCase):
@@ -62,6 +63,15 @@ class ProductExcelExportTest(unittest.TestCase):
                     "2026-08-18T10:30:00+00:00", self.ziiiro["id"],
                 ),
             )
+        warehouse_service = WarehouseStockService(database)
+        udelnaya = warehouse_service.list_warehouses()[0]
+        moscow = warehouse_service.create_warehouse("Москва", code="moscow")
+        with database.transaction() as connection:
+            set_balance(connection, self.ziiiro["id"], udelnaya["id"], 2)
+            set_balance(connection, self.ziiiro["id"], moscow["id"], 1)
+        warehouse_service.set_selected_warehouses(
+            "anonymous", [udelnaya["id"], moscow["id"]]
+        )
         self.environment = mock.patch.dict(
             "os.environ", {"CATALOG_DATABASE_PATH": str(self.database_path)}
         )

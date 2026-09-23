@@ -63,23 +63,37 @@ def apply_incoming_receipts_migration(connection, ddl_observer=None):
                     ddl_observer(statement)
                 connection.execute(statement)
     now = "1970-01-01T00:00:00+00:00"
+    warehouse_columns = _columns(connection, "erp_warehouses")
+    if "is_active" in warehouse_columns:
+        default_row = connection.execute(
+            "SELECT id FROM erp_warehouses WHERE code='udelnaya' AND is_active=1"
+        ).fetchone()
+        if default_row is None:
+            raise RuntimeError("canonical default warehouse is missing")
+        default_warehouse_id = default_row[0]
+    else:
+        connection.execute(
+            "INSERT OR IGNORE INTO erp_warehouses "
+            "(id,code,name,active,is_default,created_at,updated_at) "
+            "VALUES ('default','MAIN','Основной склад',1,1,?,?)", (now, now)
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO erp_warehouse_stocks "
+            "(warehouse_id,product_id,quantity,updated_at) "
+            "SELECT 'default',p.id,CASE WHEN EXISTS("
+            "SELECT 1 FROM erp_component_inventory ci WHERE ci.product_id=p.id) "
+            "THEN COALESCE((SELECT physical_stock FROM erp_component_inventory ci "
+            "WHERE ci.product_id=p.id),0) ELSE COALESCE(p.stock,0) END,? "
+            "FROM catalog_excel_products p", (now,)
+        )
+        default_warehouse_id = "default"
     connection.execute(
-        "INSERT OR IGNORE INTO erp_warehouses "
-        "(id,code,name,active,is_default,created_at,updated_at) "
-        "VALUES ('default','MAIN','Основной склад',1,1,?,?)", (now, now)
+        "UPDATE erp_receipts SET warehouse_id=? WHERE warehouse_id IS NULL",
+        (default_warehouse_id,),
     )
     connection.execute(
-        "INSERT OR IGNORE INTO erp_warehouse_stocks "
-        "(warehouse_id,product_id,quantity,updated_at) "
-        "SELECT 'default',p.id,CASE WHEN EXISTS("
-        "SELECT 1 FROM erp_component_inventory ci WHERE ci.product_id=p.id) "
-        "THEN COALESCE((SELECT physical_stock FROM erp_component_inventory ci "
-        "WHERE ci.product_id=p.id),0) ELSE COALESCE(p.stock,0) END,? "
-        "FROM catalog_excel_products p", (now,)
-    )
-    connection.execute("UPDATE erp_receipts SET warehouse_id='default' WHERE warehouse_id IS NULL")
-    connection.execute(
-        "UPDATE catalog_stock_movements SET warehouse_id='default' WHERE warehouse_id IS NULL"
+        "UPDATE catalog_stock_movements SET warehouse_id=? WHERE warehouse_id IS NULL",
+        (default_warehouse_id,),
     )
     rows = connection.execute(
         "SELECT id,metadata_json FROM erp_receipts WHERE operation_type IS NULL"

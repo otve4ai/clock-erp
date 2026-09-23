@@ -107,8 +107,8 @@ class ProductDeletionTest(unittest.TestCase):
         self.assertEqual(deleted["deleted_source_key"], product["source_key"])
         self.assertNotEqual(deleted["source_key"], product["source_key"])
 
-    def test_nonzero_requires_force_for_positive_negative_and_fractional(self):
-        for stock in (5, -2, 0.5):
+    def test_nonzero_requires_force_for_positive_and_fractional(self):
+        for stock in (5, 0.5):
             with self.subTest(stock=stock):
                 product = self.create_product(
                     stock=0,
@@ -116,7 +116,8 @@ class ProductDeletionTest(unittest.TestCase):
                 )
                 with self.database.transaction() as connection:
                     connection.execute(
-                        "UPDATE catalog_excel_products SET stock = ? WHERE id = ?",
+                        "UPDATE erp_product_warehouse_stock SET quantity = ? "
+                        "WHERE product_id = ?",
                         (stock, product["id"]),
                     )
                 with self.assertRaises(ProductDeleteBlockedError):

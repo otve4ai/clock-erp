@@ -9,6 +9,7 @@ from app.services.excel_product_catalog import ExcelProductCatalog
 from app.services.inventory_lock import assert_products_unlocked
 from app.services.product_reconciliation import normalize_text
 from app.services.receipt_inventory import ReceiptInventory, utc_now
+from app.services.warehouse_stock import default_warehouse_id, get_balance, set_balance
 from app.services.shared_catalog import DuplicateCatalogValueError, SharedCatalog
 
 
@@ -60,7 +61,7 @@ class ReceiptRecovery:
                     "Статус прихода изменился после dry-run; восстановление остановлено."
                 )
             items = connection.execute(
-                "SELECT i.*, p.stock, p.active AS product_active "
+                "SELECT i.*, p.active AS product_active "
                 "FROM erp_receipt_items i "
                 "JOIN catalog_excel_products p ON p.id = i.product_id "
                 "WHERE i.receipt_id = ? AND i.active = 1 ORDER BY i.id",
@@ -91,17 +92,19 @@ class ReceiptRecovery:
                             item["product_id"]
                         )
                     )
-                from app.services.component_inventory import physical
-                if physical(connection, item["product_id"]):
-                    raise ReceiptRecoveryError("Восстановление legacy-прихода компонента требует проверки физического учёта.")
-                stock_before = float(item["stock"] or 0)
+                warehouse_id = int(
+                    receipt["warehouse_id"] or default_warehouse_id(connection)
+                )
+                stock_before = get_balance(
+                    connection, item["product_id"], warehouse_id,
+                    require_initialized=False,
+                )
                 quantity = float(item["quantity"])
                 stock_after = stock_before + quantity
                 now = utc_now()
-                connection.execute(
-                    "UPDATE catalog_excel_products SET stock = ?, "
-                    "stock_source = 'receipt', updated_at = ? WHERE id = ?",
-                    (stock_after, now, item["product_id"]),
+                set_balance(
+                    connection, item["product_id"], warehouse_id,
+                    stock_after, now,
                 )
                 connection.execute(
                     "INSERT INTO catalog_stock_movements "
@@ -109,9 +112,9 @@ class ReceiptRecovery:
                     "stock_after, receipt_id, receipt_item_id, idempotency_key, "
                     "tenant_id, source_type, source_id, source_line_id, "
                     "operation_kind, source_number, source, user_name, comment, "
-                    "created_at) "
+                    "created_at, warehouse_id) "
                     "VALUES (?, ?, 'receipt', ?, ?, ?, ?, ?, ?, ?, 'receipt', ?, ?, "
-                    "'post', ?, 'Приход', ?, ?, ?)",
+                    "'post', ?, 'Приход', ?, ?, ?, ?)",
                     (
                         str(uuid.uuid4()),
                         item["product_id"],
@@ -133,7 +136,7 @@ class ReceiptRecovery:
                         "Восстановление прихода №{}".format(
                             receipt["number"] or receipt_id
                         ),
-                        now,
+                        now, warehouse_id,
                     ),
                 )
             result = self._managed_plan(
@@ -187,9 +190,13 @@ class ReceiptRecovery:
         mode,
     ):
         items = connection.execute(
-            "SELECT i.*, p.excel_name_raw AS product_name, p.stock, p.active "
+            "SELECT i.*, p.excel_name_raw AS product_name, "
+            "COALESCE(ws.quantity,0) AS stock, p.active "
             "FROM erp_receipt_items i "
             "LEFT JOIN catalog_excel_products p ON p.id = i.product_id "
+            "JOIN erp_receipts receipt_stock ON receipt_stock.id=i.receipt_id "
+            "LEFT JOIN erp_product_warehouse_stock ws ON ws.product_id=i.product_id "
+            "AND ws.warehouse_id=receipt_stock.warehouse_id "
             "WHERE i.receipt_id = ? AND i.active = 1 ORDER BY i.id",
             (receipt["id"],),
         ).fetchall()

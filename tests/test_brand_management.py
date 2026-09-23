@@ -101,16 +101,12 @@ class BrandManagementTest(unittest.TestCase):
         second = self.product("B", "B", "Casio", "Часы", 0)
         with self.database.transaction() as connection:
             connection.execute(
-                "UPDATE catalog_excel_products SET stock = 5 WHERE id = ?",
+                "UPDATE erp_product_warehouse_stock SET quantity = 5 WHERE product_id = ?",
                 (first["id"],),
-            )
-            connection.execute(
-                "UPDATE catalog_excel_products SET stock = -5 WHERE id = ?",
-                (second["id"],),
             )
         overview = self.catalog.get_brand_overview(first["brand_id"])
 
-        self.assertEqual(overview["stock_total"], 0)
+        self.assertEqual(overview["stock_total"], 5)
         self.assertEqual(overview["nonzero_count"], 1)
         self.assertEqual(overview["categories"][0]["nonzero_count"], 1)
 

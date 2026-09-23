@@ -4,7 +4,9 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
-from app.services.shared_catalog import catalog_name, normalized_name
+from app.services.shared_catalog import (
+    ALL_ACTIVE_STOCK_SQL, catalog_name, normalized_name,
+)
 
 
 class CategoryIntegrityError(ValueError):
@@ -92,8 +94,8 @@ def global_duplicate_audit(connection):
         metrics = _dicts(connection.execute(
             "SELECT p.brand_id, b.name AS brand, p.category_id, "
             "COUNT(p.id) AS product_count, "
-            "COALESCE(SUM(CASE WHEN p.stock != 0 THEN 1 ELSE 0 END), 0) "
-            "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
+            "COALESCE(SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " != 0 THEN 1 ELSE 0 END), 0) "
+            "AS nonzero_count, COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total "
             "FROM catalog_excel_products p "
             "LEFT JOIN erp_brands b ON b.id = p.brand_id "
             "WHERE p.active = 1 AND p.category_id IN ({}) "
@@ -171,8 +173,8 @@ class CategoryIntegrityRepair:
 
     def _snapshot(self, brand_id):
         products = _dicts(self.connection.execute(
-            "SELECT id, brand_id, category_id, stock, active "
-            "FROM catalog_excel_products WHERE brand_id = ? ORDER BY id",
+            "SELECT p.id, p.brand_id, p.category_id, " + ALL_ACTIVE_STOCK_SQL + " AS stock, p.active "
+            "FROM catalog_excel_products p WHERE p.brand_id = ? ORDER BY p.id",
             (int(brand_id),),
         ).fetchall())
         return {
@@ -199,19 +201,19 @@ class CategoryIntegrityRepair:
         placeholders = ", ".join("?" for _ in category_ids)
         category_metrics = _dicts(self.connection.execute(
             "SELECT p.category_id, COUNT(p.id) AS product_count, "
-            "COALESCE(SUM(CASE WHEN p.stock != 0 THEN 1 ELSE 0 END), 0) "
-            "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
+            "COALESCE(SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " != 0 THEN 1 ELSE 0 END), 0) "
+            "AS nonzero_count, COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total "
             "FROM catalog_excel_products p WHERE p.active = 1 "
             "AND p.brand_id = ? AND p.category_id IN ({}) "
             "GROUP BY p.category_id ORDER BY p.category_id".format(placeholders),
             [int(brand["id"])] + category_ids,
         ).fetchall())
         uncategorized = dict(self.connection.execute(
-            "SELECT COUNT(id) AS product_count, "
-            "COALESCE(SUM(CASE WHEN stock != 0 THEN 1 ELSE 0 END), 0) "
-            "AS nonzero_count, COALESCE(SUM(stock), 0) AS stock_total "
-            "FROM catalog_excel_products WHERE active = 1 AND brand_id = ? "
-            "AND category_id IS NULL",
+            "SELECT COUNT(p.id) AS product_count, "
+            "COALESCE(SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " != 0 THEN 1 ELSE 0 END), 0) "
+            "AS nonzero_count, COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS stock_total "
+            "FROM catalog_excel_products p WHERE p.active = 1 AND p.brand_id = ? "
+            "AND p.category_id IS NULL",
             (int(brand["id"]),),
         ).fetchone())
         snapshot = self._snapshot(brand["id"])

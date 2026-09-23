@@ -1,5 +1,6 @@
 """Atomic local receipt stock ledger with idempotent create/update/cancel."""
 from app.services.component_inventory import overlay, write_balance, remember
+from app.services.warehouse_stock import default_warehouse_id, require_warehouse
 
 import json
 import math
@@ -393,6 +394,7 @@ class ReceiptInventory:
                     for product_id in set(old_totals) | set(new_totals)
                 ],
                 include_archived=True, document=("receipt", receipt_id),
+                warehouse_id=current["warehouse_id"],
             )
             deltas = {
                 product_id: new_totals[product_id] - old_totals[product_id]
@@ -445,16 +447,16 @@ class ReceiptInventory:
                     continue
                 stock_before = float(products[product_id]["stock"] or 0)
                 stock_after = stock_before + delta
-                write_balance(connection, product_id, stock_after, "receipt", now, ("receipt", receipt_id))
+                write_balance(connection, product_id, stock_after, "receipt", now, ("receipt", receipt_id), current["warehouse_id"])
                 connection.execute(
                     "INSERT INTO catalog_stock_movements "
                     "(id, product_id, movement_type, quantity_delta, stock_before, "
                     "stock_after, receipt_id, receipt_item_id, idempotency_key, "
                     "tenant_id, source_type, source_id, source_line_id, "
                     "operation_kind, source_number, source, user_name, comment, "
-                    "created_at) "
+                    "created_at, warehouse_id) "
                     "VALUES (?, ?, 'manual_adjustment', ?, ?, ?, ?, ?, ?, ?, "
-                    "'receipt', ?, ?, 'adjust', ?, 'Приход', ?, ?, ?)",
+                    "'receipt', ?, ?, 'adjust', ?, 'Приход', ?, ?, ?, ?)",
                     (
                         str(uuid.uuid4()),
                         product_id,
@@ -478,7 +480,7 @@ class ReceiptInventory:
                         "Корректировка прихода №{}".format(
                             receipt.get("number") or receipt_id
                         ),
-                        now,
+                        now, current["warehouse_id"],
                     ),
                 )
             connection.execute(
@@ -564,7 +566,7 @@ class ReceiptInventory:
             if receipt["status"] == "cancelled":
                 return True
             rows = connection.execute(
-                "SELECT i.product_id, SUM(i.quantity) AS quantity, p.stock "
+                "SELECT i.product_id, SUM(i.quantity) AS quantity, 0 AS stock "
                 "FROM erp_receipt_items i "
                 "JOIN catalog_excel_products p ON p.id = i.product_id "
                 "WHERE i.receipt_id = ? AND i.active = 1 GROUP BY i.product_id",
@@ -576,7 +578,10 @@ class ReceiptInventory:
                 ReceiptInventoryError,
             )
             for row in rows:
-                row = overlay(connection, row, row["product_id"], ("receipt", receipt_id))
+                row = overlay(
+                    connection, row, row["product_id"], ("receipt", receipt_id),
+                    warehouse_id=receipt["warehouse_id"],
+                )
                 if float(row["stock"] or 0) < float(row["quantity"] or 0):
                     raise ReceiptInventoryError(
                         "Приход нельзя отменить: товар ID {} уже частично списан.".format(
@@ -609,7 +614,7 @@ class ReceiptInventory:
             if receipt["status"] == "cancelled":
                 return self._receipt_payload(connection, receipt_id)
             rows = connection.execute(
-                "SELECT i.*, p.stock FROM erp_receipt_items i "
+                "SELECT i.*, 0 AS stock FROM erp_receipt_items i "
                 "JOIN catalog_excel_products p ON p.id = i.product_id "
                 "WHERE i.receipt_id = ? AND i.active = 1 ORDER BY i.id",
                 (receipt_id,),
@@ -617,7 +622,10 @@ class ReceiptInventory:
             totals = defaultdict(float)
             products = {}
             for row in rows:
-                row = overlay(connection, row, row["product_id"], ("receipt", receipt_id))
+                row = overlay(
+                    connection, row, row["product_id"], ("receipt", receipt_id),
+                    warehouse_id=receipt["warehouse_id"],
+                )
                 totals[int(row["product_id"])] += float(row["quantity"])
                 products[int(row["product_id"])] = row
             for product_id, quantity in totals.items():
@@ -633,15 +641,15 @@ class ReceiptInventory:
             for index, (product_id, quantity) in enumerate(sorted(totals.items())):
                 stock_before = float(products[product_id]["stock"] or 0)
                 stock_after = stock_before - quantity
-                write_balance(connection, product_id, stock_after, "receipt_cancel", now, ("receipt", receipt_id))
+                write_balance(connection, product_id, stock_after, "receipt_cancel", now, ("receipt", receipt_id), receipt["warehouse_id"])
                 connection.execute(
                     "INSERT INTO catalog_stock_movements "
                     "(id, product_id, movement_type, quantity_delta, stock_before, "
                     "stock_after, receipt_id, idempotency_key, tenant_id, "
                     "source_type, source_id, source_line_id, operation_kind, "
-                    "source_number, source, user_name, comment, created_at) "
+                    "source_number, source, user_name, comment, created_at, warehouse_id) "
                     "VALUES (?, ?, 'cancellation', ?, ?, ?, ?, ?, ?, "
-                    "'receipt', ?, ?, 'cancel', ?, 'Приход', ?, ?, ?)",
+                    "'receipt', ?, ?, 'cancel', ?, 'Приход', ?, ?, ?, ?)",
                     (
                         str(uuid.uuid4()),
                         product_id,
@@ -662,7 +670,7 @@ class ReceiptInventory:
                         "Отмена прихода №{}".format(
                             receipt["number"] or receipt_id
                         ),
-                        now,
+                        now, receipt["warehouse_id"],
                     ),
                 )
             connection.execute(
@@ -728,23 +736,8 @@ class ReceiptInventory:
                     "receipt_delete",
                     now,
                     ("receipt", receipt_id),
+                    plan["warehouse_id"],
                 )
-                if plan.get("warehouse_id"):
-                    from app.services.manual_receipts import ManualReceipts
-                    warehouse = ManualReceipts._warehouse(
-                        connection, plan["warehouse_id"], active=False
-                    )
-                    warehouse_before = ManualReceipts._warehouse_balance(
-                        connection, warehouse, item["product_id"], now
-                    )
-                    if warehouse_before + 0.000001 < item["quantity"]:
-                        raise ReceiptInventoryError(
-                            "Поставку нельзя удалить: на выбранном складе недостаточно остатка."
-                        )
-                    ManualReceipts._set_warehouse_balance(
-                        connection, warehouse["id"], item["product_id"],
-                        warehouse_before - item["quantity"], now,
-                    )
             connection.execute(
                 "DELETE FROM catalog_stock_movements WHERE receipt_id = ?",
                 (receipt_id,),
@@ -848,7 +841,7 @@ class ReceiptInventory:
         except (TypeError, ValueError):
             receipt_metadata = {}
         rows = connection.execute(
-            "SELECT i.product_id, SUM(i.quantity) AS quantity, p.stock, "
+            "SELECT i.product_id, SUM(i.quantity) AS quantity, 0 AS stock, "
             "p.excel_name_raw AS product_name, p.excel_article AS article, "
             "COALESCE(p.bitrix_thumbnail_url, p.bitrix_primary_image_url, '') AS image_url "
             "FROM erp_receipt_items i JOIN catalog_excel_products p ON p.id = i.product_id "
@@ -893,7 +886,10 @@ class ReceiptInventory:
                         "number": sale["external_order_id"] or metadata.get("order_number") or sale["id"],
                         "date": str(sale["created_at"] or "")[:10],
                     })
-            row = overlay(connection, row, row["product_id"], ("receipt", receipt_id))
+            row = overlay(
+                connection, row, row["product_id"], ("receipt", receipt_id),
+                warehouse_id=receipt["warehouse_id"],
+            )
             quantity = float(row["quantity"] or 0)
             stock = float(row["stock"] or 0)
             stock_after = stock if sales or receipt["status"] == "draft" else stock - quantity
@@ -920,7 +916,7 @@ class ReceiptInventory:
             })
         return {
             "receipt_id": receipt_id, "number": receipt["number"] or receipt_id,
-            "warehouse_id": receipt["warehouse_id"] if "warehouse_id" in receipt.keys() else None,
+            "warehouse_id": receipt["warehouse_id"],
             "name": str(receipt_metadata.get("title") or receipt_metadata.get("name") or ""),
             "comment": receipt["comment"] or "",
             "receipt_status": receipt["status"], "posted_at": posted_at, "items": items,
@@ -944,6 +940,8 @@ class ReceiptInventory:
             (str(receipt_id),),
         ).fetchall()
         result = dict(receipt)
+        if result.get("warehouse_id") not in (None, ""):
+            result["warehouse_id"] = int(result["warehouse_id"])
         try:
             result["metadata"] = json.loads(result["metadata_json"] or "{}")
         except (TypeError, ValueError):
@@ -1013,12 +1011,17 @@ class ReceiptInventory:
         tenant_id,
         now,
     ):
-        products = cls._load_products(connection, prepared)
+        warehouse_id = require_warehouse(
+            connection, receipt.get("warehouse_id"), allow_legacy_default=True
+        )
+        products = cls._load_products(
+            connection, prepared, warehouse_id=warehouse_id
+        )
         connection.execute(
             "INSERT INTO erp_receipts "
             "(id, tenant_id, number, comment, status, receipt_date, user_name, "
-            "idempotency_key, metadata_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)",
+            "idempotency_key, metadata_json, created_at, updated_at, warehouse_id) "
+            "VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)",
             (
                 receipt_id,
                 tenant_id,
@@ -1038,6 +1041,7 @@ class ReceiptInventory:
                 json.dumps(receipt, ensure_ascii=False, sort_keys=True),
                 now,
                 now,
+                warehouse_id,
             ),
         )
         cls._insert_items(
@@ -1096,6 +1100,7 @@ class ReceiptInventory:
         products = cls._load_products(
             connection,
             [{"product_id": item["product_id"]} for item in items],
+            warehouse_id=receipt["warehouse_id"],
         )
         assert_products_unlocked(
             connection, products, ReceiptInventoryError
@@ -1107,7 +1112,7 @@ class ReceiptInventory:
             quantity = float(item["quantity"])
             stock_after = stock_before + quantity
             remember(connection, product_id, ("receipt", receipt_id))
-            write_balance(connection, product_id, stock_after, "receipt", now, ("receipt", receipt_id))
+            write_balance(connection, product_id, stock_after, "receipt", now, ("receipt", receipt_id), receipt["warehouse_id"])
             products[product_id]["stock"] = stock_after
             connection.execute(
                 "INSERT INTO catalog_stock_movements "
@@ -1115,9 +1120,9 @@ class ReceiptInventory:
                 "stock_after, receipt_id, receipt_item_id, idempotency_key, "
                 "tenant_id, source_type, source_id, source_line_id, "
                 "operation_kind, source_number, source, user_name, comment, "
-                "created_at) "
+                "created_at, warehouse_id) "
                 "VALUES (?, ?, 'receipt', ?, ?, ?, ?, ?, ?, ?, 'receipt', ?, ?, "
-                "'post', ?, 'Приход', ?, ?, ?)",
+                "'post', ?, 'Приход', ?, ?, ?, ?)",
                 (
                     str(uuid.uuid4()),
                     product_id,
@@ -1137,7 +1142,7 @@ class ReceiptInventory:
                     str(receipt["number"] or receipt_id),
                     str(user_name or receipt["user_name"] or "") or None,
                     "Приход №{}".format(receipt["number"] or receipt_id),
-                    now,
+                    now, receipt["warehouse_id"],
                 ),
             )
             products[product_id] = {
@@ -1186,7 +1191,8 @@ class ReceiptInventory:
         return prepared
 
     @staticmethod
-    def _load_products(connection, positions, include_archived=False, document=None):
+    def _load_products(connection, positions, include_archived=False, document=None,
+                       warehouse_id=None):
         product_ids = sorted({
             int(position["product_id"])
             for position in positions
@@ -1194,7 +1200,7 @@ class ReceiptInventory:
         placeholders = ", ".join("?" for _ in product_ids)
         active_sql = "" if include_archived else " AND active = 1"
         rows = connection.execute(
-            "SELECT id, stock, brand_id, category_id, active "
+            "SELECT id, 0 AS stock, brand_id, category_id, active "
             "FROM catalog_excel_products WHERE id IN ({}){}".format(
                 placeholders,
                 active_sql,
@@ -1202,7 +1208,12 @@ class ReceiptInventory:
             product_ids,
         ).fetchall()
         try:
-            products = {int(row["id"]): overlay(connection, row, document=document) for row in rows}
+            products = {
+                int(row["id"]): overlay(
+                    connection, row, document=document,
+                    warehouse_id=warehouse_id,
+                ) for row in rows
+            }
         except ValueError as error:
             raise ReceiptInventoryError(str(error))
         missing = [product_id for product_id in product_ids if product_id not in products]

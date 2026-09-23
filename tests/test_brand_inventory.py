@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
@@ -169,16 +170,15 @@ class BrandInventoryTest(unittest.TestCase):
             [positive["id"], zero["id"]],
         )
 
-    def test_negative_scope_does_not_create_inventory(self):
+    def test_negative_canonical_stock_is_rejected(self):
         self.product(stock=0)
         negative = self.product(stock=1, name="Negative", article="NEGATIVE")
-        with self.database.transaction() as connection:
+        with self.assertRaises(sqlite3.IntegrityError), self.database.transaction() as connection:
             connection.execute(
-                "UPDATE catalog_excel_products SET stock = -1 WHERE id = ?",
+                "UPDATE erp_product_warehouse_stock SET quantity = -1 "
+                "WHERE product_id = ?",
                 (negative["id"],),
             )
-        with self.assertRaisesRegex(InventoryError, "отрицательные остатки"):
-            self.service.start(self.brand_id())
         with self.database.connect() as connection:
             self.assertEqual(connection.execute(
                 "SELECT COUNT(*) FROM erp_inventory_sessions"

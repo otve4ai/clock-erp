@@ -650,6 +650,7 @@
   };
   $("supply-product-source").onchange = $("supply-product-search").oninput;
   function updateAddition() {
+    $("add-item").disabled = busy;
     $("create-manual-supply-product").disabled = busy || Boolean(addition);
     $("supply-product-source").disabled = busy || Boolean(addition);
     $("supply-taxonomy").hidden =
@@ -815,8 +816,8 @@
       addition = null;
       current = result;
       items = result.items.map((item) => ({ ...item }));
-      $("add-item-dialog").close();
       renderItems();
+      $("add-item-dialog").close();
       message(success, true);
       await load();
     } catch (error) {
