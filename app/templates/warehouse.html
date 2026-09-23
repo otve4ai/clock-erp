@@ -4065,6 +4065,7 @@
         <script defer src="{{ url_for('static', filename='js/datetime-cell-e2e.js') }}"></script>
     {% endif %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/product-picker.css') }}">
+    <link rel="stylesheet" href="{{ static_asset_url('css/erp-native-table-columns.css') }}">
     <script defer src="{{ url_for('static', filename='js/product-picker.js') }}"></script>
 </head>
 <body class="warehouse-page">
@@ -4777,7 +4778,7 @@
                 tabindex="0"
                 aria-label="Таблица товаров с горизонтальной прокруткой"
             >
-                    <table id="warehouseProductsTable" class="warehouse-products-table erp-data-table">
+                    <table id="warehouseProductsTable" class="warehouse-products-table erp-data-table erp-native-columns-table">
                         <colgroup>
                             <col class="warehouse-col-photo" data-column-key="photo">
                             <col class="warehouse-col-name" data-column-key="name">

@@ -158,7 +158,7 @@ class ErpTableUxPolishTest(unittest.TestCase):
         warehouse = self.source("app/templates/warehouse.html")
         sales = self.source("app/templates/sales.html")
         controller = self.source("app/static/js/erp-native-table-columns.js")
-        css = self.source("app/static/css/erp-components.css")
+        css = self.source("app/static/css/erp-native-table-columns.css")
 
         for template in (warehouse, sales):
             self.assertIn("window.ErpNativeTableColumns.create({", template)
@@ -176,12 +176,18 @@ class ErpTableUxPolishTest(unittest.TestCase):
             controller,
         )
         self.assertIn('data-system-column="actions"', warehouse)
+        for template in (warehouse, sales):
+            self.assertIn("erp-native-columns-table", template)
+            self.assertIn(
+                "static_asset_url('css/erp-native-table-columns.css')",
+                template,
+            )
         self.assertIn(
-            ':is(.warehouse-products-table, .sales-table).erp-data-table thead th',
+            ".erp-native-columns-table.erp-data-table thead th",
             css,
         )
         self.assertIn(
-            ':is(.warehouse-products-table .warehouse-sort-label, .sales-table .sales-sort-label)',
+            ".erp-native-columns-table.erp-data-table .erp-sort-label",
             css,
         )
 

@@ -10,6 +10,8 @@
 
 - `app/static/css/themes.css` — глобальные theme tokens и две темы;
 - `app/static/css/erp-components.css` — общие элементы рабочих страниц;
+- `app/static/css/erp-native-table-columns.css` — единый визуальный контракт
+  заголовков и управления столбцами таблиц товаров и продаж;
 - `app/static/css/sidebar.css` — desktop/mobile application shell;
 - `app/static/css/notifications.css` — toast-состояния;
 - `app/templates/_sidebar.html`, `_pagination.html`, `_catalog_combobox.html` —
