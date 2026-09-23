@@ -4761,6 +4761,7 @@
                             <col class="warehouse-col-brand" data-column-key="brand">
                             <col class="warehouse-col-category" data-column-key="category">
                             <col class="warehouse-col-stock" data-column-key="stock">
+                            <col data-column-key="site_status">
                             <col class="warehouse-col-created" data-column-key="created">
                             <col class="warehouse-col-cell" data-column-key="cell">
                             {% if out_of_stock %}<col data-column-key="platform_checks">{% endif %}
@@ -4857,6 +4858,8 @@
                                     </span>
                                 </th>
 
+                                <th data-column-key="site_status">На сайте</th>
+
                                 <th class="created-column" data-column-key="created">
                                     <span
                                         class="warehouse-sort-label erp-sort-label{% if sort_by == 'created_at' %} is-active{% endif %}"
@@ -4952,6 +4955,13 @@
 
                                     <td data-column-key="stock" class="{% if item.stock <= 0 %}stock-zero{% else %}stock-good{% endif %}">
                                         {{ item.stock_display }}
+                                    </td>
+
+                                    <td data-column-key="site_status">
+                                        <span class="warehouse-site-status is-{{ item.site_status_key }}">
+                                            <span class="warehouse-site-status-dot" aria-hidden="true"></span>
+                                            {{ item.site_status_label }}
+                                        </span>
                                     </td>
 
                                     <td class="created-column" data-column-key="created">
@@ -7886,8 +7896,8 @@
         const warehouseTablePreviousStorageKey = "vechasu.warehouse.table-view.v2";
         const warehouseTableStorageKey = "vechasu.warehouse.table-view.v3";
         const warehouseTableDefaults = {
-            order: ["photo", "name", "stock", "price", "article", "brand", "category", "created", "model", "cell", "platform_checks"],
-            widths: { photo: 64, name: 256, model: 120, price: 80, article: 96, brand: 95, category: 150, stock: 104, created: 106, cell: 75, platform_checks: 210 },
+            order: ["photo", "name", "stock", "site_status", "price", "article", "brand", "category", "created", "model", "cell", "platform_checks"],
+            widths: { photo: 64, name: 256, model: 120, price: 80, article: 96, brand: 95, category: 150, stock: 104, site_status: 118, created: 106, cell: 75, platform_checks: 210 },
             hidden: ["model", "cell"]
         };
         const warehouseTableRequiredColumns = ["photo", "name"];
@@ -7895,15 +7905,15 @@
         const warehouseTableColumnLabels = {
             photo: "Фото", name: "Название", model: "Модель", price: "Цена", article: "Артикул",
             brand: "Бренд", category: "Категория", stock: "Остаток",
-            created: "Добавлено", cell: "Ячейка", platform_checks: "Проверка отключения"
+            site_status: "На сайте", created: "Добавлено", cell: "Ячейка", platform_checks: "Проверка отключения"
         };
         const warehouseTableMinimumWidths = {
             photo: 60, name: 196, model: 90, price: 72, article: 86, brand: 84,
-            category: 138, stock: 98, created: 96, cell: 68, platform_checks: 180
+            category: 138, stock: 98, site_status: 108, created: 96, cell: 68, platform_checks: 180
         };
         const warehouseTableGrowWeights = {
             photo: 0.2, name: 5, model: 1.5, price: 0.25, article: 2, brand: 2,
-            category: 2.5, stock: 0.2, created: 0.5, cell: 0.5, platform_checks: 2
+            category: 2.5, stock: 0.2, site_status: 0.4, created: 0.5, cell: 0.5, platform_checks: 2
         };
         const warehouseTableMaximumWidth = 520;
         const warehouseTableActionWidth = 82;
@@ -7926,9 +7936,23 @@
                         knownSavedWidths[key] = savedWidths[key];
                     }
                 });
+                const savedOrder = Array.isArray(saved.order)
+                    ? saved.order.filter(function(key, index, values) {
+                        return warehouseTableDefaults.order.includes(key)
+                            && values.indexOf(key) === index;
+                    })
+                    : warehouseTableDefaults.order.slice();
+                if (!savedOrder.includes("site_status")) {
+                    const stockIndex = savedOrder.indexOf("stock");
+                    savedOrder.splice(
+                        stockIndex >= 0 ? stockIndex + 1 : savedOrder.length,
+                        0,
+                        "site_status"
+                    );
+                }
                 const view = {
                     version: 3,
-                    order: Array.isArray(saved.order) ? saved.order : warehouseTableDefaults.order.slice(),
+                    order: savedOrder,
                     widths: Object.assign({}, warehouseTableDefaults.widths, knownSavedWidths),
                     customWidths: Array.isArray(saved.customWidths)
                         ? saved.customWidths.filter((key, index, values) => (
