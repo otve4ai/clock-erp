@@ -9,6 +9,7 @@ async function addProduct(page: Page, article: string, quantity = '1') {
   await page.locator('#add-quantity').fill(quantity);
   await page.locator('#confirm-add-item').click();
   await expect(page.locator('#add-item-dialog')).not.toBeVisible();
+  await expect(page.locator('#add-item')).toBeEnabled();
 }
 async function openNewSupply(page: Page) {
   await page.locator('.add-menu summary').click();
