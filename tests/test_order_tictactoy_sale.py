@@ -733,7 +733,10 @@ class OrderTictactoySaleTest(unittest.TestCase):
         self.assertEqual({row["order_status"] for row in sales}, {"completed"})
 
     def test_success_is_one_local_sale_with_two_lines_and_exact_redirect(self):
-        response = self.conduct()
+        status_service = OrderStatusService(self.database)
+        status_service.ingest("18593", "A")
+        with mock.patch.object(web, "update_order_status") as update_status:
+            response = self.conduct()
         self.assertEqual(urlsplit(response.location).path, "/sales")
         query = parse_qs(urlsplit(response.location).query)
         self.assertEqual(query["source"], ["tictactoy"])
@@ -743,6 +746,12 @@ class OrderTictactoySaleTest(unittest.TestCase):
         self.assertEqual(len({row["id"] for row in rows}), 1)
         self.assertEqual(ExcelProductCatalog(self.database).get_product(self.watch["id"])["stock"], 3)
         self.assertEqual(ExcelProductCatalog(self.database).get_product(self.strap["id"])["stock"], 2)
+        update_status.assert_not_called()
+        self.assertEqual(status_service.get("18593")["erp_status"], "confirmed")
+        with self.database.connect() as connection:
+            self.assertEqual(connection.execute(
+                "SELECT COUNT(*) FROM erp_order_status_sync_queue"
+            ).fetchone()[0], 0)
         report = web.build_sales_report_records(
             warehouse_items=[], operations=[], stored_manual_sales=rows,
             automatic_overrides={},
@@ -1146,18 +1155,19 @@ class OrderTictactoySaleTest(unittest.TestCase):
                 web.OrderStatusService,
                 "change",
                 side_effect=RuntimeError("rollback probe"),
-            ),
+            ) as status_change,
+            mock.patch.object(web, "update_order_status") as update_status,
         ):
-            rolled_back = self.client.post(
+            completed = self.client.post(
                 "/order/18593/stock-writeoff",
                 data={"csrf_token": "test-token"},
             )
-        self.assertNotIn(
-            "stock_notice", parse_qs(urlsplit(rolled_back.location).query)
-        )
+        self.assertEqual(urlsplit(completed.location).path, "/sales")
+        status_change.assert_not_called()
+        update_status.assert_not_called()
         self.assertEqual(
             ExcelProductCatalog(self.database).get_product(self.watch["id"])["stock"],
-            5,
+            3,
         )
 
     def test_assembled_order_without_sale_can_be_recovered_atomically(self):
@@ -1168,7 +1178,7 @@ class OrderTictactoySaleTest(unittest.TestCase):
         self.assertEqual(len({row["id"] for row in rows}), 1)
         state = OrderStatusService(self.database).get("18593")
         self.assertEqual(state["erp_status"], "assembled")
-        self.assertEqual(state["sale_id"], rows[0]["id"])
+        self.assertIsNone(state["sale_id"])
         self.assertEqual(
             ExcelProductCatalog(self.database).get_product(self.watch["id"])["stock"],
             3,
@@ -1550,7 +1560,7 @@ class OrderTictactoySaleTest(unittest.TestCase):
             "order_id", "order_item_id", "product_id", "created_at", "updated_at"
         ])
 
-    def test_refusal_requires_cancelling_linked_sale_first(self):
+    def test_sale_does_not_link_order_status_but_still_blocks_manual_refusal(self):
         self.conduct()
         status_service = OrderStatusService(self.database)
         with (
@@ -1560,11 +1570,13 @@ class OrderTictactoySaleTest(unittest.TestCase):
             mock.patch.object(web, "update_order_status") as update,
         ):
             response = self.client.post("/order/18593/status", data={"status": "C"})
+        self.assertEqual(response.status_code, 302)
         update.assert_not_called()
         self.assertIn(
             "Сначала отмените связанную продажу",
             parse_qs(urlsplit(response.location).query)["message"][0],
         )
+        self.assertIsNone(status_service.get("18593")["sale_id"])
 
     def test_refusal_can_be_set_manually_without_sale(self):
         status_service = OrderStatusService(self.database)

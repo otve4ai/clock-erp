@@ -256,6 +256,7 @@ from app.services.repair_cases import (
     normalize_date,
     normalize_money,
     repair_attention_key,
+    repair_created_key,
     repair_now,
     save_repair_file,
 )
@@ -1328,7 +1329,6 @@ def refresh_orders_cache():
     """Incrementally refresh the recent Bitrix window without deleting history."""
     now = time.time()
     try:
-        order_status_service().retry_pending(update_order_status, limit=10)
         # The ordinary list endpoint is intentionally a bounded recent window.
         # Full cursor traversal belongs only to the explicit history backfill.
         short_orders = bitrix_orders_client().list_orders(limit=50)
@@ -3908,14 +3908,6 @@ def _conduct_order_sale(order_id):
             "user_name": actor,
             "idempotency_key": "bitrix-order:{}".format(order_id),
             "enforce_external_unique": True,
-            "failure_hook": lambda connection: sale_status_service.change(
-                order_id,
-                ERP_ASSEMBLED,
-                current_audit_actor(),
-                sale_id=payload["id"],
-                connection=connection,
-                order_number=order_number,
-            ),
             "audit_actor": current_audit_actor(),
         }
         if strap_replacement_requested:
@@ -3926,20 +3918,10 @@ def _conduct_order_sale(order_id):
             sale = inventory.create_sale_batch(
                 payload, prepared_items, **create_arguments
             )
-        status_synced = sale_status_service.sync_one(
-            order_id, update_order_status
-        )
         WAREHOUSE_CACHE["items"] = []
         WAREHOUSE_CACHE["loaded_at"] = 0
         _cached_api_sales_records.cache_clear()
-        success_message = (
-            f"Заказ №{order_number} проведён в продажу"
-            + (
-                ""
-                if status_synced
-                else "; статус ожидает синхронизации с Bitrix"
-            )
-        )
+        success_message = f"Заказ №{order_number} проведён в продажу"
         stock_notification = None
         if str(sale.get("id") or "") == payload["id"]:
             stock_notification = build_automatic_sale_stock_notification(
@@ -8493,7 +8475,7 @@ def repair_page():
     }
     if repair_view == "active" and queue:
         cases = [case for case in cases if matches_queue(case, queue)]
-    cases.sort(key=repair_attention_key)
+    cases.sort(key=repair_created_key, reverse=True)
 
     page, per_page = parse_erp_pagination()
     total = len(cases)
@@ -11839,9 +11821,7 @@ def sale_cancel():
     managed = inventory.get_sale(sale_id)
     if managed is not None:
         try:
-            external_order_id = str(managed.get("external_order_id") or "").strip()
             actor = current_audit_actor()
-            sale_number = str(managed.get("order_number") or sale_id)
             inventory.cancel_sale(
                 sale_id,
                 reason=reason,
@@ -11852,27 +11832,8 @@ def sale_cancel():
                     or "sale-cancel:{}".format(sale_id)
                 ),
                 audit_actor=actor,
-                failure_hook=(
-                    lambda connection: OrderStatusService(
-                        inventory.database
-                    ).change(
-                        external_order_id, ERP_REFUSED, actor,
-                        sale_id=sale_id, connection=connection,
-                        order_number=external_order_id,
-                        event_message=(
-                            "Статус автоматически изменён на “Отказ” "
-                            "при отмене продажи №{}"
-                        ).format(sale_number),
-                    )
-                    if external_order_id else None
-                ),
             )
             _cached_api_receipt_records.cache_clear()
-            if external_order_id:
-                synced = OrderStatusService(inventory.database).sync_one(
-                    external_order_id, update_order_status
-                )
-                cache_order_status(external_order_id, "C", synced=synced)
         except CancellationConflictError as error:
             return respond_to_sales_action(
                 str(error), notice="error", status_code=409,
@@ -11885,13 +11846,9 @@ def sale_cancel():
                 status_code=500,
             )
         _cached_api_sales_records.cache_clear()
-        message = (
-            "Продажа отменена. Товар возвращён на склад, приход создан, "
-            "заказ переведён в статус “Отказ”"
-            if external_order_id else
+        return respond_to_sales_action(
             "Продажа отменена. Товар возвращён на склад, приход создан"
         )
-        return respond_to_sales_action(message)
 
     record = _sales_action_record(sale_id, sale_type)
     if record is None:
@@ -23562,9 +23519,7 @@ def api_sale_cancel(sale_id):
         inventory = SalesInventory()
         managed = inventory.get_sale(sale_id)
         if managed is not None:
-            external_order_id = str(managed.get("external_order_id") or "").strip()
             actor = current_audit_actor()
-            sale_number = str(managed.get("order_number") or sale_id)
             sale = inventory.cancel_sale(
                 sale_id=sale_id,
                 reason=reason,
@@ -23576,27 +23531,8 @@ def api_sale_cancel(sale_id):
                     or "sale-cancel:{}".format(sale_id)
                 ),
                 audit_actor=actor,
-                failure_hook=(
-                    lambda connection: OrderStatusService(
-                        inventory.database
-                    ).change(
-                        external_order_id, ERP_REFUSED, actor,
-                        sale_id=sale_id, connection=connection,
-                        order_number=external_order_id,
-                        event_message=(
-                            "Статус автоматически изменён на “Отказ” "
-                            "при отмене продажи №{}"
-                        ).format(sale_number),
-                    )
-                    if external_order_id else None
-                ),
             )
             _cached_api_receipt_records.cache_clear()
-            if external_order_id:
-                synced = OrderStatusService(inventory.database).sync_one(
-                    external_order_id, update_order_status
-                )
-                cache_order_status(external_order_id, "C", synced=synced)
         else:
             record = find_api_sale(sale_id)
             if record is None:
@@ -23646,9 +23582,6 @@ def api_sale_cancel(sale_id):
     _cached_api_sales_records.cache_clear()
     updated = find_api_sale(sale["id"])
     message = (
-        "Продажа отменена. Товар возвращён на склад, приход создан, "
-        "заказ переведён в статус “Отказ”"
-        if managed is not None and external_order_id else
         "Продажа отменена. Товар возвращён на склад, приход создан"
         if managed is not None else "Продажа отменена"
     )
@@ -24017,7 +23950,7 @@ def api_repairs_collection():
     else:
         cases = list(all_cases)
     cases = [case for case in cases if repair_case_matches(case, filters)]
-    sort_by = (request.args.get("sort_by") or "attention").strip()
+    sort_by = (request.args.get("sort_by") or "created_at").strip()
     sort_dir = (request.args.get("sort_dir") or "desc").strip()
     allowed_sort = {
         "request_at",
@@ -24029,11 +23962,17 @@ def api_repairs_collection():
         "updated_at",
         "control_date",
         "attention",
+        "created_at",
     }
     if sort_by not in allowed_sort:
-        sort_by = "attention"
+        sort_by = "created_at"
     if sort_by == "attention":
         cases.sort(key=repair_attention_key)
+    elif sort_by == "created_at":
+        cases.sort(
+            key=repair_created_key,
+            reverse=sort_dir != "asc",
+        )
     else:
         cases.sort(
             key=lambda case: (
