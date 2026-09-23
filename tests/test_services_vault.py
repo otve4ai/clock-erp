@@ -109,6 +109,7 @@ class ServicesVaultTest(unittest.TestCase):
         self.assertNotIn("correct horse battery", serialized)
         self.assertNotIn("employee-login", serialized)
         self.assertEqual(len(listing.get_json()["services"][0]["accounts"]), 2)
+        self.assertEqual(listing.get_json()["services"][0]["access_count"], 1)
         page = self.client.get("/app/services")
         self.assertEqual(page.status_code, 200)
         self.assertNotIn(b"correct horse battery", page.data)
@@ -187,6 +188,55 @@ class ServicesVaultTest(unittest.TestCase):
             self.assertEqual(response.status_code, 403)
             self.assertNotIn("employee-login", response.get_data(as_text=True))
             self.assertNotIn("correct horse battery", response.get_data(as_text=True))
+
+    def test_other_user_unauthenticated_and_revoked_sessions_never_receive_password(self):
+        second_employee = self._user("second@example.com", "employee")
+        payload = self.payload()
+        payload["permissions"][0]["can_view_password"] = True
+        service_id = self.create(payload).get_json()["id"]
+        account_id = self.client.get(
+            "/api/services"
+        ).get_json()["services"][0]["accounts"][0]["id"]
+
+        self.login(second_employee)
+        wrong_user = self.client.get(
+            "/api/service-accounts/{}/password".format(account_id)
+        )
+        self.assertEqual(wrong_user.status_code, 403)
+        self.assertNotIn("correct horse battery", wrong_user.get_data(as_text=True))
+
+        self.login(self.employee_id)
+        allowed = self.client.get(
+            "/api/service-accounts/{}/password".format(account_id)
+        )
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(allowed.get_json()["value"], "correct horse battery")
+
+        self.login(self.owner_id)
+        revoked = self.client.post(
+            "/api/services/access/users/{}/revoke".format(self.employee_id),
+            headers={"X-CSRF-Token": "services-csrf"},
+        )
+        self.assertEqual(revoked.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in revoked.get_json()["access"]["services"]],
+            [service_id],
+        )
+
+        self.login(self.employee_id)
+        stale_session = self.client.get(
+            "/api/service-accounts/{}/password".format(account_id)
+        )
+        self.assertEqual(stale_session.status_code, 403)
+        self.assertNotIn("correct horse battery", stale_session.get_data(as_text=True))
+
+        with self.client.session_transaction() as session:
+            session.clear()
+        anonymous = self.client.get(
+            "/api/service-accounts/{}/password".format(account_id)
+        )
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertNotIn("correct horse battery", anonymous.get_data(as_text=True))
 
     def test_deactivating_employee_revokes_all_service_access_and_reports_rotation(self):
         service_id = self.create().get_json()["id"]

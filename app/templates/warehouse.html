@@ -770,6 +770,7 @@
         .warehouse-product-name-cell {
             display: flex;
             align-items: center;
+            gap: 8px;
             min-width: 0;
         }
 
@@ -4028,6 +4029,7 @@
     <link rel="stylesheet" href="{{ static_asset_url('css/products-workspace.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/erp-focus-mode.css') }}">
     <script defer src="{{ static_asset_url('js/products-tabs.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/product-export.js') }}"></script>
     <script defer src="{{ url_for('static', filename='js/erp-focus-mode.js') }}"></script>
     {% if config.TESTING and request.args.get("products_focus_mode_e2e") == "1" %}
         <script defer src="{{ url_for('static', filename='js/products-focus-mode-e2e.js') }}"></script>
@@ -4772,6 +4774,7 @@
                                     </div>
                                 </th>
                                 <th data-column-key="name">
+                                    <input type="checkbox" data-export-select-page aria-label="Выбрать все товары на странице">
                                     <span
                                         class="warehouse-sort-label erp-sort-label{% if sort_by == 'name' %} is-active{% endif %}"
                                         data-sort-field="name"
@@ -4934,6 +4937,7 @@
 
                                     <td data-column-key="name">
                                         <div class="warehouse-product-name-cell">
+                                            <input type="checkbox" data-export-select="{{ item.id }}" aria-label="Выбрать товар {{ item.name|e }} для экспорта">
                                             <div class="name warehouse-ellipsis" title="{{ item.name|e }}">{{ item.name }}</div>
                                         </div>
                                     </td>
@@ -5084,6 +5088,65 @@
 {% if not partial_only %}
         </main>
     </div>
+
+    <dialog id="productExportDialog" class="product-export-dialog" aria-labelledby="productExportTitle">
+        <form id="productExportForm" method="post" action="{{ url_for('warehouse_products_export') }}">
+            <header class="product-export-header">
+                <div>
+                    <h2 id="productExportTitle">Экспорт товаров в Excel</h2>
+                    <p>Выберите, какие товары и какие поля экспортировать. Файл будет сформирован в формате .xlsx.</p>
+                </div>
+                <button type="button" class="product-export-close" data-export-close aria-label="Закрыть">×</button>
+            </header>
+            <div class="product-export-body">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <section class="product-export-section" aria-labelledby="productExportScopeTitle">
+                    <h3 id="productExportScopeTitle">Какие товары экспортировать</h3>
+                    <label class="product-export-option">
+                        <input type="radio" name="scope" value="all"{% if not export_filters_applied %} checked{% endif %}>
+                        <span><strong>Все товары</strong><small>Выгрузить весь каталог · {{ export_all_count }} товаров</small></span>
+                    </label>
+                    <label class="product-export-option">
+                        <input type="radio" name="scope" value="filtered"{% if export_filters_applied %} checked{% endif %}>
+                        <span><strong>Только отфильтрованные</strong><small data-export-filtered-count>{{ export_filtered_count }} товаров</small></span>
+                    </label>
+                    {% if export_filter_labels %}
+                        <div class="product-export-filters" data-export-current-filters><strong>Сейчас применены фильтры:</strong>{% for label in export_filter_labels %}<span>{{ label }}</span>{% endfor %}</div>
+                    {% else %}
+                        <div class="product-export-filters is-empty" data-export-current-filters>Фильтры не применены — выборка совпадает со всем каталогом.</div>
+                    {% endif %}
+                    <label class="product-export-option">
+                        <input type="radio" name="scope" value="selected" disabled>
+                        <span><strong>Только выбранные</strong><small data-export-selected-count>0 товаров выбрано</small></span>
+                    </label>
+                </section>
+
+                <section class="product-export-section" aria-labelledby="productExportFieldsTitle">
+                    <div class="product-export-section-heading">
+                        <h3 id="productExportFieldsTitle">Выберите поля для экспорта</h3>
+                        <div><button type="button" data-export-fields-all>Выбрать все</button><button type="button" data-export-fields-none>Снять все</button></div>
+                    </div>
+                    <div class="product-export-field-groups">
+                        {% for group in export_field_groups %}
+                            <fieldset><legend>{{ group.label }}</legend>{% for field in group.fields %}<label><input type="checkbox" name="fields" value="{{ field.key }}"{% if field.default %} checked{% endif %}> {{ field.label }}</label>{% endfor %}</fieldset>
+                        {% endfor %}
+                        {% if export_warehouses %}
+                            <fieldset><legend>Склады</legend>{% for warehouse in export_warehouses %}<label><input type="checkbox" name="fields" value="warehouse:{{ warehouse|e }}" checked> {{ warehouse }}</label>{% endfor %}</fieldset>
+                        {% endif %}
+                    </div>
+                    <p class="product-export-error" data-export-error role="alert"></p>
+                </section>
+
+                <label class="product-export-filename">Название файла<input type="text" name="filename" value="{{ export_default_filename }}" maxlength="120" required></label>
+                <p class="product-export-format">Формат: Excel (.xlsx)</p>
+            </div>
+            <footer class="product-export-footer">
+                <button type="button" class="products-workspace-button" data-export-close>Отмена</button>
+                <button type="submit" class="products-workspace-button is-primary" data-export-submit>Скачать Excel</button>
+            </footer>
+        </form>
+    </dialog>
+    <div id="productExportToast" class="product-export-toast" role="status" aria-live="polite" hidden></div>
 
     <dialog
         id="warehouseForceDeleteDialog"

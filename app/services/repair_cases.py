@@ -369,6 +369,14 @@ def repair_attention_key(case, today=None):
     )
 
 
+def repair_created_key(case):
+    """Stable chronological ordering by creation timestamp and repair id."""
+    return (
+        _text(case.get("created_at")),
+        _text(case.get("id")),
+    )
+
+
 def apply_repair_action(case, action, payload, actor="Система"):
     """Validate and atomically mutate one repair workflow state."""
     if _text(case.get("archived_at")):

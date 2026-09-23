@@ -1233,8 +1233,13 @@ html[data-theme="dark"] :where(
     border-color: var(--theme-border) !important;
 }
 
-html[data-theme] ::selection {
-    background: var(--theme-info);
+::selection {
+    background: #1d4ed8;
+    color: #fff;
+}
+
+::-moz-selection {
+    background: #1d4ed8;
     color: #fff;
 }
 
