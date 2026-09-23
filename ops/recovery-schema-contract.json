@@ -22,5 +22,12 @@
     ],
     "sms.db": ["sms_messages", "sms_meta"],
     "tasks.db": ["tasks", "task_history"]
+  },
+  "metadata": {
+    "orders.db": {
+      "orders_snapshot_meta": {
+        "deleted_orders_v1": "Local order deletion tombstones preserved across source synchronization"
+      }
+    }
   }
 }
