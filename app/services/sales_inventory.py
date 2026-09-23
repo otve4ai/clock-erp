@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 
 from app.catalog_db import CatalogDatabase
 from app.services.product_bundles import BundleError, compositions, physical_lines
+from app.services.warehouse_stock import require_warehouse
 from app.services.audit_journal import AuditJournal
 from app.services.brand_values import is_numeric_brand, normalize_brand
 from app.services.excel_product_catalog import (
@@ -419,6 +420,10 @@ class SalesInventory:
 
         self.initialize()
         with self.database.transaction() as connection:
+            warehouse_id = require_warehouse(
+                connection, payload.get("warehouse_id"),
+                allow_legacy_default=True,
+            )
             existing = connection.execute(
                 "SELECT id FROM erp_sales WHERE id=? OR "
                 "(? IS NOT NULL AND idempotency_key=?) OR "
@@ -528,11 +533,14 @@ class SalesInventory:
                     (product_id,),
                 ).fetchone()
                 remember(connection, product_id, ("sale", sale_id))
-                before = balance(connection, product_id, ("sale", sale_id))
+                before = balance(
+                    connection, product_id, ("sale", sale_id),
+                    warehouse_id=warehouse_id,
+                )
                 after = before + float(delta)
                 if after < -0.000001:
                     raise InsufficientStockError(before)
-                cursor = write_balance(connection, product_id, after, "order_strap_replacement", inserted_at, ("sale", sale_id))
+                cursor = write_balance(connection, product_id, after, "order_strap_replacement", inserted_at, ("sale", sale_id), warehouse_id)
                 if cursor.rowcount != 1:
                     latest = connection.execute(
                         "SELECT stock FROM catalog_excel_products WHERE id=?",
@@ -543,7 +551,7 @@ class SalesInventory:
                     "INSERT INTO catalog_stock_movements (id,product_id,movement_type,"
                     "quantity_delta,stock_before,stock_after,sale_id,sale_item_id,"
                     "idempotency_key,source_type,source_id,source_line_id,operation_kind,"
-                    "source,user_name,comment,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "source,user_name,comment,created_at,warehouse_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (str(uuid.uuid4()), product_id, movement_type, delta, before, after,
                      sale_id, sale_item_id,
                      "{}:{}".format(idempotency_key, kind) if idempotency_key else None,
@@ -551,7 +559,7 @@ class SalesInventory:
                      kind, source, user_name or None,
                      "Переукомплектация заказа №{}".format(
                          stored_payload.get("order_number") or external_order_id or sale_id
-                     ), inserted_at),
+                     ), inserted_at, warehouse_id),
                 )
                 stock_changes.append({
                     "product_id": str(product_id), "kind": kind,
@@ -571,6 +579,10 @@ class SalesInventory:
                      item["discount_reason"] or None, item["unit_price"], created_at),
                 )
                 item_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+                connection.execute(
+                    "UPDATE erp_sale_items SET warehouse_id=? WHERE id=?",
+                    (warehouse_id, item_id),
+                )
                 snapshot = dict(item)
                 snapshot.update({"sale_item_id": int(item_id), "product_id": str(item["product_id"])})
                 item_snapshots.append(snapshot)
@@ -677,6 +689,13 @@ class SalesInventory:
 
     def _write_sale_stock(self, connection, product_id, quantity, sale_id,
                           item_id, key, source, user_name, timestamp, sale_number=None):
+        item = connection.execute(
+            "SELECT warehouse_id FROM erp_sale_items WHERE id=?", (item_id,)
+        ).fetchone()
+        warehouse_id = require_warehouse(
+            connection, item["warehouse_id"] if item else None,
+            allow_legacy_default=True,
+        )
         try:
             lines = physical_lines(connection, product_id, quantity)
         except BundleError as error:
@@ -693,12 +712,15 @@ class SalesInventory:
                 raise SalesInventoryError("Компонент или товар не найден.")
             remember(connection, physical_id, document)
             try:
-                product = overlay(connection, product, physical_id, document)
+                product = overlay(
+                    connection, product, physical_id, document,
+                    warehouse_id=warehouse_id,
+                )
             except ValueError as error:
                 raise SalesInventoryError(str(error))
             if product["stock"] < required:
                 raise InsufficientStockError(product["stock"])
-            cursor = write_balance(connection, physical_id, product["stock"] - required, "sale", timestamp, document)
+            cursor = write_balance(connection, physical_id, product["stock"] - required, "sale", timestamp, document, warehouse_id)
             if cursor.rowcount != 1:
                 raise InsufficientStockError(product["stock"])
             if is_bundle:
@@ -712,13 +734,14 @@ class SalesInventory:
             connection.execute(
                 "INSERT INTO catalog_stock_movements "
                 "(id,product_id,movement_type,quantity_delta,stock_before,stock_after,"
-                "sale_id,sale_item_id,idempotency_key,source,user_name,comment,created_at) "
-                "VALUES (?,?,'sale',?,?,?,?,?,?,?,?,?,?)",
+                "sale_id,sale_item_id,idempotency_key,source,user_name,comment,created_at,warehouse_id) "
+                "VALUES (?,?,'sale',?,?,?,?,?,?,?,?,?,?,?)",
                 (str(uuid.uuid4()), physical_id, -required, product["stock"],
                  float(product["stock"]) - required, sale_id, item_id, movement_key,
                  source, user_name or None,
                  ("Продажа №{}".format(sale_number or sale_id) +
-                  ("; SKU {}".format(product_id) if is_bundle else "")), timestamp),
+                  ("; SKU {}".format(product_id) if is_bundle else "")), timestamp,
+                 warehouse_id),
             )
 
     def create_sale(
@@ -777,6 +800,11 @@ class SalesInventory:
 
         self.initialize()
         with self.database.transaction() as connection:
+            warehouse_id = require_warehouse(
+                connection, stored_payload.get("warehouse_id"),
+                allow_legacy_default=True,
+            )
+            stored_payload["warehouse_id"] = warehouse_id
             existing = connection.execute(
                 "SELECT id FROM erp_sales WHERE id = ? "
                 "OR (? IS NOT NULL AND idempotency_key = ?) "
@@ -851,6 +879,10 @@ class SalesInventory:
                     unit_price,
                     created_at,
                 ),
+            )
+            connection.execute(
+                "UPDATE erp_sale_items SET warehouse_id=? WHERE id=last_insert_rowid()",
+                (warehouse_id,),
             )
             item_id = connection.execute(
                 "SELECT last_insert_rowid()"
@@ -957,6 +989,11 @@ class SalesInventory:
 
         self.initialize()
         with self.database.transaction() as connection:
+            warehouse_id = require_warehouse(
+                connection, payload.get("warehouse_id"),
+                allow_legacy_default=True,
+            )
+            stored_payload["warehouse_id"] = warehouse_id
             existing = connection.execute(
                 "SELECT id FROM erp_sales WHERE id = ? "
                 "OR (? IS NOT NULL AND idempotency_key = ?) "
@@ -1032,6 +1069,10 @@ class SalesInventory:
                         item["unit_price"],
                         created_at,
                     ),
+                )
+                connection.execute(
+                    "UPDATE erp_sale_items SET warehouse_id=? WHERE id=last_insert_rowid()",
+                    (warehouse_id,),
                 )
                 item_id = connection.execute(
                     "SELECT last_insert_rowid()"
@@ -1252,12 +1293,15 @@ class SalesInventory:
                 )
 
             document = ("sale", sale_id)
-            product = overlay(connection, product, item["product_id"], document)
+            product = overlay(
+                connection, product, item["product_id"], document,
+                warehouse_id=item["warehouse_id"],
+            )
             stock_before = float(product["stock"] or 0)
-            stock_cursor = write_balance(connection, item["product_id"], stock_before + quantity, "return", returned_at, document)
+            stock_cursor = write_balance(connection, item["product_id"], stock_before + quantity, "return", returned_at, document, item["warehouse_id"])
             if stock_cursor.rowcount != 1:
                 raise ReturnConflictError("Товар не найден.")
-            product = {"stock": balance(connection, item["product_id"], document)}
+            product = {"stock": balance(connection, item["product_id"], document, warehouse_id=item["warehouse_id"])}
 
             item_cursor = connection.execute(
                 "UPDATE erp_sale_items SET returned_quantity = ?, "
@@ -1291,8 +1335,8 @@ class SalesInventory:
                 "INSERT INTO catalog_stock_movements ("
                 "id, product_id, movement_type, quantity_delta, stock_before, stock_after, "
                 "sale_id, sale_item_id, idempotency_key, source, user_name, "
-                "comment, created_at"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "comment, created_at, warehouse_id"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     str(uuid.uuid4()),
                     item["product_id"],
@@ -1316,7 +1360,7 @@ class SalesInventory:
                         self._sale_number(sale),
                         ": {}".format(reason) if reason else "",
                     ),
-                    returned_at,
+                    returned_at, item["warehouse_id"],
                 ),
             )
             if failure_hook:
@@ -1364,18 +1408,22 @@ class SalesInventory:
             if product is None:
                 raise ReturnConflictError("Исторический компонент не найден.")
             document = ("sale", sale["id"])
-            product = overlay(connection, product, physical_id, document)
+            product = overlay(
+                connection, product, physical_id, document,
+                warehouse_id=item["warehouse_id"],
+            )
             stock_after = float(product["stock"]) + required
-            write_balance(connection, physical_id, stock_after, "return", timestamp, document)
+            write_balance(connection, physical_id, stock_after, "return", timestamp, document, item["warehouse_id"])
             connection.execute(
                 "INSERT INTO catalog_stock_movements "
                 "(id,product_id,movement_type,quantity_delta,stock_before,stock_after,"
-                "sale_id,sale_item_id,idempotency_key,source,user_name,comment,created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "sale_id,sale_item_id,idempotency_key,source,user_name,comment,created_at,warehouse_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (str(uuid.uuid4()), physical_id, movement_type, required, product["stock"],
                  stock_after, sale["id"], item["id"],
                  key if index == 0 else None, sale["source"], user_name or None,
-                 "Возврат SKU {} по продаже {}: {}".format(item["product_id"], sale["id"], reason), timestamp),
+                 "Возврат SKU {} по продаже {}: {}".format(item["product_id"], sale["id"], reason), timestamp,
+                 item["warehouse_id"]),
             )
         returned = float(item["returned_quantity"] or 0) + quantity
         status = "returned" if returned == float(item["quantity"]) else "partially_returned"
@@ -1689,6 +1737,7 @@ class SalesInventory:
             for index, reversal in enumerate(plan["reversals"]):
                 product_id = reversal["product_id"]
                 quantity_delta = reversal["quantity"]
+                warehouse_id = int(items[0]["warehouse_id"])
                 product = connection.execute(
                     "SELECT stock FROM catalog_excel_products WHERE id = ?",
                     (product_id,),
@@ -1699,7 +1748,10 @@ class SalesInventory:
                         "Продажа не отменена."
                     )
                 document = ("sale", sale_id)
-                product = overlay(connection, product, product_id, document)
+                product = overlay(
+                    connection, product, product_id, document,
+                    warehouse_id=warehouse_id,
+                )
                 stock_before = float(product["stock"] or 0)
                 stock_after = stock_before + quantity_delta
                 if stock_after < -0.000001:
@@ -1720,7 +1772,7 @@ class SalesInventory:
                         "Отмена создаст отрицательный остаток товара. "
                         "Требуется ручное разрешение."
                     )
-                write_balance(connection, product_id, stock_after, "sale_cancel", cancelled_at, document)
+                write_balance(connection, product_id, stock_after, "sale_cancel", cancelled_at, document, warehouse_id)
                 item = item_by_product.get(product_id) or items[0]
                 component_items = component_item_ids.get(product_id)
                 reversal_item_id = item["id"]
@@ -1732,8 +1784,8 @@ class SalesInventory:
                     "INSERT INTO catalog_stock_movements ("
                     "id, product_id, movement_type, quantity_delta, "
                     "stock_before, stock_after, sale_id, sale_item_id, "
-                    "idempotency_key, source, user_name, comment, created_at"
-                    ") VALUES (?, ?, 'cancellation', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "idempotency_key, source, user_name, comment, created_at, warehouse_id"
+                    ") VALUES (?, ?, 'cancellation', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         str(uuid.uuid4()), product_id, quantity_delta, stock_before,
                         stock_after, sale_id, reversal_item_id, movement_key,
@@ -1743,7 +1795,7 @@ class SalesInventory:
                             reason,
                             ": {}".format(comment) if comment else "",
                         ),
-                        cancelled_at,
+                        cancelled_at, warehouse_id,
                     ),
                 )
 

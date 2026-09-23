@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.catalog_db import CatalogDatabase
+from app.services.warehouse_stock import default_warehouse_id, get_balance, set_balance
 from app.services.audit_journal import AuditJournal
 from app.services.brand_values import is_numeric_brand, normalize_brand
 from app.services.inventory_lock import (
@@ -193,16 +194,18 @@ def parse_initial_stock(value):
 
 
 def _record_manual_stock_adjustment(
-        connection, product_id, stock_before, stock_after, reason):
+        connection, product_id, stock_before, stock_after, reason,
+        warehouse_id=None):
     if stock_after == stock_before:
         return
+    warehouse_id = warehouse_id or default_warehouse_id(connection)
     connection.execute(
         "INSERT INTO catalog_excel_manual_stock_operations ("
         "id, product_id, stock_before, stock_after, stock_difference, "
-        "reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "reason, created_at, warehouse_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             str(uuid.uuid4()), int(product_id), stock_before, stock_after,
-            stock_after - stock_before, text(reason) or None, utc_now(),
+            stock_after - stock_before, text(reason) or None, utc_now(), warehouse_id,
         ),
     )
 
@@ -315,12 +318,10 @@ def _matching_snapshot(row):
 
 
 def _restore_columns(connection, product_id, state, columns):
-    if "stock" in columns:
-        from app.services.component_inventory import physical
-        if physical(connection, product_id):
-            legacy = connection.execute("SELECT stock FROM catalog_excel_products WHERE id=?", (int(product_id),)).fetchone()
-            if legacy is not None and state.get("stock") != legacy[0]:
-                raise ValueError("Для компонента используйте физическую инвентаризацию или приход; замена legacy-остатка импортом запрещена.")
+    columns = tuple(
+        column for column in columns
+        if column not in ("stock", "stock_source")
+    )
     assignments = ", ".join("{} = ?".format(column) for column in columns)
     connection.execute(
         "UPDATE catalog_excel_products SET {} WHERE id = ?".format(assignments),
@@ -465,6 +466,7 @@ class ExcelProductBatchService:
             active_products = connection.execute(
                 "SELECT * FROM catalog_excel_products WHERE active = 1"
             ).fetchall()
+            warehouse_id = default_warehouse_id(connection)
             for product in active_products:
                 if (
                     product["source_key"] in incoming_keys
@@ -472,12 +474,17 @@ class ExcelProductBatchService:
                 ):
                     continue
                 before = _snapshot(product)
+                before["stock"] = get_balance(
+                    connection, product["id"], warehouse_id,
+                    require_initialized=False,
+                )
                 after = dict(before)
                 after.update({
                     "active": 0, "current_batch_id": batch_id, "stock": 0.0,
                     "updated_at": now,
                 })
                 _restore_columns(connection, product["id"], after, PRODUCT_MUTABLE_COLUMNS)
+                set_balance(connection, product["id"], warehouse_id, 0, now)
                 self._record_change(
                     connection, batch_id, product["id"], product["source_key"], None,
                     "deactivated", False, before, after, product["stock"], 0.0,
@@ -515,12 +522,20 @@ class ExcelProductBatchService:
                             (source_key, product["id"]),
                         )
                 before = _snapshot(product)
+                if before is not None:
+                    before["stock"] = get_balance(
+                        connection, product["id"], warehouse_id,
+                        require_initialized=False,
+                    )
                 state = self._state_for_result(
                     connection, result, batch_id, file_sha256, now, product,
                 )
                 if product is None:
                     columns = ("source_key", "created_batch_id", "created_at") + PRODUCT_MUTABLE_COLUMNS
-                    values = [source_key, batch_id, now] + [state[column] for column in PRODUCT_MUTABLE_COLUMNS]
+                    values = [source_key, batch_id, now] + [
+                        0.0 if column == "stock" else state[column]
+                        for column in PRODUCT_MUTABLE_COLUMNS
+                    ]
                     placeholders = ", ".join("?" for _ in columns)
                     connection.execute(
                         "INSERT INTO catalog_excel_products ({}) VALUES ({})".format(
@@ -534,8 +549,15 @@ class ExcelProductBatchService:
                 else:
                     product_id = product["id"]
                     created_product = False
-                    stock_before = float(product["stock"])
+                    stock_before = get_balance(
+                        connection, product_id, warehouse_id,
+                        require_initialized=False,
+                    )
                     _restore_columns(connection, product_id, state, PRODUCT_MUTABLE_COLUMNS)
+                set_balance(
+                    connection, product_id, warehouse_id,
+                    float(result.get("stock") or 0), now,
+                )
                 assign_product_taxonomy(
                     connection,
                     product_id,
@@ -580,7 +602,11 @@ class ExcelProductBatchService:
                 ).fetchone()
                 if product is None:
                     continue
-                stock_before = float(product["stock"])
+                warehouse_id = default_warehouse_id(connection)
+                stock_before = get_balance(
+                    connection, product["id"], warehouse_id,
+                    require_initialized=False,
+                )
                 previous = _load_json(change["previous_state_json"], None)
                 original_operation = connection.execute(
                     "SELECT id FROM catalog_excel_stock_operations "
@@ -600,6 +626,10 @@ class ExcelProductBatchService:
                     connection, product["id"], batch_id
                 ):
                     connection.execute(
+                        "DELETE FROM erp_product_warehouse_stock WHERE product_id=?",
+                        (product["id"],),
+                    )
+                    connection.execute(
                         "DELETE FROM catalog_excel_products WHERE id = ?", (product["id"],)
                     )
                 elif change["created_product"]:
@@ -608,9 +638,14 @@ class ExcelProductBatchService:
                     _restore_columns(
                         connection, product["id"], retained, PRODUCT_MUTABLE_COLUMNS
                     )
+                    set_balance(connection, product["id"], warehouse_id, 0, now)
                 elif previous is not None:
                     _restore_columns(
                         connection, product["id"], previous, PRODUCT_MUTABLE_COLUMNS
+                    )
+                    set_balance(
+                        connection, product["id"], warehouse_id,
+                        float(previous.get("stock") or 0), now,
                     )
             connection.execute(
                 "UPDATE catalog_excel_batches SET status = 'rolled_back', rolled_back_at = ? "
@@ -711,8 +746,8 @@ class ExcelProductBatchService:
             "batch_id, product_id, source_key, excel_row, row_kind, created_product, "
             "previous_state_json, applied_state_json, stock_before, stock_after, "
             "stock_difference, match_status, bitrix_link_cardinality, "
-            "shared_bitrix_row_count, bitrix_xml_id, operation_result, created_at"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "shared_bitrix_row_count, bitrix_xml_id, operation_result, created_at,warehouse_id"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 batch_id, product_id, source_key, excel_row, row_kind,
                 int(bool(created_product)), _json(before) if before is not None else None,
@@ -720,6 +755,7 @@ class ExcelProductBatchService:
                 match_status, after.get("bitrix_link_cardinality"),
                 int(after.get("shared_bitrix_row_count") or 0), after.get("bitrix_xml_id"),
                 "adjusted" if difference else "already_at_target", now,
+                default_warehouse_id(connection),
             ),
         )
         if difference:
@@ -756,12 +792,13 @@ class ExcelProductBatchService:
         connection.execute(
             "INSERT INTO catalog_excel_stock_operations ("
             "id, batch_id, product_id, operation_type, stock_before, stock_after, "
-            "stock_difference, reversal_of, created_at, details_json"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "stock_difference, reversal_of, created_at, details_json,warehouse_id"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 str(uuid.uuid4()), batch_id, product_id, operation_type,
                 float(stock_before), float(stock_after),
                 float(stock_after) - float(stock_before), reversal_of, now, _json(details),
+                default_warehouse_id(connection),
             ),
         )
 
@@ -772,8 +809,11 @@ class ExcelProductBatchService:
         batch["active_cards"] = connection.execute(
             "SELECT COUNT(*) FROM catalog_excel_products WHERE active = 1"
         ).fetchone()[0]
+        warehouse_id = default_warehouse_id(connection)
         batch["active_stock"] = connection.execute(
-            "SELECT COALESCE(SUM(stock), 0) FROM catalog_excel_products WHERE active = 1"
+            "SELECT COALESCE(SUM(ws.quantity),0) FROM catalog_excel_products p "
+            "JOIN erp_product_warehouse_stock ws ON ws.product_id=p.id "
+            "WHERE p.active=1 AND ws.warehouse_id=?", (warehouse_id,)
         ).fetchone()[0]
         batch["operation_rows"] = connection.execute(
             "SELECT COUNT(*) FROM catalog_excel_stock_operations WHERE batch_id = ?",
@@ -1358,7 +1398,15 @@ class ExcelProductCatalog:
                 + VISIBLE_PRODUCT_SQL,
                 (int(product_id),),
             ).fetchone()
-        return self._prepare_product(dict(row)) if row else None
+            if row:
+                item = dict(row)
+                item["stock"] = get_balance(
+                    connection, item["id"], default_warehouse_id(connection),
+                    require_initialized=False,
+                )
+            else:
+                item = None
+        return self._prepare_product(item) if item else None
 
     def search_repair_catalog_items(self, query="", product_id=None, limit=20):
         """Search the repair selector without materializing the assortment."""
@@ -1550,7 +1598,7 @@ class ExcelProductCatalog:
                 article_quality(article), brand, category or None,
                 brand_row["id"] if brand_row else None,
                 category_row["id"] if category_row else None,
-                stock, cell or None,
+                0, cell or None,
                 "manual", batch["file_sha256"], "not_found", "manual_create", 0.0,
                 "unmatched", "[]", "unlinked", 0,
             ) + tuple(enrichment.values()) + (
@@ -1570,6 +1618,8 @@ class ExcelProductCatalog:
                 values,
             )
             product_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+            warehouse_id = default_warehouse_id(connection)
+            set_balance(connection, product_id, warehouse_id, stock, now)
             if local_component:
                 connection.execute("INSERT INTO erp_local_components(product_id) VALUES (?)", (product_id,))
             _record_manual_stock_adjustment(
@@ -1578,6 +1628,7 @@ class ExcelProductCatalog:
                 0,
                 stock,
                 "Начальный остаток при создании товара",
+                warehouse_id,
             )
             AuditJournal(self.database).record(
                 "product", product_id,
@@ -1721,7 +1772,11 @@ class ExcelProductCatalog:
                     values["bitrix_price_currency"] = (
                         values.get("bitrix_price_currency") or "RUB"
                     )
-            stock_before = float(values["stock"] or 0)
+            warehouse_id = default_warehouse_id(connection)
+            stock_before = get_balance(
+                connection, product_id, warehouse_id,
+                require_initialized=False,
+            )
             if stock is not None:
                 try:
                     stock_after = float(str(stock).replace(",", "."))
@@ -1730,7 +1785,6 @@ class ExcelProductCatalog:
                 if not math.isfinite(stock_after) or stock_after < 0:
                     raise ValueError("Остаток должен быть неотрицательным числом.")
                 values["stock"] = stock_after
-                values["stock_source"] = "manual"
             raw_excel = _load_json(values.get("raw_excel_json"), {})
             raw_excel.update({
                 "excel_name": values["excel_name_raw"],
@@ -1744,6 +1798,11 @@ class ExcelProductCatalog:
             values["raw_excel_json"] = _json(raw_excel)
             values["updated_at"] = utc_now()
             _restore_columns(connection, product_id, values, PRODUCT_MUTABLE_COLUMNS)
+            if stock is not None:
+                set_balance(
+                    connection, product_id, warehouse_id, stock_after,
+                    values["updated_at"],
+                )
             if model is not None or brand_changed:
                 values["model_id"] = get_or_create_model_record(
                     connection, values.get("brand_id"), values.get("model")
@@ -1767,6 +1826,7 @@ class ExcelProductCatalog:
                     stock_before,
                     stock_after,
                     stock_reason,
+                    warehouse_id,
                 )
             before = {
                 "name": product["excel_name_raw"],
@@ -1776,7 +1836,7 @@ class ExcelProductCatalog:
                 "category": product["excel_category"],
                 "price": product["bitrix_price_amount"],
                 "cell": product["cell"],
-                "stock": float(product["stock"] or 0),
+                "stock": stock_before,
             }
             after = {
                 "name": values["excel_name_raw"],
@@ -1786,7 +1846,7 @@ class ExcelProductCatalog:
                 "category": values["excel_category"],
                 "price": values.get("bitrix_price_amount"),
                 "cell": values["cell"],
-                "stock": float(values["stock"] or 0),
+                "stock": stock_after if stock is not None else stock_before,
             }
             if before != after:
                 AuditJournal(self.database).record(

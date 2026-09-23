@@ -1,16 +1,28 @@
-"""Transaction-local routing between legacy and explicitly confirmed physical balances."""
+"""Compatibility facade over the canonical warehouse stock service."""
 import math
 from datetime import datetime, timezone
 from app.catalog_db import CatalogDatabase
 from app.services.inventory_lock import assert_products_unlocked
-
-
-# Read projection only: catalog_excel_products.stock itself remains untouched.
-PHYSICAL_STOCK_SQL = (
-    "CASE WHEN EXISTS(SELECT 1 FROM erp_component_inventory ci WHERE ci.product_id=p.id) "
-    "THEN COALESCE((SELECT physical_stock FROM erp_component_inventory ci WHERE ci.product_id=p.id),0) "
-    "ELSE p.stock END"
+from app.services.warehouse_stock import (
+    default_warehouse_id,
+    get_balance,
+    set_balance,
 )
+
+
+# Read projection for legacy SQL callers. New code should use warehouse_stock.
+PHYSICAL_STOCK_SQL = (
+    "COALESCE((SELECT ws.quantity FROM erp_product_warehouse_stock ws "
+    "JOIN erp_warehouses warehouse ON warehouse.id=ws.warehouse_id "
+    "WHERE ws.product_id=p.id AND warehouse.code='udelnaya'),0)"
+)
+
+
+def warehouse_stock_sql(warehouse_id):
+    return (
+        "COALESCE((SELECT ws.quantity FROM erp_product_warehouse_stock ws "
+        "WHERE ws.product_id=p.id AND ws.warehouse_id={}),0)"
+    ).format(int(warehouse_id))
 
 
 def now():
@@ -32,37 +44,38 @@ def remember(connection, product_id, document):
                            (document[0], str(document[1]), int(product_id)))
 
 
-def balance(connection, product_id, document=None, require_initialized=True):
-    is_physical = physical(connection, product_id, document)
-    row = connection.execute(
-        "SELECT physical_stock FROM erp_component_inventory WHERE product_id=?" if is_physical
-        else "SELECT stock FROM catalog_excel_products WHERE id=?", (int(product_id),),
-    ).fetchone()
-    if row is None:
-        raise ValueError("Товар не найден.")
-    if row[0] is None and require_initialized:
-        raise ValueError("Физический остаток компонента не подтверждён. Установите фактическое количество.")
-    return float(row[0] or 0)
+def balance(connection, product_id, document=None, require_initialized=True,
+            warehouse_id=None):
+    del document
+    return get_balance(
+        connection, product_id, warehouse_id,
+        allow_legacy_default=True,
+        require_initialized=require_initialized,
+    )
 
 
-def write_balance(connection, product_id, value, source, timestamp, document=None):
+def write_balance(connection, product_id, value, source, timestamp, document=None,
+                  warehouse_id=None):
+    del source, document
     value = float(value)
     if not math.isfinite(value) or value < 0:
         raise ValueError("Физический остаток не может быть отрицательным.")
-    if physical(connection, product_id, document):
-        balance(connection, product_id, document)
-        return connection.execute("UPDATE erp_component_inventory SET physical_stock=?,updated_at=? WHERE product_id=?",
-                                  (value, timestamp, int(product_id)))
-    return connection.execute("UPDATE catalog_excel_products SET stock=?,stock_source=?,updated_at=? WHERE id=?",
-                              (value, source, timestamp, int(product_id)))
+    if warehouse_id in (None, ""):
+        warehouse_id = default_warehouse_id(connection)
+    return set_balance(
+        connection, product_id, warehouse_id, value, timestamp=timestamp
+    )
 
 
-def overlay(connection, row, product_id=None, document=None, require_initialized=True):
+def overlay(connection, row, product_id=None, document=None, require_initialized=True,
+            warehouse_id=None):
     if row is None:
         return None
     result = dict(row)
     pid = product_id if product_id is not None else result['id']
-    result['stock'] = balance(connection, pid, document, require_initialized)
+    result['stock'] = balance(
+        connection, pid, document, require_initialized, warehouse_id
+    )
     return result
 
 
@@ -70,7 +83,8 @@ class ComponentInventory:
     def __init__(self, database=None):
         self.database = database or CatalogDatabase()
 
-    def confirm(self, product_id, quantity, actor="", reason="Физическая инвентаризация"):
+    def confirm(self, product_id, quantity, actor="", reason="Физическая инвентаризация",
+                warehouse_id=None):
         if isinstance(quantity, bool):
             raise ValueError("Укажите целое фактическое количество от 0.")
         try:
@@ -85,8 +99,13 @@ class ComponentInventory:
             if row is None:
                 raise ValueError("Сначала сохраните товар в составе как компонент.")
             timestamp = now()
-            connection.execute("UPDATE erp_component_inventory SET physical_stock=?,initialized_at=COALESCE(initialized_at,?),updated_at=? WHERE product_id=?",
-                               (value,timestamp,timestamp,int(product_id)))
-            connection.execute("INSERT INTO erp_component_inventory_events(product_id,stock_before,stock_after,actor,reason,created_at) VALUES (?,?,?,?,?,?)",
-                               (int(product_id),row[0],value,str(actor or ''),str(reason or 'Физическая инвентаризация'),timestamp))
+            if warehouse_id in (None, ""):
+                warehouse_id = default_warehouse_id(connection)
+            old = get_balance(
+                connection, product_id, warehouse_id,
+                require_initialized=False,
+            )
+            set_balance(connection, product_id, warehouse_id, value, timestamp)
+            connection.execute("INSERT INTO erp_component_inventory_events(product_id,stock_before,stock_after,actor,reason,created_at,warehouse_id) VALUES (?,?,?,?,?,?,?)",
+                               (int(product_id),old,value,str(actor or ''),str(reason or 'Физическая инвентаризация'),timestamp,warehouse_id))
         return value

@@ -129,7 +129,9 @@ class SupplyEngine:
             ).fetchone()
             if active is None:
                 raise SupplyError('Товар не найден в ERP. Сначала добавьте его в каталог.')
-            products = ReceiptInventory._load_products(connection, prepared)
+            products = ReceiptInventory._load_products(
+                connection, prepared, warehouse_id=row['warehouse_id']
+            )
             assert_products_unlocked(connection, [product_id], SupplyError)
             existing = connection.execute(
                 'SELECT * FROM erp_receipt_items WHERE receipt_id = ? AND product_id = ? AND active = 1 ORDER BY id',
@@ -149,22 +151,22 @@ class SupplyEngine:
                 item_id = connection.execute('SELECT last_insert_rowid()').fetchone()[0]
             if row['status'] == 'posted':
                 # The addition uses today's physical/legacy balance; old movements stay immutable.
-                stock_before = balance(connection, product_id)
+                stock_before = balance(connection, product_id, warehouse_id=row['warehouse_id'])
                 if not math.isfinite(stock_before) or stock_before < 0:
                     raise SupplyError('Остаток товара некорректен. Добавление остановлено.')
                 remember(connection, product_id, ('receipt', supply_id))
                 stock_after = stock_before + quantity
-                write_balance(connection, product_id, stock_after, 'receipt', now)
+                write_balance(connection, product_id, stock_after, 'receipt', now, warehouse_id=row['warehouse_id'])
                 connection.execute(
                     "INSERT INTO catalog_stock_movements "
                     "(id, product_id, movement_type, quantity_delta, stock_before, stock_after, "
                     "receipt_id, receipt_item_id, idempotency_key, tenant_id, source_type, "
-                    "source_id, source_line_id, operation_kind, source_number, source, user_name, comment, created_at) "
-                    "VALUES (?, ?, 'receipt', ?, ?, ?, ?, ?, ?, ?, 'supply', ?, ?, 'add', ?, 'Поставка', ?, ?, ?)",
+                    "source_id, source_line_id, operation_kind, source_number, source, user_name, comment, created_at,warehouse_id) "
+                    "VALUES (?, ?, 'receipt', ?, ?, ?, ?, ?, ?, ?, 'supply', ?, ?, 'add', ?, 'Поставка', ?, ?, ?,?)",
                     (uuid.uuid4().hex, product_id, quantity, stock_before, stock_after,
                      supply_id, item_id, 'supply-add:' + supply_id + ':' + key, row['tenant_id'],
                      supply_id, key, row['number'], actor,
-                     'Дополнение поставки №{}: +{} шт.'.format(row['number'], quantity), now),
+                     'Дополнение поставки №{}: +{} шт.'.format(row['number'], quantity), now,row['warehouse_id']),
                 )
                 meta.setdefault('snapshots', {}).setdefault(str(product_id), self._product(connection, product_id))
             additions[key] = {'product_id': product_id, 'quantity': quantity, 'created_at': now, 'user_name': actor}

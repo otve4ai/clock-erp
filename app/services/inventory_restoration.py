@@ -5,6 +5,7 @@ import uuid
 from app.catalog_db import CatalogDatabase
 from app.services.audit_journal import AuditJournal
 from app.services.brand_inventory import utc_now
+from app.services.warehouse_stock import default_warehouse_id, get_balance, set_balance
 
 
 class InventoryRestorationError(ValueError):
@@ -48,16 +49,19 @@ class InventorySnapshotRestoration:
     def _plan(self, connection, brand_name, session_id=None):
         brand = self._brand(connection, brand_name)
         session = self._session(connection, brand["id"], session_id)
+        warehouse_id = int(session["warehouse_id"] or default_warehouse_id(connection))
         items = connection.execute(
             "SELECT i.id AS item_id, i.product_id, i.snapshot_stock, "
             "p.excel_name_raw AS name, COALESCE(p.excel_article,'') AS article, "
-            "p.stock AS current_stock, p.active, p.brand_id, p.excel_brand, "
+            "COALESCE(ws.quantity,0) AS current_stock, p.active, p.brand_id, p.excel_brand, "
             "p.deleted_at, p.deleted_source_key "
             "FROM erp_inventory_items i "
             "LEFT JOIN catalog_excel_products p ON p.id = i.product_id "
+            "LEFT JOIN erp_product_warehouse_stock ws ON ws.product_id=p.id "
+            "AND ws.warehouse_id=? "
             "WHERE i.session_id = ? AND i.appearance = 'snapshot' "
             "ORDER BY i.product_id",
-            (session["id"],),
+            (warehouse_id, session["id"]),
         ).fetchall()
         if not items:
             raise InventoryRestorationError(
@@ -93,11 +97,13 @@ class InventorySnapshotRestoration:
                 })
         card_totals = connection.execute(
             "SELECT COUNT(*) AS total, "
-            "SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) AS active_total, "
-            "SUM(CASE WHEN active = 1 AND stock > 0 THEN 1 ELSE 0 END) AS in_stock, "
-            "COALESCE(SUM(CASE WHEN active = 1 THEN stock ELSE 0 END),0) AS active_stock "
-            "FROM catalog_excel_products WHERE brand_id = ? AND created_at <= ?",
-            (brand["id"], session["started_at"]),
+            "SUM(CASE WHEN p.active = 1 THEN 1 ELSE 0 END) AS active_total, "
+            "SUM(CASE WHEN p.active = 1 AND COALESCE(ws.quantity,0) > 0 THEN 1 ELSE 0 END) AS in_stock, "
+            "COALESCE(SUM(CASE WHEN p.active = 1 THEN COALESCE(ws.quantity,0) ELSE 0 END),0) AS active_stock "
+            "FROM catalog_excel_products p LEFT JOIN erp_product_warehouse_stock ws "
+            "ON ws.product_id=p.id AND ws.warehouse_id=? "
+            "WHERE p.brand_id = ? AND p.created_at <= ?",
+            (warehouse_id, brand["id"], session["started_at"]),
         ).fetchone()
         active_sessions = connection.execute(
             "SELECT id FROM erp_inventory_sessions "
@@ -108,6 +114,7 @@ class InventorySnapshotRestoration:
             "brand_id": int(brand["id"]),
             "brand_name": brand["name"],
             "session_id": session["id"],
+            "warehouse_id": warehouse_id,
             "started_at": session["started_at"],
             "completed_at": session["completed_at"],
             "snapshot_positions": len(items),
@@ -177,29 +184,34 @@ class InventorySnapshotRestoration:
                             change["product_id"]
                         )
                     )
-                from app.services.component_inventory import physical
-                if physical(connection, change["product_id"]):
-                    raise InventoryRestorationError("Для компонента выполните физическую инвентаризацию; восстановление старого stock запрещено.")
                 source_key = product["source_key"]
                 if product["deleted_at"] is not None:
                     source_key = product["deleted_source_key"] or source_key
-                cursor = connection.execute(
-                    "UPDATE catalog_excel_products SET stock = ?, stock_source = 'inventory', "
-                    "active = 1, brand_id = ?, excel_brand = ?, source_key = ?, "
-                    "deleted_at = NULL, deleted_by = NULL, deleted_stock = NULL, "
-                    "delete_mode = NULL, deleted_source_key = NULL, updated_at = ? "
-                    "WHERE id = ? AND stock = ?",
-                    (
-                        change["target_stock"], plan["brand_id"], plan["brand_name"],
-                        source_key, now, change["product_id"], product["stock"],
-                    ),
+                current_balance = get_balance(
+                    connection, change["product_id"], plan["warehouse_id"],
+                    require_initialized=False,
                 )
-                if cursor.rowcount != 1:
+                if current_balance != change["current_stock"]:
                     raise InventoryRestorationError(
                         "Остаток товара {} изменился во время восстановления.".format(
                             change["product_id"]
                         )
                     )
+                connection.execute(
+                    "UPDATE catalog_excel_products SET "
+                    "active = 1, brand_id = ?, excel_brand = ?, source_key = ?, "
+                    "deleted_at = NULL, deleted_by = NULL, deleted_stock = NULL, "
+                    "delete_mode = NULL, deleted_source_key = NULL, updated_at = ? "
+                    "WHERE id = ?",
+                    (
+                        plan["brand_id"], plan["brand_name"],
+                        source_key, now, change["product_id"],
+                    ),
+                )
+                set_balance(
+                    connection, change["product_id"], plan["warehouse_id"],
+                    change["target_stock"], now,
+                )
                 movement_id = None
                 if change["restore_delta"]:
                     movement_id = str(uuid.uuid4())
@@ -207,14 +219,14 @@ class InventorySnapshotRestoration:
                         "INSERT INTO catalog_stock_movements ("
                         "id, product_id, movement_type, quantity_delta, stock_before, "
                         "stock_after, idempotency_key, tenant_id, source_type, source_id, "
-                        "source_line_id, operation_kind, source, user_name, comment, created_at"
+                        "source_line_id, operation_kind, source, user_name, comment, created_at, warehouse_id"
                         ") VALUES (?, ?, 'inventory_adjustment', ?, ?, ?, ?, 'default', "
-                        "'inventory_restore', ?, ?, 'restore', 'Vechasu ERP', ?, ?, ?)",
+                        "'inventory_restore', ?, ?, 'restore', 'Vechasu ERP', ?, ?, ?, ?)",
                         (
                             movement_id, change["product_id"], change["restore_delta"],
                             change["current_stock"], change["target_stock"], key,
                             plan["session_id"], change["item_id"], user_name or None,
-                            reason, now,
+                            reason, now, plan["warehouse_id"],
                         ),
                     )
                 AuditJournal(self.database).record(

@@ -5,9 +5,15 @@ import uuid
 from datetime import datetime, timezone
 
 from app.catalog_db import CatalogDatabase
+from app.multiwarehouse_migration import DEFAULT_WAREHOUSE_CODE
 from app.services.audit_journal import AuditJournal
 from app.services.bitrix_erp_product_sync import BitrixERPProductSync
 from app.services.inventory_lock import assert_no_active_inventory
+from app.services.warehouse_stock import (
+    default_warehouse_id,
+    get_balance,
+    set_balance,
+)
 from app.services.protected_catalog_brands import (
     canonical_protected_brand,
     protected_brand_rows,
@@ -124,7 +130,19 @@ class BitrixStockSync:
                     report["protected_by_brand"].setdefault(protected_name, 0)
                     report["protected_by_brand"][protected_name] += 1
                     continue
-                stock_before = float(existing["stock"] or 0)
+                if connection.execute(
+                    "SELECT 1 FROM erp_product_bundles WHERE product_id=?",
+                    (int(existing["id"]),),
+                ).fetchone() is not None:
+                    report["not_synchronized"].append(
+                        self._item(product, "derived_bundle_stock")
+                    )
+                    continue
+                warehouse_id = default_warehouse_id(connection)
+                stock_before = get_balance(
+                    connection, existing["id"], warehouse_id,
+                    require_initialized=False,
+                )
                 delta = quantity - stock_before
                 direction = (
                     "increased" if delta > 0
@@ -161,6 +179,7 @@ class BitrixStockSync:
                         delta,
                         run_id,
                         source_generated_at,
+                        warehouse_id,
                     )
                     report["updated"] += 1
             protected_after = protected_state_digest(connection)
@@ -172,32 +191,29 @@ class BitrixStockSync:
 
     @staticmethod
     def _apply_adjustment(connection, existing, product, stock_before,
-                          stock_after, delta, run_id, source_generated_at):
+                          stock_after, delta, run_id, source_generated_at,
+                          warehouse_id):
         now = utc_now()
         product_id = int(existing["id"])
         external_id = _text(product.get("external_product_id"))
-        connection.execute(
-            "UPDATE catalog_excel_products SET stock = ?, "
-            "stock_source = 'bitrix_catalog_quantity', updated_at = ? WHERE id = ?",
-            (stock_after, now, product_id),
-        )
+        set_balance(connection, product_id, warehouse_id, stock_after, now)
         connection.execute(
             "INSERT INTO catalog_excel_manual_stock_operations ("
-            "id, product_id, stock_before, stock_after, stock_difference, reason, created_at"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "id, product_id, stock_before, stock_after, stock_difference, reason, created_at,warehouse_id"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 str(uuid.uuid4()), product_id, stock_before, stock_after, delta,
                 "Синхронизация остатка из {} (Bitrix ID {})".format(
                     SOURCE_FIELD, external_id
                 ),
-                now,
+                now, warehouse_id,
             ),
         )
         connection.execute(
             "INSERT INTO catalog_stock_movements ("
             "id, product_id, movement_type, quantity_delta, stock_before, stock_after, "
             "idempotency_key, source_type, source_id, operation_kind, source, comment, "
-            "created_at) VALUES (?, ?, 'manual_adjustment', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "created_at,warehouse_id) VALUES (?, ?, 'manual_adjustment', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 str(uuid.uuid4()), product_id, delta, stock_before, stock_after,
                 "{}:{}".format(run_id, product_id),
@@ -205,7 +221,7 @@ class BitrixStockSync:
                 "Фактический остаток сайта; generated_at={}".format(
                     source_generated_at or "unknown"
                 ),
-                now,
+                now, warehouse_id,
             ),
         )
         AuditJournal().record(
@@ -222,6 +238,7 @@ class BitrixStockSync:
                 "bitrix_product_id": external_id,
                 "source_field": SOURCE_FIELD,
                 "run_id": run_id,
+                "warehouse_id": warehouse_id,
             },
             actor_type="system",
             source="bitrix_catalog_quantity",
@@ -260,10 +277,10 @@ class BitrixStockSync:
                 "export_field": EXPORT_FIELD,
                 "site_filter": SITE_AVAILABILITY_FILTER,
                 "subtract_reserved_again": False,
-                "store_id": None,
+                "store_id": DEFAULT_WAREHOUSE_CODE,
                 "store_note": (
-                    "The site reads the aggregate catalog quantity; store 1 amounts "
-                    "are not used by the catalog availability filter."
+                    "Legacy Bitrix quantity is applied only to the Udelnaya warehouse; "
+                    "it never overwrites the sum of all warehouses."
                 ),
                 "generated_at": source_generated_at,
             },

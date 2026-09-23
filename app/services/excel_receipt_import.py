@@ -29,6 +29,7 @@ from app.services.excel_product_catalog import (
     _restore_columns,
     utc_now,
 )
+from app.services.warehouse_stock import require_warehouse
 from app.services.inventory_lock import (
     assert_product_can_join_brand,
     assert_products_unlocked,
@@ -413,10 +414,13 @@ class ExcelReceiptImportService:
                     )
         return self.get_draft(draft_id, refresh=False)
 
-    def post(self, draft_id):
+    def post(self, draft_id, warehouse_id=None):
         self.database.initialize()
         self.get_draft(draft_id)
         with self.database.transaction() as connection:
+            warehouse_id = require_warehouse(
+                connection, warehouse_id, allow_legacy_default=True
+            )
             draft = connection.execute(
                 "SELECT * FROM catalog_excel_import_drafts WHERE id = ?", (draft_id,)
             ).fetchone()
@@ -534,7 +538,7 @@ class ExcelReceiptImportService:
                 "INSERT INTO catalog_excel_receipts ("
                 "number, draft_id, source_filename, file_sha256, sheet_name, status, "
                 "row_count, total_quantity, new_cards, matched_cards, created_at, posted_at, "
-                "details_json) VALUES (NULL, ?, ?, ?, ?, 'posted', ?, ?, 0, ?, ?, ?, ?)",
+                "details_json, warehouse_id) VALUES (NULL, ?, ?, ?, ?, 'posted', ?, ?, 0, ?, ?, ?, ?, ?)",
                 (
                     draft_id, draft["source_filename"], draft["file_sha256"],
                     draft["sheet_name"], len(matches), total_quantity, matched_cards,
@@ -545,7 +549,7 @@ class ExcelReceiptImportService:
                         "positive_rows": positive_rows,
                         "zero_rows": zero_rows,
                         "external_writes": 0,
-                    }),
+                    }), warehouse_id,
                 ),
             )
             receipt_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -593,7 +597,10 @@ class ExcelReceiptImportService:
                 from app.services.component_inventory import physical, balance, write_balance, remember
                 physical_component = existing is not None and physical(connection, existing["id"])
                 quantity = float(result["stock"])
-                stock_before = balance(connection, existing["id"]) if existing is not None else 0.0
+                stock_before = balance(
+                    connection, existing["id"], warehouse_id=warehouse_id,
+                    require_initialized=False,
+                ) if existing is not None else 0.0
                 state["stock"] = stock_before + quantity
                 state["stock_source"] = "receipt"
                 if existing is None:
@@ -603,7 +610,10 @@ class ExcelReceiptImportService:
                     columns = (
                         "source_key", "created_batch_id", "created_at",
                     ) + PRODUCT_MUTABLE_COLUMNS
-                    values = [source_key, batch_id, now] + [state[column] for column in PRODUCT_MUTABLE_COLUMNS]
+                    values = [source_key, batch_id, now] + [
+                        0.0 if column == "stock" else state[column]
+                        for column in PRODUCT_MUTABLE_COLUMNS
+                    ]
                     connection.execute(
                         "INSERT INTO catalog_excel_products ({}) VALUES ({})".format(
                             ", ".join(columns), ", ".join("?" for _ in columns)
@@ -618,11 +628,14 @@ class ExcelReceiptImportService:
                     claimed_product_ids.add(product_id)
                     created_product = False
                     if physical_component:
-                        write_balance(connection, product_id, stock_before + quantity, "excel_receipt", now)
                         remember(connection, product_id, ("excel_receipt", receipt_id))
                         state["stock"] = existing["stock"]
                         state["stock_source"] = existing["stock_source"]
                     _restore_columns(connection, product_id, state, PRODUCT_MUTABLE_COLUMNS)
+                write_balance(
+                    connection, product_id, stock_before + quantity,
+                    "excel_receipt", now, warehouse_id=warehouse_id,
+                )
 
                 draft_row = draft_rows[int(result["excel_row"])]
                 connection.execute(
@@ -630,7 +643,7 @@ class ExcelReceiptImportService:
                     "receipt_id, draft_row_id, product_id, excel_row, excel_name, "
                     "excel_article, excel_brand, excel_category, cell, quantity, stock_before, "
                     "stock_after, created_product, match_status, bitrix_catalog_product_id, "
-                    "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "created_at, warehouse_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         receipt_id, draft_row["id"], product_id, result["excel_row"],
                         result["excel_name"], result.get("excel_article") or None,
@@ -638,7 +651,7 @@ class ExcelReceiptImportService:
                         result.get("cell") or None, quantity, stock_before,
                         stock_before + quantity, int(created_product), result["match_status"],
                         result.get("product_id") if result["match_status"] in AUTOMATIC_STATUSES else None,
-                        now,
+                        now, warehouse_id,
                     ),
                 )
                 receipt_row_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -646,12 +659,13 @@ class ExcelReceiptImportService:
                     connection.execute(
                         "INSERT INTO catalog_excel_receipt_operations ("
                         "id, receipt_id, receipt_row_id, product_id, stock_before, stock_after, "
-                        "stock_difference, created_at, details_json"
-                        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "stock_difference, created_at, details_json, warehouse_id"
+                        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             str(uuid.uuid4()), receipt_id, receipt_row_id, product_id,
                             stock_before, stock_before + quantity, quantity, now,
                             _json({"excel_row": result["excel_row"], "draft_id": draft_id}),
+                            warehouse_id,
                         ),
                     )
                 if self.fault_hook is not None:

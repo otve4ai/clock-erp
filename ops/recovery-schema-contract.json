@@ -5,6 +5,8 @@
     "catalog.db": [
       "catalog_excel_products",
       "catalog_stock_movements",
+      "erp_warehouses",
+      "erp_product_warehouse_stock",
       "erp_sales",
       "erp_receipts"
     ],
