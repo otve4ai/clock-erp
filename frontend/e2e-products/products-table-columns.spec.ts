@@ -64,6 +64,55 @@ async function setColumnVisibility(page: Page, key: string, visible: boolean) {
   await expect(panel).toBeHidden();
 }
 
+async function headerVisualContract(page: Page, selector: string) {
+  return page.locator(selector).evaluate((header) => {
+    const headerStyle = getComputedStyle(header);
+    const label = header.querySelector<HTMLElement>('.erp-sort-label');
+    if (!label) throw new Error('Sort label was not found in table header');
+    const labelStyle = getComputedStyle(label);
+    return {
+      header: {
+        backgroundColor: headerStyle.backgroundColor,
+        borderBottomColor: headerStyle.borderBottomColor,
+        borderBottomWidth: headerStyle.borderBottomWidth,
+        color: headerStyle.color,
+        fontFamily: headerStyle.fontFamily,
+        fontSize: headerStyle.fontSize,
+        fontWeight: headerStyle.fontWeight,
+        height: headerStyle.height,
+        lineHeight: headerStyle.lineHeight,
+        paddingLeft: headerStyle.paddingLeft,
+        paddingRight: headerStyle.paddingRight,
+      },
+      label: {
+        backgroundColor: labelStyle.backgroundColor,
+        color: labelStyle.color,
+        fontFamily: labelStyle.fontFamily,
+        fontSize: labelStyle.fontSize,
+        fontWeight: labelStyle.fontWeight,
+        lineHeight: labelStyle.lineHeight,
+      },
+    };
+  });
+}
+
+test('products and sales headers use the same computed visual contract', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto('/app/products', { waitUntil: 'load' });
+  const products = await headerVisualContract(
+    page,
+    '#warehouseProductsTable th[data-column-key="name"]',
+  );
+
+  await page.goto('/app/sales', { waitUntil: 'load' });
+  const sales = await headerVisualContract(
+    page,
+    '.sales-table th[data-column-key="product_name"]',
+  );
+
+  expect(products).toEqual(sales);
+});
+
 test('resizing one product column keeps neighbours fixed and persists', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto('/app/products', { waitUntil: 'load' });

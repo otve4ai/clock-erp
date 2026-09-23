@@ -1628,6 +1628,10 @@
         rel="stylesheet"
         href="{{ url_for('static', filename='css/erp-focus-mode.css') }}"
     >
+    <link
+        rel="stylesheet"
+        href="{{ static_asset_url('css/erp-native-table-columns.css') }}"
+    >
     <style>
         .sales-list-page .sales-table.erp-data-table
         .sale-row.is-shared-sale {
@@ -2415,7 +2419,7 @@
                     aria-label="Таблица продаж с горизонтальной прокруткой"
                 >
                     <table
-                        class="sales-table erp-data-table"
+                        class="sales-table erp-data-table erp-native-columns-table"
                         data-source="{{ active_source }}"
                         data-sort-field="{{ sales_sort_field }}"
                         data-sort-direction="{{ sales_sort_direction }}"
