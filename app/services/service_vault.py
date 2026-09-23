@@ -345,6 +345,9 @@ class ServiceVault:
                             ",".join(PERMISSIONS)
                         ), (row["id"],)
                     ).fetchall()]
+                access_count = sum(
+                    1 for grant in grants if bool(grant.get("can_view"))
+                ) if rights["can_manage_access"] else None
                 result.append({
                     "id": row["id"], "name": row["name"],
                     "url": row["url"] if (rights["can_open"] or rights["can_edit"]) else "",
@@ -354,7 +357,7 @@ class ServiceVault:
                     "sort_order": row["sort_order"], "version": row["version"],
                     "archived": bool(row["archived_at"]), "permissions": rights,
                     "accounts": [dict(account) for account in accounts],
-                    "grants": grants,
+                    "grants": grants, "access_count": access_count,
                 })
             return result
 

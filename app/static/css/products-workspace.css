@@ -8,6 +8,235 @@
     max-width: 100%;
 }
 
+.warehouse-col-select,
+.warehouse-products-table [data-system-column="select"] {
+    width: 44px;
+    min-width: 44px;
+    text-align: center;
+}
+
+.warehouse-products-table [data-system-column="select"] input {
+    width: 17px;
+    height: 17px;
+    accent-color: var(--erp-primary, #174887);
+}
+
+.product-export-dialog {
+    width: min(760px, calc(100vw - 28px));
+    max-height: calc(100vh - 28px);
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: 16px;
+    background: var(--erp-surface, #fff);
+    color: var(--erp-text, #172033);
+    box-shadow: 0 24px 70px rgba(15, 23, 42, .24);
+}
+
+.product-export-dialog::backdrop {
+    background: rgba(15, 23, 42, .48);
+}
+
+.product-export-dialog form {
+    display: flex;
+    max-height: calc(100vh - 28px);
+    flex-direction: column;
+}
+
+.product-export-header,
+.product-export-footer,
+.product-export-section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.product-export-header,
+.product-export-footer {
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--erp-border, #e2e8f0);
+}
+
+.product-export-footer {
+    justify-content: flex-end;
+    border-top: 1px solid var(--erp-border, #e2e8f0);
+    border-bottom: 0;
+}
+
+.product-export-header h2,
+.product-export-section h3 {
+    margin: 0;
+}
+
+.product-export-header p {
+    margin: 5px 0 0;
+    color: var(--erp-text-muted, #64748b);
+    font-size: 13px;
+}
+
+.product-export-close {
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--erp-text-muted, #64748b);
+    font-size: 26px;
+    cursor: pointer;
+}
+
+.product-export-body {
+    display: grid;
+    gap: 20px;
+    padding: 20px 22px;
+    overflow-y: auto;
+}
+
+.product-export-section {
+    display: grid;
+    gap: 10px;
+}
+
+.product-export-section h3 {
+    font-size: 15px;
+}
+
+.product-export-option {
+    display: flex;
+    gap: 10px;
+    padding: 11px 12px;
+    border: 1px solid var(--erp-border, #e2e8f0);
+    border-radius: 10px;
+    cursor: pointer;
+}
+
+.product-export-option:has(input:checked) {
+    border-color: var(--erp-primary, #174887);
+    background: color-mix(in srgb, var(--erp-primary, #174887) 7%, transparent);
+}
+
+.product-export-option:has(input:disabled) {
+    cursor: not-allowed;
+    opacity: .56;
+}
+
+.product-export-option span,
+.product-export-option small,
+.product-export-filters span {
+    display: block;
+}
+
+.product-export-option small,
+.product-export-format,
+.product-export-filters {
+    color: var(--erp-text-muted, #64748b);
+    font-size: 12px;
+}
+
+.product-export-filters {
+    display: grid;
+    gap: 3px;
+    margin: -2px 0 2px 34px;
+    padding: 10px 12px;
+    border-radius: 9px;
+    background: var(--erp-surface-muted, #f8fafc);
+}
+
+.product-export-section-heading button {
+    padding: 4px 7px;
+    border: 0;
+    background: transparent;
+    color: var(--erp-primary, #174887);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.product-export-field-groups {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.product-export-field-groups fieldset {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--erp-border, #e2e8f0);
+    border-radius: 10px;
+}
+
+.product-export-field-groups legend {
+    padding: 0 5px;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.product-export-field-groups label {
+    font-size: 13px;
+}
+
+.product-export-filename {
+    display: grid;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.product-export-filename input {
+    min-height: 40px;
+    padding: 0 11px;
+    border: 1px solid var(--erp-border-strong, #cbd5e1);
+    border-radius: 9px;
+    background: var(--erp-surface, #fff);
+    color: var(--erp-text, #172033);
+    font: inherit;
+}
+
+.product-export-error {
+    min-height: 18px;
+    margin: 0;
+    color: var(--erp-danger, #b91c1c);
+    font-size: 12px;
+}
+
+.product-export-format {
+    margin: -14px 0 0;
+}
+
+.product-export-toast {
+    position: fixed;
+    z-index: 5000;
+    right: 22px;
+    bottom: 22px;
+    max-width: min(440px, calc(100vw - 32px));
+    padding: 13px 16px;
+    border-radius: 11px;
+    background: #166534;
+    color: #fff;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, .22);
+}
+
+.product-export-toast.is-error {
+    background: #991b1b;
+}
+
+@media (max-width: 620px) {
+    .product-export-field-groups {
+        grid-template-columns: 1fr;
+    }
+
+    .product-export-header,
+    .product-export-body,
+    .product-export-footer {
+        padding-right: 16px;
+        padding-left: 16px;
+    }
+}
+
 .products-analytics-page {
     margin: 0;
     overflow-x: hidden;

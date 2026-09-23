@@ -5,6 +5,14 @@
         <p>Каталог и складские остатки</p>
     </div>
     <div class="erp-workspace-actions products-workspace-actions">
+        {% if active_view == 'products' %}
+            <div class="products-add-menu products-actions-menu">
+                <button id="productsActionsToggle" class="products-workspace-button" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleProductsActionsMenu(event)">Действия ▾</button>
+                <div id="productsActionsMenu" class="products-add-menu-list" role="menu" hidden>
+                    <button id="openProductExport" type="button" role="menuitem">Экспорт в Excel</button>
+                </div>
+            </div>
+        {% endif %}
         {% if add_button %}
             <div class="products-add-menu">
                 <button id="openWarehouseAddModal" class="products-workspace-button is-primary" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleProductsAddMenu(event)">Добавить товар ▾</button>
