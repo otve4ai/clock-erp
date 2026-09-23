@@ -4,15 +4,15 @@
 
 ## 1. Final HEAD
 
-Финальный SHA фиксируется в сообщении сдачи после публикации последнего report-коммита. Реализация выполнена в `/Users/maksim/Projects/clock-erp-multiwarehouse`, ветка `agent/multiwarehouse`; исходное дерево `/Users/maksim/Projects/clock-erp` не изменялось.
+Проверенный implementation/merge HEAD: `e7d937be`. Финальный SHA ветки (следующий report-only commit) фиксируется в сообщении сдачи. Реализация выполнена в `/Users/maksim/Projects/clock-erp-multiwarehouse`, ветка `agent/multiwarehouse`; исходное дерево `/Users/maksim/Projects/clock-erp` не изменялось.
 
 ## 2. Commits
 
-Базовые commits этапов: `503edc6b` (canonical multiwarehouse backend), `46284c9a` (синхронизация с main), `74f8f23d` (read model и UI). Финальный commit, merge актуального `origin/main` и report commit перечислены в PR и сообщении сдачи.
+Commits задачи: `503edc6b` (canonical multiwarehouse backend), `46284c9a` (синхронизация с main), `74f8f23d` (read model и UI), `455d3f74` (production readiness, tests, rehearsal/evidence/runbook), `e7d937be` (merge актуального `origin/main` и интеграция configurable export). Следующий commit изменяет только реквизиты этого отчёта.
 
 ## 3. Pull Request
 
-Draft PR создаётся после фиксации отчёта и полного clean-status. Ссылка фиксируется в сообщении сдачи. Автоматический merge запрещён и не выполнялся.
+Draft PR: https://github.com/otve4ai/clock-erp/pull/596. Автоматический merge запрещён и не выполнялся.
 
 ## 4. Изменённые файлы
 
@@ -106,4 +106,4 @@ Production copy не содержит компонентов и bundles, поэ�
 
 ## 22. Git status и deploy gate
 
-После commit/push ожидается clean status ветки `agent/multiwarehouse`; точный HEAD и Draft PR фиксируются при сдаче. Production deploy, production migration, restart сервиса и PR merge **не выполнялись**.
+После финального report commit/push статус ветки `agent/multiwarehouse` проверяется как clean; точный HEAD фиксируется при сдаче. Draft PR: https://github.com/otve4ai/clock-erp/pull/596. Production deploy, production migration, restart сервиса и PR merge **не выполнялись**.
