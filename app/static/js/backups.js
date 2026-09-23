@@ -8,7 +8,8 @@
     const q = (selector) => root.querySelector(selector);
     const text = (selector, value) => { const node = q(selector); if (node) node.textContent = value; };
     const unknown = "Не удалось определить";
-    const typeLabels = { automatic: "Автоматический", manual: "Ручной" };
+    const typeLabels = { automatic: "Ежедневный", daily: "Ежедневный", weekly: "Недельный", monthly: "Месячный", manual: "Ручной", safety: "Safety" };
+    const reasonLabels = { scheduled: "По расписанию", manual: "Вручную", pre_restore: "Перед восстановлением", pre_import: "Перед импортом", pre_update: "Перед обновлением", pre_price_change: "Перед изменением цен", pre_stock_change: "Перед изменением остатков", pre_migration: "Перед миграцией" };
     const statusLabels = { not_checked: "Не проверен", verified: "Проверен", error: "Повреждён", creating: "Создаётся", verifying: "Проверяется" };
     let watchedOperationId = bootstrap.status && bootstrap.status.operation && bootstrap.status.operation.active
         ? bootstrap.status.operation.id
@@ -17,6 +18,7 @@
     let pendingRecovery = null;
     const stageLabels = {
         pending: "Ожидает", preflight: "Предварительная проверка",
+        safety_backup: "Safety backup",
         staging_restore: "Staging", staging_check: "Проверка staging",
         maintenance: "Режим обслуживания", production_restore: "Восстановление",
         service_restart: "Перезапуск", health_check: "Проверка ERP",
@@ -121,15 +123,24 @@
             status.backup_directory && !status.backup_directory.available
                 ? `Бэкапы недоступны: ${status.backup_directory.message}`
                 : "Реальные бэкапы не найдены",
-            6
+            7
         );
         backups.forEach((backup) => {
             const parts = dateParts(backup.timestamp);
             const row = document.createElement("tr");
-            row.append(cell(parts.date), cell(parts.time), cell(bytes(backup.size)), cell(typeLabels[backup.type] || backup.type));
+            row.append(cell(parts.date), cell(parts.time), cell(bytes(backup.size)));
+            const typeCell = document.createElement("td");
+            const categories = backup.retention_categories && backup.retention_categories.length
+                ? backup.retention_categories
+                : [backup.backup_type || backup.type];
+            categories.forEach((category) => typeCell.appendChild(
+                badge(typeLabels[category] || category, `backup-type ${category}`)
+            ));
+            row.appendChild(typeCell);
             const statusCell = document.createElement("td");
             statusCell.appendChild(badge(statusLabels[backup.status] || backup.status, backup.status));
             row.appendChild(statusCell);
+            row.appendChild(cell(reasonLabels[backup.reason] || backup.reason || "—"));
             const actions = document.createElement("td");
             const restore = document.createElement("button");
             restore.type = "button";
@@ -145,6 +156,31 @@
                 url: `/api/v1/backups/${encodeURIComponent(backup.backup_id)}/restore`,
             }));
             actions.appendChild(restore);
+            if ((backup.backup_type || backup.type) === "manual") {
+                const remove = document.createElement("button");
+                remove.type = "button";
+                remove.className = "backup-button danger";
+                remove.textContent = "Удалить";
+                remove.disabled = status.operation.active;
+                remove.addEventListener("click", async () => {
+                    if (!window.confirm(`Удалить ручной бэкап от ${parts.full}? Это действие необратимо.`)) return;
+                    remove.disabled = true;
+                    try {
+                        const response = await fetch(`/api/v1/backups/${encodeURIComponent(backup.backup_id)}`, {
+                            method: "DELETE",
+                            headers: { Accept: "application/json", "X-CSRF-Token": bootstrap.csrf },
+                        });
+                        const payload = await response.json();
+                        if (!response.ok) throw new Error(payload.message || "Не удалось удалить бэкап");
+                        showMessage("Ручной бэкап удалён", false);
+                        await refresh();
+                    } catch (error) {
+                        showMessage(error.message || "Не удалось удалить бэкап", true);
+                        remove.disabled = false;
+                    }
+                });
+                actions.appendChild(remove);
+            }
             row.appendChild(actions);
             body.appendChild(row);
         });

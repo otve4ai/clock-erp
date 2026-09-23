@@ -5,6 +5,7 @@ validated operation record; this module performs all filesystem, Git and
 service work from fixed server-side roots.
 """
 
+import datetime as dt
 import fcntl
 import hashlib
 import json
@@ -27,6 +28,7 @@ from app.services.backup_admin import (
     BackupNotFoundError,
     _atomic_json_write,
     _safe_json_read,
+    _sha256_file,
     _utc_now,
 )
 
@@ -36,12 +38,13 @@ IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{8,96}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 KINDS = ("data_restore", "code_rollback", "full_restore")
 ACTIVE_STAGES = (
-    "pending", "preflight", "staging_restore", "staging_check", "maintenance",
+    "pending", "preflight", "safety_backup", "staging_restore", "staging_check", "maintenance",
     "production_restore", "service_restart", "health_check",
 )
 STAGE_LABELS = {
     "pending": "Ожидает запуска",
     "preflight": "Предварительная проверка",
+    "safety_backup": "Safety backup текущего состояния",
     "staging_restore": "Распаковка в staging",
     "staging_check": "Проверка staging",
     "maintenance": "Режим обслуживания",
@@ -493,6 +496,67 @@ class RecoveryEngine:
         self._write_operation(operation)
         return target, instance
 
+    def _create_safety_backup(self, operation):
+        from scripts.retain_erp_backups import create_backup
+
+        try:
+            archive = create_backup(
+                self.project_root, self.backup_root, dt.datetime.now(), "safety",
+                operation_id=operation["id"], apply_changes=True,
+            )
+            relative = str(archive.relative_to(self.backup_root))
+            backup = self.backups.resolve_backup(self.backups._backup_id(relative))
+            expected = sorted(
+                path.name for path in (self.project_root / "instance").glob("*.db")
+            )
+            databases = self.backups._verify_archive(archive, expected)
+            contract_hash, database_manifest, file_manifest = (
+                self.backups._capture_recovery_metadata(archive)
+            )
+            git = self.backups.git_status(history_limit=1)
+            if not git.get("commit"):
+                raise BackupAdminError("Git commit текущего состояния недоступен")
+            metadata = {
+                "metadata_version": 2,
+                "backup_id": backup["backup_id"],
+                "timestamp": backup["timestamp"],
+                "created_at": backup["timestamp"],
+                "status": "verified",
+                "type": "safety",
+                "backup_type": "safety",
+                "retention_categories": ["safety"],
+                "reason": "pre_restore",
+                "size": backup["size"],
+                "checksum_sha256": _sha256_file(archive),
+                "git_commit": git.get("commit"),
+                "git_branch": git.get("branch"),
+                "app_version": git.get("short"),
+                "schema_versions": dict(
+                    (name, item["user_version"])
+                    for name, item in database_manifest.items()
+                ),
+                "database_manifest": database_manifest,
+                "file_manifest": file_manifest,
+                "recovery_contract": contract_hash,
+                "integrity_status": "verified",
+                "databases": databases,
+            }
+            _atomic_json_write(self.backups._metadata_path(backup["backup_id"]), metadata)
+            verified = self.backups.resolve_backup(backup["backup_id"])
+            if verified.get("integrity_status") != "verified":
+                raise BackupAdminError("Safety backup не прошёл проверку metadata")
+            operation["safety_backup_id"] = backup["backup_id"]
+            self._write_operation(operation)
+            self._log(operation, "safety_backup", backup["backup_id"])
+            return verified
+        except Exception as error:
+            raise RecoveryError(
+                "SAFETY_BACKUP_FAILED",
+                "Восстановление отменено: safety backup не создан или не проверен ({})".format(
+                    type(error).__name__
+                ),
+            )
+
     def _maintenance_on(self, operation):
         self.maintenance_path.parent.mkdir(parents=True, exist_ok=True)
         _atomic_json_write(self.maintenance_path, {
@@ -744,6 +808,8 @@ class RecoveryEngine:
             backup, metadata, _current_contract, runtime_contract = self._preflight(operation)
             staged_instance = None
             if operation["kind"] in ("data_restore", "full_restore"):
+                self._stage(operation, "safety_backup")
+                self._create_safety_backup(operation)
                 self._stage(operation, "staging_restore")
                 _staging, staged_instance = self._stage_backup(operation, backup, metadata, runtime_contract)
                 self._inject("after_staging")

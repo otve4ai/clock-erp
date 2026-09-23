@@ -163,16 +163,30 @@ class RecoveryV2Test(unittest.TestCase):
         result = self._engine().run(self._operation(backup=backup)["id"])
         self.assertEqual(result["status"], "completed")
         self.assertEqual(self._payload(), "backup")
-        self.assertNotIn("safety_backup_id", result)
+        self.assertRegex(result["safety_backup_id"], r"^[0-9a-f]{24}$")
+        safety = self.service.resolve_backup(result["safety_backup_id"])
+        self.assertEqual(safety["backup_type"], "safety")
+        self.assertEqual(safety["reason"], "pre_restore")
+        self.assertEqual(safety["integrity_status"], "verified")
         self.assertFalse(self.maintenance.exists())
         self.assertEqual(
             [item["stage"] for item in result["progress"]],
-            ["pending", "preflight", "staging_restore",
+            ["pending", "preflight", "safety_backup", "staging_restore",
              "staging_check", "maintenance", "production_restore", "service_restart",
              "health_check", "completed"],
         )
         audit = json.loads(self.service.audit_path.read_text(encoding="utf-8").splitlines()[-1])
         self.assertEqual(audit["operation_id"], result["id"])
+
+    def test_restore_aborts_when_safety_backup_cannot_be_verified(self):
+        backup = self._make_backup()
+        engine = self._engine()
+        with mock.patch.object(
+            engine.backups, "_verify_archive", side_effect=BackupAdminError("invalid")
+        ):
+            result = engine.run(self._operation(backup=backup)["id"])
+        self.assertEqual(result["error_code"], "SAFETY_BACKUP_FAILED")
+        self.assertEqual(self._payload(), "current")
 
     def test_corrupt_backup_is_blocked_before_production_change(self):
         backup = self._make_backup()

@@ -4,6 +4,7 @@
 import argparse
 import datetime as dt
 import fcntl
+import hashlib
 import os
 import re
 import shutil
@@ -17,6 +18,7 @@ from pathlib import Path
 LEGACY_DAILY_BACKUP = re.compile(r"^clock-erp-(\d{8})-(\d{6})\.tar\.gz$")
 DAILY_BACKUP = re.compile(r"^clock-erp-daily-(\d{8})-(\d{6})\.tar\.gz$")
 MANUAL_BACKUP = re.compile(r"^clock-erp-manual-(\d{8})-(\d{6})-[0-9a-f]{32}\.tar\.gz$")
+SAFETY_BACKUP = re.compile(r"^clock-erp-safety-(\d{8})-(\d{6})-[0-9a-f]{32}\.tar\.gz$")
 RUNTIME_DATABASE_BACKUP = re.compile(
     r"^[A-Za-z0-9_.-]+\.db\.backup-[A-Za-z0-9_.-]+$"
 )
@@ -51,9 +53,7 @@ def _is_valid_backup(path, kind):
         return False
     if not path.is_file():
         return False
-    if kind == "daily":
-        return _valid_tar_backup(path)
-    if kind == "manual":
+    if kind in ("daily", "weekly", "monthly", "manual", "safety"):
         return _valid_tar_backup(path)
     return False
 
@@ -77,29 +77,36 @@ def _discover(directory, pattern, kind):
 def discover_backups(backup_root):
     daily = _discover(backup_root, LEGACY_DAILY_BACKUP, "daily")
     daily.extend(_discover(backup_root / "daily", DAILY_BACKUP, "daily"))
-
     manual = _discover(backup_root / "manual", MANUAL_BACKUP, "manual")
+    safety = _discover(backup_root / "safety", SAFETY_BACKUP, "safety")
     return {
         "daily": daily,
+        "weekly": [item for item in daily if item[0].weekday() == 6],
+        "monthly": [item for item in daily if item[0].day == 1],
         "manual": manual,
+        "safety": safety,
     }
 
 
 def retention_plan(backups, now, policy="daily"):
     ordered = sorted(backups, key=lambda item: (item[0], str(item[1])), reverse=True)
     keep = set()
-    if policy == "daily":
-        cutoff = now.date() - dt.timedelta(days=6)
-        retained_days = set()
+    limits = {"daily": 14, "weekly": 8, "monthly": 12}
+    if policy in limits:
+        retained_periods = set()
         for timestamp, path, is_valid in ordered:
             if not is_valid or timestamp > now:
                 keep.add(path)
                 continue
-            backup_date = timestamp.date()
-            if backup_date >= cutoff and backup_date not in retained_days:
-                retained_days.add(backup_date)
+            period = (
+                timestamp.date() if policy == "daily" else
+                timestamp.isocalendar()[:2] if policy == "weekly" else
+                (timestamp.year, timestamp.month)
+            )
+            if period not in retained_periods and len(retained_periods) < limits[policy]:
+                retained_periods.add(period)
                 keep.add(path)
-    elif policy == "manual":
+    elif policy in ("manual", "safety"):
         keep.update(path for _timestamp, path, _is_valid in ordered)
     else:
         raise ValueError("unknown retention policy: {}".format(policy))
@@ -140,16 +147,28 @@ def apply_plan(actions, backup_root, apply_changes):
         resolved = path.resolve()
         if root not in resolved.parents:
             raise RuntimeError("refusing to delete outside backup root: {}".format(path))
-        if path.is_dir():
-            shutil.rmtree(str(path))
-        else:
-            path.unlink()
-        bytes_deleted += size
+        try:
+            if path.is_dir():
+                shutil.rmtree(str(path))
+            else:
+                path.unlink()
+            relative = str(resolved.relative_to(root))
+            backup_id = hashlib.sha256(
+                relative.encode("utf-8")
+            ).hexdigest()[:24]
+            metadata = root / "metadata" / (backup_id + ".json")
+            if metadata.is_file() and not metadata.is_symlink():
+                metadata.unlink()
+            bytes_deleted += size
+        except OSError as error:
+            counts["DELETE_FAILED"] = counts.get("DELETE_FAILED", 0) + 1
+            print("DELETE_FAILED|{}|{}|{}".format(timestamp.isoformat(), path, type(error).__name__))
     print(
-        "SUMMARY|mode={}|keep={}|delete={}|skip_invalid={}|bytes_selected={}|bytes_deleted={}".format(
+        "SUMMARY|mode={}|keep={}|delete={}|delete_failed={}|skip_invalid={}|bytes_selected={}|bytes_deleted={}".format(
             "apply" if apply_changes else "dry-run",
             counts.get("KEEP", 0) + counts.get("KEEP_FUTURE", 0),
             counts.get("DELETE", 0),
+            counts.get("DELETE_FAILED", 0),
             counts.get("SKIP_INVALID", 0),
             bytes_selected,
             bytes_deleted,
@@ -248,6 +267,13 @@ def create_backup(project_root, backup_root, now, kind, operation_id=None, apply
         filename = "clock-erp-manual-{}-{}.tar.gz".format(
             now.strftime("%Y%m%d-%H%M%S"), operation_id
         )
+    elif kind == "safety":
+        if not re.fullmatch(r"[0-9a-f]{32}", str(operation_id or "")):
+            raise ValueError("safety backup operation id is invalid")
+        directory = backup_root / "safety"
+        filename = "clock-erp-safety-{}-{}.tar.gz".format(
+            now.strftime("%Y%m%d-%H%M%S"), operation_id
+        )
     else:
         raise ValueError("unsupported backup kind: {}".format(kind))
     target = directory / filename
@@ -278,9 +304,29 @@ def create_backup(project_root, backup_root, now, kind, operation_id=None, apply
         shutil.rmtree(str(staging), ignore_errors=True)
 
 
-def write_recovery_metadata(project_root, backup_root, archive_path, backup_type):
+def automatic_retention_categories(timestamp):
+    categories = ["daily"]
+    if timestamp.weekday() == 6:
+        categories.append("weekly")
+    if timestamp.day == 1:
+        categories.append("monthly")
+    return categories
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_recovery_metadata(project_root, backup_root, archive_path, backup_type,
+                            reason=None, retention_categories=None, strict=False):
     """Attach Recovery V2 metadata without making backup creation Flask-dependent."""
-    import hashlib
     import json
     import sys
 
@@ -315,7 +361,14 @@ def write_recovery_metadata(project_root, backup_root, archive_path, backup_type
         metadata = {
             "metadata_version": 2, "backup_id": backup_id,
             "timestamp": candidate["timestamp"], "type": backup_type,
+            "created_at": candidate["timestamp"], "status": "verified",
+            "backup_type": backup_type,
+            "retention_categories": list(retention_categories or [backup_type]),
+            "reason": reason or ("manual" if backup_type == "manual" else
+                                   "pre_restore" if backup_type == "safety" else
+                                   "scheduled"),
             "size": archive_path.stat().st_size, "git_commit": commit,
+            "checksum_sha256": _sha256_file(archive_path),
             "git_branch": branch, "app_version": commit[:12],
             "schema_versions": dict(
                 (name, item["user_version"]) for name, item in database_manifest.items()
@@ -326,8 +379,37 @@ def write_recovery_metadata(project_root, backup_root, archive_path, backup_type
         }
         _atomic_json_write(service._metadata_path(backup_id), metadata)
         print("METADATA_VERIFIED|{}".format(backup_id))
+        return metadata
     except Exception as error:
         print("METADATA_FAILED|{}".format(type(error).__name__), file=sys.stderr)
+        if strict:
+            raise
+        return None
+
+
+def combined_retention_plan(streams, now):
+    """Delete a shared automatic archive only after every category expires."""
+    decisions = {}
+    timestamps = {}
+    validity = {}
+    for policy in ("daily", "weekly", "monthly"):
+        for action, timestamp, path in retention_plan(streams[policy], now, policy):
+            decisions.setdefault(path, {})[policy] = action
+            timestamps[path] = timestamp
+            validity[path] = action != "SKIP_INVALID"
+    actions = []
+    for path in sorted(timestamps, key=lambda item: (timestamps[item], str(item)), reverse=True):
+        path_decisions = decisions[path]
+        if not validity[path]:
+            action = "SKIP_INVALID"
+        elif any(value == "KEEP_FUTURE" for value in path_decisions.values()):
+            action = "KEEP_FUTURE"
+        elif any(value == "KEEP" for value in path_decisions.values()):
+            action = "KEEP"
+        else:
+            action = "DELETE"
+        actions.append((action, timestamps[path], path))
+    return actions
 
 
 def main():
@@ -337,6 +419,7 @@ def main():
     creation = parser.add_mutually_exclusive_group()
     creation.add_argument("--create-daily", action="store_true")
     creation.add_argument("--create-manual", metavar="OPERATION_ID")
+    creation.add_argument("--create-safety", metavar="OPERATION_ID")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--now", help=argparse.SUPPRESS)
     arguments = parser.parse_args()
@@ -347,6 +430,7 @@ def main():
     if (
         arguments.create_daily
         or arguments.create_manual
+        or arguments.create_safety
     ) and not arguments.project_root:
         parser.error("--project-root is required when creating a backup")
 
@@ -364,10 +448,12 @@ def main():
         else dt.datetime.now()
     )
     streams = discover_backups(backup_root)
-    for stream in ("daily", "manual"):
+    print("STREAM|automatic")
+    apply_plan(combined_retention_plan(streams, now), backup_root, arguments.apply)
+    for stream in ("manual", "safety"):
         print("STREAM|{}".format(stream))
-        actions = retention_plan(streams[stream], now, policy=stream)
-        apply_plan(actions, backup_root, arguments.apply)
+        apply_plan(retention_plan(streams[stream], now, policy=stream), backup_root,
+                   arguments.apply)
 
     if arguments.create_daily:
         daily_before = set(path for _timestamp, path, _valid in discover_backups(backup_root)["daily"])
@@ -380,7 +466,9 @@ def main():
             and created not in daily_before
         ):
             write_recovery_metadata(
-                arguments.project_root.resolve(), backup_root, created, "automatic"
+                arguments.project_root.resolve(), backup_root, created, "daily",
+                reason="scheduled",
+                retention_categories=automatic_retention_categories(now),
             )
     elif arguments.create_manual:
         created = create_backup(
@@ -389,7 +477,18 @@ def main():
         )
         if arguments.apply and created and created.is_file():
             write_recovery_metadata(
-                arguments.project_root.resolve(), backup_root, created, "manual"
+                arguments.project_root.resolve(), backup_root, created, "manual",
+                reason="manual", retention_categories=["manual"],
+            )
+    elif arguments.create_safety:
+        created = create_backup(
+            arguments.project_root.resolve(), backup_root, now, "safety",
+            operation_id=arguments.create_safety, apply_changes=arguments.apply,
+        )
+        if arguments.apply and created and created.is_file():
+            write_recovery_metadata(
+                arguments.project_root.resolve(), backup_root, created, "safety",
+                reason="pre_restore", retention_categories=["safety"], strict=True,
             )
 
 
