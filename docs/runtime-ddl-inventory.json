@@ -48,7 +48,7 @@
     },
     {
       "file": "app/schema_migrations.py",
-      "sha256": "c925639c379b213f051e7a466a766941c23f23e4b63b0b5f5b9d7f4f40ec33df",
+      "sha256": "051116edbb27462d6a3e0605aa295a95e15ef8a6005375b64fc49d80befb8ba9",
       "owner": "migration-platform"
     },
     {
@@ -94,6 +94,16 @@
     {
       "file": "app/remove_product_collections_migration.py",
       "sha256": "a7daa57f38b7f46a6502d557b9325553b595068d4ebe6cbf7eb3c5105ceaf3dc",
+      "owner": "catalog-migrations"
+    },
+    {
+      "file": "app/incoming_receipts_migration.py",
+      "sha256": "62924381cac53a2cbdc348f26b12b3a94f2c6853645256a2a10f7e228de3666e",
+      "owner": "catalog-migrations"
+    },
+    {
+      "file": "app/catalog_incoming_receipts_schema_manifest.json",
+      "sha256": "63b8a645238e1920b3775abc520a2f323fa692feddb326ab9c1c2a35d28512b6",
       "owner": "catalog-migrations"
     }
   ],
