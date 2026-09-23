@@ -96,6 +96,13 @@ async function headerVisualContract(page: Page, selector: string) {
   });
 }
 
+async function effectiveHeaderColor(page: Page, selector: string) {
+  return page.locator(selector).evaluate((header) => {
+    const label = header.querySelector<HTMLElement>('.erp-sort-label');
+    return getComputedStyle(label || header).color;
+  });
+}
+
 test('products and sales headers use the same computed visual contract', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto('/app/products', { waitUntil: 'load' });
@@ -111,6 +118,30 @@ test('products and sales headers use the same computed visual contract', async (
   );
 
   expect(products).toEqual(sales);
+});
+
+test('sortable and plain headers use one muted text color', async ({ page }) => {
+  const expectedColor = 'rgb(86, 101, 122)';
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto('/app/products', { waitUntil: 'load' });
+
+  for (const selector of [
+    '#warehouseProductsTable th[data-column-key="photo"]',
+    '#warehouseProductsTable th[data-column-key="name"]',
+    '#warehouseProductsTable th[data-column-key="model"]',
+    '#warehouseProductsTable th[data-column-key="price"]',
+    '#warehouseProductsTable th[data-system-column="actions"]',
+  ]) {
+    expect(await effectiveHeaderColor(page, selector)).toBe(expectedColor);
+  }
+
+  await page.goto('/app/sales', { waitUntil: 'load' });
+  for (const selector of [
+    '.sales-table th[data-column-key="product_name"]',
+    '.sales-table th[data-system-column="actions"]',
+  ]) {
+    expect(await effectiveHeaderColor(page, selector)).toBe(expectedColor);
+  }
 });
 
 test('resizing one product column keeps neighbours fixed and persists', async ({ page }) => {

@@ -372,7 +372,7 @@ html[data-theme] :where(
     .erp-secondary-action,
     .pagination a,
     .pagination button
-) {
+):not(.erp-sort-label) {
     border-color: var(--theme-border-strong) !important;
     border-radius: var(--theme-control-radius) !important;
     background-color: var(--theme-surface) !important;
@@ -388,7 +388,7 @@ html[data-theme] :where(
     .erp-secondary-action,
     .pagination a,
     .pagination button
-):hover:not(:disabled):not([aria-disabled="true"]) {
+):not(.erp-sort-label):hover:not(:disabled):not([aria-disabled="true"]) {
     border-color: var(--theme-border-strong) !important;
     background-color: var(--theme-hover) !important;
     color: var(--theme-text-strong) !important;

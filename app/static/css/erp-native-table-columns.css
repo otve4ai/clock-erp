@@ -14,7 +14,7 @@
     border-radius: 0 !important;
     background: #f3f6f9 !important;
     background-image: none !important;
-    color: var(--theme-text, #172033);
+    color: var(--theme-text-muted, #56657a);
     font-family: var(--erp-font-family);
     font-size: 12px;
     font-weight: 800;
@@ -35,7 +35,7 @@
     border: 0;
     border-radius: 6px;
     background: transparent !important;
-    color: var(--theme-text, #172033);
+    color: var(--theme-text-muted, #56657a);
     font: inherit;
     text-align: left;
     box-shadow: none !important;
