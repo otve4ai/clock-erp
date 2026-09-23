@@ -545,22 +545,16 @@
     font-weight: var(--erp-type-control-weight);
 }
 
-.warehouse-products-table.erp-data-table,
-.sales-table.erp-data-table,
 .receipts-table.erp-data-table {
     border-collapse: separate;
     border-spacing: 0;
     font-family: var(--erp-font-family);
 }
 
-.warehouse-products-table.erp-data-table thead,
-.sales-table.erp-data-table thead,
 .receipts-table.erp-data-table thead {
     background: #f3f6fa;
 }
 
-.warehouse-products-table.erp-data-table thead th,
-.sales-table.erp-data-table thead th,
 .receipts-table.erp-data-table thead th {
     height: 46px;
     padding: 0 11px;
@@ -576,14 +570,10 @@
     box-shadow: none !important;
 }
 
-.warehouse-products-table.erp-data-table thead th[data-system-column="actions"],
-.sales-table.erp-data-table thead th[data-system-column="actions"],
 .receipts-table.erp-data-table thead th[data-system-column="actions"] {
     background: #f3f6fa !important;
 }
 
-.warehouse-products-table .warehouse-sort-label,
-.sales-table .sales-sort-label,
 .receipts-table .receipt-sort-button {
     min-height: 0;
     padding: 0;
@@ -595,16 +585,12 @@
     box-shadow: none !important;
 }
 
-.warehouse-products-table .erp-sort-arrow,
-.sales-table .erp-sort-arrow,
 .receipts-table .receipt-sort-button > span {
     color: #aeb8c6;
     font-weight: 700;
     opacity: 0.45;
 }
 
-.warehouse-products-table .erp-sort-label.is-active,
-.sales-table .sales-sort-label.is-active,
 .receipts-table .receipt-sort-button.is-active,
 .receipts-table .receipt-sort-button:has(> span.is-active) {
     color: var(--erp-primary);
@@ -5506,33 +5492,6 @@ select.erp-control {
     background: #f8fafc;
 }
 
-.erp-sort-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    color: inherit;
-    font: inherit;
-    font-weight: inherit;
-    white-space: nowrap;
-    cursor: pointer;
-    user-select: none;
-}
-
-.erp-sort-label:hover,
-.erp-sort-label.is-active {
-    color: var(--erp-primary);
-}
-
-.erp-sort-arrow {
-    color: #9ca3af;
-    font-size: 11px;
-    font-weight: 900;
-}
-
-.erp-sort-label.is-active .erp-sort-arrow {
-    color: var(--erp-primary);
-}
-
 .erp-product-primary {
     color: var(--erp-text);
     font-size: 14px;
@@ -6423,35 +6382,6 @@ select.erp-control {
     line-height: 1.3;
 }
 
-.sales-table.erp-data-table .sales-sort-label {
-    height: 100%;
-    justify-content: flex-start;
-    gap: 6px;
-    margin: 0;
-    padding: 0;
-    border-radius: 6px;
-}
-
-.sales-table.erp-data-table .sales-sort-label:focus-visible {
-    outline: 2px solid #8eb1ff;
-    outline-offset: 2px;
-}
-
-.sales-table.erp-data-table .erp-sort-arrow {
-    flex: 0 0 auto;
-    color: #58708f;
-    font-size: 13px;
-    opacity: 0;
-    transform: translateY(-1px);
-    transition: opacity 0.14s ease;
-}
-
-.sales-table.erp-data-table .sales-sort-label:hover .erp-sort-arrow,
-.sales-table.erp-data-table .sales-sort-label:focus-visible .erp-sort-arrow,
-.sales-table.erp-data-table .sales-sort-label.is-active .erp-sort-arrow {
-    opacity: 1;
-}
-
 .sales-table.erp-data-table tbody td {
     background: #ffffff;
 }
@@ -6573,32 +6503,6 @@ select.erp-control {
 .sales-table.erp-data-table .money-cell {
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
-}
-
-.sales-table.erp-data-table .sales-column-resize-handle {
-    right: -5px;
-    width: 10px;
-    background: transparent;
-}
-
-.sales-table.erp-data-table .sales-column-resize-handle::after {
-    position: absolute;
-    top: 9px;
-    bottom: 9px;
-    left: 4px;
-    width: 2px;
-    border-radius: 999px;
-    background: #cbd5e1;
-    content: "";
-    opacity: 0;
-    transition: background 0.14s ease, opacity 0.14s ease;
-}
-
-.sales-table.erp-data-table th:hover .sales-column-resize-handle::after,
-.sales-table.erp-data-table .sales-column-resize-handle:hover::after,
-.sales-table.erp-data-table .sales-column-resize-handle.is-active::after {
-    background: #5f8fe9;
-    opacity: 1;
 }
 
 .source-badge {
@@ -7705,15 +7609,11 @@ select.erp-control {
     z-index: 1200;
 }
 
-.warehouse-products-table.erp-data-table,
-.sales-table.erp-data-table,
 .receipts-table.erp-data-table {
     border-collapse: separate;
     border-spacing: 0;
 }
 
-.warehouse-products-table.erp-data-table thead th,
-.sales-table.erp-data-table thead th,
 .receipts-table.erp-data-table thead th {
     height: 46px;
     padding-top: 0;
@@ -7729,30 +7629,20 @@ select.erp-control {
     box-shadow: none;
 }
 
-.warehouse-products-table.erp-data-table thead th:first-child,
-.sales-table.erp-data-table thead th:first-child,
 .receipts-table.erp-data-table thead th:first-child {
     border-top-left-radius: 0 !important;
 }
 
-.warehouse-products-table.erp-data-table thead th:last-child,
-.sales-table.erp-data-table thead th:last-child,
 .receipts-table.erp-data-table thead th:last-child {
     border-top-right-radius: 0 !important;
 }
 
-.warehouse-products-table .erp-sort-arrow,
-.sales-table .erp-sort-arrow,
 .receipts-table .receipt-sort-button > span {
     color: #64748b;
     opacity: 0.18;
     transition: color 0.14s ease, opacity 0.14s ease;
 }
 
-.warehouse-products-table .erp-sort-label:hover .erp-sort-arrow,
-.warehouse-products-table .erp-sort-label.is-active .erp-sort-arrow,
-.sales-table .sales-sort-label:hover .erp-sort-arrow,
-.sales-table .sales-sort-label.is-active .erp-sort-arrow,
 .receipts-table .receipt-sort-button:hover > span,
 .receipts-table .receipt-sort-button > span.is-active {
     color: var(--erp-primary);
@@ -7990,14 +7880,10 @@ select.erp-control {
 }
 
 /* Final table contract stays authoritative over legacy page selectors. */
-.warehouse-products-table.erp-data-table thead,
-.sales-table.erp-data-table thead,
 .receipts-table.erp-data-table thead {
     background: #f3f6fa;
 }
 
-.warehouse-products-table.erp-data-table thead th,
-.sales-table.erp-data-table thead th,
 .receipts-table.erp-data-table thead th {
     height: 46px;
     border-radius: 0 !important;
@@ -8007,8 +7893,6 @@ select.erp-control {
     font-weight: var(--erp-type-table-head-weight);
 }
 
-.warehouse-products-table .warehouse-sort-label,
-.sales-table .sales-sort-label,
 .receipts-table .receipt-sort-button {
     border: 0;
     border-radius: 0;

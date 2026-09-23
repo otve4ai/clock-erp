@@ -33,15 +33,28 @@ class UnifiedErpVisualSystemTest(unittest.TestCase):
 
     def test_three_tables_share_one_authoritative_header_contract(self):
         css = self.source("app/static/css/erp-components.css")
+        native_columns_css = self.source(
+            "app/static/css/erp-native-table-columns.css"
+        )
         contract = css.split(
             "Final table contract stays authoritative", 1
         )[1]
-        for selector in (
-            ".warehouse-products-table.erp-data-table thead th",
-            ".sales-table.erp-data-table thead th",
+        self.assertIn(
+            ".erp-native-columns-table.erp-data-table thead th",
+            native_columns_css,
+        )
+        self.assertIn(
             ".receipts-table.erp-data-table thead th",
-        ):
-            self.assertIn(selector, contract)
+            contract,
+        )
+        self.assertNotIn(
+            ".warehouse-products-table.erp-data-table thead th",
+            contract,
+        )
+        self.assertNotIn(
+            ".sales-table.erp-data-table thead th",
+            contract,
+        )
         self.assertIn("background: #f3f6fa", contract)
         self.assertIn("background: transparent !important", contract)
         self.assertIn("height: 46px", contract)

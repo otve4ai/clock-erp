@@ -76,11 +76,19 @@ class ErpTableUxPolishTest(unittest.TestCase):
 
     def test_table_headers_and_actions_use_shared_quiet_styles(self):
         css = self.source("app/static/css/erp-components.css")
+        native_columns_css = self.source(
+            "app/static/css/erp-native-table-columns.css"
+        )
         self.assertIn(
+            ".erp-native-columns-table.erp-data-table thead th",
+            native_columns_css,
+        )
+        self.assertIn("var(--theme-text-muted, #56657a)", native_columns_css)
+        self.assertNotIn(
             ".warehouse-products-table.erp-data-table thead th",
             css,
         )
-        self.assertIn(".sales-table.erp-data-table thead th", css)
+        self.assertNotIn(".sales-table.erp-data-table thead th", css)
         self.assertIn(".receipts-table.erp-data-table thead th", css)
         self.assertIn("border-radius: 0 !important", css)
         self.assertIn(".erp-scroll-hint.has-horizontal-overflow", css)
