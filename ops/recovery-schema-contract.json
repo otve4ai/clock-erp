@@ -7,8 +7,10 @@
       "catalog_stock_movements",
       "erp_warehouses",
       "erp_product_warehouse_stock",
+      "erp_document_sequences",
       "erp_sales",
-      "erp_receipts"
+      "erp_receipts",
+      "erp_warehouse_stocks"
     ],
     "customers.db": ["customers", "registry_meta"],
     "mail.db": ["mail_messages", "mail_threads"],

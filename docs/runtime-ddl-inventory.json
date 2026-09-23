@@ -48,7 +48,7 @@
     },
     {
       "file": "app/schema_migrations.py",
-      "sha256": "2936d26af0e8e06b7be435c2822ca68dfb39ec49a55d62e99a2846b79c44ba49",
+      "sha256": "0fb5a0c8eccd93077a54fa204836ea675f5b07f30b925a0b1f9c43726c5bbd9e",
       "owner": "migration-platform"
     },
     {
@@ -98,12 +98,22 @@
     },
     {
       "file": "app/multiwarehouse_migration.py",
-      "sha256": "871829ee1c9cb8fc1b1f962a2bb67080ddfc0926f5d42202e571dd5ff5c7f635",
+      "sha256": "203cd9f5974c69c6e3c5369e2e430e5a328db41965ac5a0195cc99cd14606f94",
       "owner": "catalog-migrations"
     },
     {
       "file": "app/catalog_warehouse_schema_manifest.json",
-      "sha256": "bc3c82e7f7688181f93d141f7020ad2a15dd98dc4ef3c0321a939c54e4ab48f8",
+      "sha256": "191655a917fb00a793e8f4b24cf37f4ec5b954d7994a5a59e77afbe99612a6a9",
+      "owner": "catalog-migrations"
+    },
+    {
+      "file": "app/incoming_receipts_migration.py",
+      "sha256": "46c0d48b3ef6930fb609f8118e26947b4c75754565f4425f0c49e88787108a1a",
+      "owner": "catalog-migrations"
+    },
+    {
+      "file": "app/catalog_incoming_receipts_schema_manifest.json",
+      "sha256": "d80231c1d0cad806ba86773321a605b34384a2c469d5c4e61d2d1de8690f4a5b",
       "owner": "catalog-migrations"
     }
   ],

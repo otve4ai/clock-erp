@@ -940,6 +940,8 @@ class ReceiptInventory:
             (str(receipt_id),),
         ).fetchall()
         result = dict(receipt)
+        if result.get("warehouse_id") not in (None, ""):
+            result["warehouse_id"] = int(result["warehouse_id"])
         try:
             result["metadata"] = json.loads(result["metadata_json"] or "{}")
         except (TypeError, ValueError):

@@ -205,9 +205,9 @@ class MultiwarehouseTest(unittest.TestCase):
                 ("legacy-receipt", now[:10], now, now),
             )
             apply_multiwarehouse_migration(connection)
-            self.assertEqual(connection.execute(
+            self.assertEqual(int(connection.execute(
                 "SELECT warehouse_id FROM erp_receipts WHERE id='legacy-receipt'"
-            ).fetchone()[0], self.udelnaya)
+            ).fetchone()[0]), self.udelnaya)
 
     def test_migration_copies_legacy_canonical_stock_and_verifies_totals(self):
         product_id = self.products["ORDINARY"]
@@ -288,7 +288,7 @@ class MultiwarehouseTest(unittest.TestCase):
                 (sale["id"],),
             ).fetchone()[0], self.hong_kong)
             warehouses = {
-                row[0] for row in connection.execute(
+                int(row[0]) for row in connection.execute(
                     "SELECT warehouse_id FROM catalog_stock_movements "
                     "WHERE source_id IN (?,?,?) OR sale_id=? OR receipt_id=?",
                     (sale["id"], receipt["id"], writeoff["id"], sale["id"], receipt["id"]),

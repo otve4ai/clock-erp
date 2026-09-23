@@ -30,6 +30,7 @@ from app.multiwarehouse_migration import (
     apply_multiwarehouse_migration,
     verify_multiwarehouse_migration,
 )
+from app.incoming_receipts_migration import INCOMING_RECEIPTS_DEFINITION, apply_incoming_receipts_migration
 
 from app.catalog_migration_steps import (
     ORDER_STRAP_SCHEMA_SQL,
@@ -251,6 +252,7 @@ BUNDLE_MIGRATION_ID = "2026-09-07-local-product-bundles-v1"
 COMPONENT_MIGRATION_ID = "2026-09-07-component-physical-inventory-v1"
 
 WRITEOFF_MIGRATION_ID = "2026-09-08-stock-writeoffs-v1"
+INCOMING_RECEIPTS_MIGRATION_ID = "2026-09-23-incoming-receipts-v1"
 
 MULTIWAREHOUSE_MIGRATION_ID = "2026-09-23-multiwarehouse-stock-v1"
 
@@ -341,6 +343,11 @@ MIGRATIONS = (
     {"id": "2026-09-09-remove-product-collections-v1", "name": "Remove retired product collections",
      "checksum": hashlib.sha256("\n".join(REMOVE_COLLECTIONS_SQL).encode("utf-8")).hexdigest(),
      "transactional": True, "recovery": "restore verified catalog database backup while service is stopped"},
+    {"id": INCOMING_RECEIPTS_MIGRATION_ID,
+     "name": "Explicit incoming document types and warehouse balances",
+     "checksum": hashlib.sha256("\n".join(INCOMING_RECEIPTS_DEFINITION).encode("utf-8")).hexdigest(),
+     "transactional": True,
+     "recovery": "restore verified catalog database backup while service is stopped"},
     {"id": MULTIWAREHOUSE_MIGRATION_ID, "name": "Canonical multiwarehouse stock",
      "checksum": hashlib.sha256(("\n".join(WAREHOUSE_SQL) + MULTIWAREHOUSE_MIGRATION_ID).encode("utf-8")).hexdigest(),
      "transactional": True, "recovery": "restore verified catalog database backup while service is stopped"},
@@ -737,7 +744,9 @@ def _json_structure(connection):
     ))
 
 
-def verify_complete_catalog_contract(connection, include_bundles=True):
+def verify_complete_catalog_contract(connection, include_bundles=True, include_incoming=None):
+    if include_incoming is None:
+        include_incoming = include_bundles
     expected = expected_catalog_manifest()
     if include_bundles:
         extra = json.loads(Path(__file__).resolve().with_name(
@@ -768,6 +777,14 @@ def verify_complete_catalog_contract(connection, include_bundles=True):
             expected["tables"].pop(table, None)
         expected["indexes"] = [row for row in expected["indexes"]
                                if row[0] not in ("product_collections", "erp_collections")]
+    if include_incoming:
+        extra = json.loads(Path(__file__).resolve().with_name(
+            "catalog_incoming_receipts_schema_manifest.json"
+        ).read_text(encoding="utf-8"))
+        expected["tables"].update(extra["tables"])
+        replaced = set(extra["tables"])
+        expected["indexes"] = [row for row in expected["indexes"] if row[0] not in replaced]
+        expected["indexes"] = sorted(expected["indexes"] + extra["indexes"])
     actual = _json_structure(connection)
     if actual == expected:
         return True
@@ -1335,12 +1352,12 @@ def apply_migrations(database_path, app_commit="", ddl_observer=None):
                         raise
                     finally:
                         connection.close()
-                elif migration["id"] in (BUNDLE_MIGRATION_ID, COMPONENT_MIGRATION_ID, WRITEOFF_MIGRATION_ID, "2026-09-09-remove-product-collections-v1"):
+                elif migration["id"] in (BUNDLE_MIGRATION_ID, COMPONENT_MIGRATION_ID, WRITEOFF_MIGRATION_ID, "2026-09-09-remove-product-collections-v1", INCOMING_RECEIPTS_MIGRATION_ID):
                     connection = sqlite3.connect(str(path))
                     try:
                         connection.execute("PRAGMA foreign_keys = ON")
                         connection.execute("BEGIN IMMEDIATE")
-                        ({"2026-09-09-remove-product-collections-v1": apply_remove_collections_migration, BUNDLE_MIGRATION_ID: apply_bundle_migration, COMPONENT_MIGRATION_ID: apply_component_inventory_migration, WRITEOFF_MIGRATION_ID: apply_writeoff_migration}[migration["id"]])(connection, ddl_observer)
+                        ({"2026-09-09-remove-product-collections-v1": apply_remove_collections_migration, BUNDLE_MIGRATION_ID: apply_bundle_migration, COMPONENT_MIGRATION_ID: apply_component_inventory_migration, WRITEOFF_MIGRATION_ID: apply_writeoff_migration, INCOMING_RECEIPTS_MIGRATION_ID: apply_incoming_receipts_migration}[migration["id"]])(connection, ddl_observer)
                         connection.commit()
                     except Exception:
                         connection.rollback()
@@ -1613,6 +1630,9 @@ def validate_known_sql_compatibility(source_root):
     multiwarehouse_migration = source_root / "app" / "multiwarehouse_migration.py"
     if multiwarehouse_migration.exists():
         paths.append(multiwarehouse_migration)
+    incoming_receipts_migration = source_root / "app" / "incoming_receipts_migration.py"
+    if incoming_receipts_migration.exists():
+        paths.append(incoming_receipts_migration)
     domain_migrations = source_root / "app" / "domain_schema_migrations.py"
     if domain_migrations.exists():
         paths.append(domain_migrations)

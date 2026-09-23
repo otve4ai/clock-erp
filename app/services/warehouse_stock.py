@@ -182,7 +182,10 @@ class WarehouseStockService:
                     "" if include_archived else "WHERE is_active=1"
                 )
             ).fetchall()
-            return [dict(row) for row in rows]
+            result = [dict(row) for row in rows]
+            for warehouse in result:
+                warehouse["id"] = int(warehouse["id"])
+            return result
 
     def selected_warehouse_ids(self, user_id):
         """Return an always non-empty, active per-user warehouse selection."""
@@ -244,7 +247,8 @@ class WarehouseStockService:
                 "LEFT JOIN erp_product_bundles b ON b.product_id=p.id "
                 "WHERE w.is_active=1 GROUP BY w.id ORDER BY w.id"
             ).fetchall()
-        return [{**dict(row), "selected": int(row["id"]) in selected} for row in rows]
+        return [{**dict(row), "id": int(row["id"]),
+                 "selected": int(row["id"]) in selected} for row in rows]
 
     def rename_warehouse(self, warehouse_id, name, actor=None):
         name = " ".join(str(name or "").split())
@@ -268,6 +272,7 @@ class WarehouseStockService:
             result = dict(connection.execute(
                 "SELECT * FROM erp_warehouses WHERE id=?", (warehouse_id,)
             ).fetchone())
+            result["id"] = int(result["id"])
             actor = actor or {}
             AuditJournal(self.database).record(
                 "settings", "warehouse:{}".format(warehouse_id), "updated",
@@ -326,19 +331,40 @@ class WarehouseStockService:
         self.database.initialize()
         with self.database.transaction() as connection:
             try:
-                connection.execute(
-                    "INSERT INTO erp_warehouses(code,name,normalized_name,is_active,created_at,updated_at) "
-                    "VALUES (?,?,?,1,?,?)",
-                    (code, name, normalized, timestamp, timestamp),
-                )
+                columns = {row[1]: str(row[2] or "").upper() for row in connection.execute(
+                    "PRAGMA table_info(erp_warehouses)"
+                ).fetchall()}
+                if columns.get("id") == "TEXT":
+                    numeric_ids = []
+                    for row in connection.execute("SELECT id FROM erp_warehouses"):
+                        try:
+                            numeric_ids.append(int(row[0]))
+                        except (TypeError, ValueError):
+                            continue
+                    warehouse_id = max(numeric_ids or [0]) + 1
+                    connection.execute(
+                        "INSERT INTO erp_warehouses"
+                        "(id,code,name,active,is_default,normalized_name,is_active,created_at,updated_at) "
+                        "VALUES (?,?,?,1,0,?,1,?,?)",
+                        (warehouse_id, code, name, normalized, timestamp, timestamp),
+                    )
+                else:
+                    connection.execute(
+                        "INSERT INTO erp_warehouses(code,name,normalized_name,is_active,created_at,updated_at) "
+                        "VALUES (?,?,?,1,?,?)",
+                        (code, name, normalized, timestamp, timestamp),
+                    )
+                    warehouse_id = connection.execute(
+                        "SELECT last_insert_rowid()"
+                    ).fetchone()[0]
             except Exception as error:
                 if "UNIQUE" in str(error).upper():
                     raise WarehouseStockError("Склад с таким названием или кодом уже существует.")
                 raise
-            warehouse_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
             result = dict(connection.execute(
                 "SELECT * FROM erp_warehouses WHERE id=?", (warehouse_id,)
             ).fetchone())
+            result["id"] = int(result["id"])
             actor = actor or {}
             AuditJournal(self.database).record(
                 "settings", "warehouse:{}".format(warehouse_id), "created",

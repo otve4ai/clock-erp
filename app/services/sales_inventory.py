@@ -1983,14 +1983,20 @@ class SalesInventory:
         connection.execute(
             "INSERT INTO erp_receipts ("
             "id, tenant_id, number, comment, status, receipt_date, user_name, "
-            "idempotency_key, metadata_json, created_at, updated_at) "
-            "VALUES (?, 'default', ?, ?, 'posted', ?, ?, ?, ?, ?, ?)",
+            "idempotency_key, metadata_json, created_at, updated_at,operation_type,"
+            "warehouse_id,posted_at,posted_by) "
+            "VALUES (?, 'default', ?, ?, 'posted', ?, ?, ?, ?, ?, ?,"
+            "'sale_cancellation','default',?,?)",
             (
                 receipt_id, document_number, comment, cancelled_at[:10],
                 user_name, receipt_id,
                 json.dumps(metadata, ensure_ascii=False, sort_keys=True),
-                cancelled_at, cancelled_at,
+                cancelled_at, cancelled_at, cancelled_at, user_name,
             ),
+        )
+        connection.execute(
+            "UPDATE catalog_stock_movements SET warehouse_id=COALESCE(warehouse_id,'default') "
+            "WHERE sale_id=? AND movement_type='cancellation'", (sale_id,)
         )
         for position in receipt_positions:
             connection.execute(
