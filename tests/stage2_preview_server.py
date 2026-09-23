@@ -157,7 +157,6 @@ with CatalogDatabase(PREVIEW_ROOT / "catalog.db").transaction() as connection:
     first_id = product_ids[0]
     connection.execute(
         "UPDATE catalog_excel_products SET bitrix_external_product_id = ?, "
-        "bitrix_active = 1, "
         "bitrix_primary_image_url = ?, bitrix_thumbnail_url = ?, "
         "local_image_path = ?, local_image_source = 'bitrix', "
         "local_image_sha256 = ?, "
@@ -172,25 +171,30 @@ with CatalogDatabase(PREVIEW_ROOT / "catalog.db").transaction() as connection:
         ),
     )
     connection.execute(
-        "UPDATE catalog_excel_products SET bitrix_external_product_id = ?, "
-        "bitrix_active = 1 WHERE excel_article = ?",
-        ("204699", "GA-2100-1A1"),
+        "UPDATE catalog_excel_products SET bitrix_thumbnail_url = ? "
+        "WHERE id = ?",
+        ("/product-images/{}".format(fixture_local_name), product_ids[1]),
     )
-    connection.execute(
-        "UPDATE catalog_excel_products SET bitrix_external_product_id = ?, "
-        "bitrix_active = 0, bitrix_thumbnail_url = ? WHERE excel_article = ?",
-        (
-            "204700", "/product-images/{}".format(fixture_local_name),
-            "T137.407",
-        ),
-    )
-    connection.execute(
-        "UPDATE catalog_excel_products SET bitrix_external_product_id = ?, "
-        "bitrix_active = NULL WHERE excel_article = ?",
-        ("204701", "STRAP-CB"),
-    )
+    for article, external_id, active in (
+        ("PAGE-121", "204701", 1),
+        ("PAGE-120", "204702", 0),
+        ("PAGE-119", "204703", None),
+    ):
+        connection.execute(
+            "UPDATE catalog_excel_products SET bitrix_external_product_id = ?, "
+            "bitrix_active = ? WHERE excel_article = ?",
+            (external_id, active, article),
+        )
 
-projected_products = web.get_excel_warehouse_items()
+preview_site_statuses = {
+    "PAGE-121": ("active", "Активен"),
+    "PAGE-120": ("inactive", "Неактивен"),
+    "PAGE-119": ("unknown", "Статус неизвестен"),
+}
+for item in projected_products:
+    status = preview_site_statuses.get(item.get("article"))
+    if status:
+        item["site_status_key"], item["site_status_label"] = status
 
 
 def fixture_live_bitrix_product(product, force=False):
