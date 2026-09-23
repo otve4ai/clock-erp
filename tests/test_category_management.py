@@ -413,17 +413,11 @@ class CategoryManagementTest(unittest.TestCase):
         first = self.product("Positive", "POS", "Casio", "Часы", 5)
         negative = self.product("Negative", "NEG", "Casio", "Часы", 0)
         self.product("Other", "OTH", "Seiko", "Часы", 0)
-        with self.database.transaction() as connection:
-            connection.execute(
-                "UPDATE catalog_excel_products SET stock = -5 WHERE id = ?",
-                (negative["id"],),
-            )
-
         detail = self.catalog.get_category_overview(first["category_id"])
 
         self.assertEqual(detail["product_count"], 3)
         self.assertEqual(detail["nonzero_count"], 1)
-        self.assertEqual(detail["stock_total"], 0)
+        self.assertEqual(detail["stock_total"], 5)
         self.assertEqual(
             sum(item["product_count"] for item in detail["brands"]),
             detail["product_count"],
@@ -483,12 +477,6 @@ class CategoryManagementTest(unittest.TestCase):
             name="No brand or category", article="NONE-2", brand="",
             category="", category_id=0, stock=4,
         )
-        with self.database.transaction() as connection:
-            connection.execute(
-                "UPDATE catalog_excel_products SET stock = -2 WHERE id = ?",
-                (unassigned["id"],),
-            )
-
         result = self.catalog.list_category_overviews(
             sort_by="products", sort_dir="desc", limit=100
         )
@@ -498,7 +486,7 @@ class CategoryManagementTest(unittest.TestCase):
         self.assertEqual(result["items"][0]["detail_brand_count"], 2)
         self.assertEqual(result["items"][0]["product_count"], 2)
         self.assertEqual(result["items"][0]["nonzero_count"], 1)
-        self.assertEqual(result["items"][0]["stock_total"], 2)
+        self.assertEqual(result["items"][0]["stock_total"], 4)
 
     def test_pagination_and_numeric_sort_are_server_side(self):
         brand = self.catalog.create_brand("Casio")

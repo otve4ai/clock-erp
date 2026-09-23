@@ -15,8 +15,8 @@
     try { await json("/api/v1/warehouse-preferences", {method: "PUT", body: JSON.stringify({warehouse_ids: selected})}); location.reload(); }
     catch (error) { event.target.checked = !event.target.checked; errorBox.textContent = error.message; }
   });
-  document.getElementById("warehouseAddSubmit")?.addEventListener("click", async event => {
-    const form = event.target.closest("#warehouseAddForm");
+  document.getElementById("warehouseManagementAddSubmit")?.addEventListener("click", async event => {
+    const form = event.target.closest("#warehouseManagementAddForm");
     const name = form.querySelector("[name=name]").value.trim();
     if (!name) { errorBox.textContent = "Введите название склада."; return; }
     try { await json("/api/v1/warehouses", {method: "POST", body: JSON.stringify({name})}); location.reload(); }

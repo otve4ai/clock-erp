@@ -16,6 +16,8 @@ from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
 from app.catalog_db import CatalogDatabase
+from app.services.excel_product_catalog import warehouse_stock_cte
+from app.services.warehouse_stock import default_warehouse_id
 
 
 ERP_TIMEZONE_LABEL = "Europe/Moscow (UTC+03:00)"
@@ -164,9 +166,24 @@ def parse_filters(arguments, today=None):
 class BusinessAnalytics(object):
     """Single query layer shared by HTML, drill-down fragments and CSV."""
 
-    def __init__(self, database=None, purchase_store=None):
+    def __init__(self, database=None, purchase_store=None, warehouse_ids=None):
         self.database = database or CatalogDatabase(cache_initialization=True)
         self.purchase_store = purchase_store
+        self.warehouse_ids = warehouse_ids
+
+    def _stock_map(self, connection):
+        """Current stock for the user's selected warehouses, bundles included."""
+        warehouse_ids = self.warehouse_ids
+        if warehouse_ids is None:
+            warehouse_ids = [default_warehouse_id(connection)]
+        sql, parameters = warehouse_stock_cte(warehouse_ids)
+        return {
+            int(row["product_id"]): float(row["quantity"] or 0)
+            for row in connection.execute(
+                sql + "SELECT product_id,quantity FROM warehouse_stock_view",
+                parameters,
+            ).fetchall()
+        }
 
     @staticmethod
     def _sale_where(filters, alias="s"):
@@ -361,6 +378,7 @@ class BusinessAnalytics(object):
             return result
 
     def _product_rows(self, connection, filters, revenue_complete):
+        stock_by_product = self._stock_map(connection)
         where, values = self._sale_where(filters)
         if filters["q"]:
             where += " AND (p.excel_name_raw LIKE ? OR coalesce(p.excel_article,'') LIKE ? OR coalesce(b.name,p.excel_brand,'') LIKE ?)"
@@ -369,7 +387,7 @@ class BusinessAnalytics(object):
         rows = [dict(row) for row in connection.execute(
             "SELECT p.id, p.excel_name_raw name, coalesce(p.excel_article,'') article, coalesce(p.bitrix_thumbnail_url,p.bitrix_primary_image_url,'') image_url, coalesce(b.name,p.excel_brand,'Без бренда') brand, "
             "coalesce(c.name,p.excel_category,'Без категории') category, coalesce(m.name,p.model,'—') model, "
-            "p.stock, count(DISTINCT CASE WHEN i.quantity-i.returned_quantity>0 THEN s.id END) sales, coalesce(sum(max(i.quantity-i.returned_quantity,0)),0) units, "
+            "0 AS stock, count(DISTINCT CASE WHEN i.quantity-i.returned_quantity>0 THEN s.id END) sales, coalesce(sum(max(i.quantity-i.returned_quantity,0)),0) units, "
             "coalesce(sum(max(i.quantity-i.returned_quantity,0)*coalesce(i.unit_price,0)),0) revenue, "
             "sum(CASE WHEN i.quantity-i.returned_quantity>0 AND i.unit_price IS NULL THEN 1 ELSE 0 END) unknown_prices, max(s.created_at) last_sale "
             + self._joins() + " WHERE " + where + " GROUP BY p.id",
@@ -384,6 +402,7 @@ class BusinessAnalytics(object):
         total_sales = sum(int(row["sales"] or 0) for row in rows)
         total_units = sum(float(row["units"] or 0) for row in rows)
         for row in rows:
+            row["stock"] = stock_by_product.get(int(row["id"]), 0.0)
             before = previous_rows.get(int(row["id"]), {"sales": 0, "units": 0, "revenue": 0})
             row["revenue"] = float(row["revenue"] or 0) if revenue_complete else None
             row["sales_share"] = row["sales"] / float(total_sales) * 100 if total_sales else 0
@@ -461,6 +480,7 @@ class BusinessAnalytics(object):
         return item
 
     def _stock_rows(self, connection, filters):
+        stock_by_product = self._stock_map(connection)
         anchor = _date(filters["to"], date.today())
         cut30 = (anchor - timedelta(days=29)).isoformat()
         cut60 = (anchor - timedelta(days=59)).isoformat()
@@ -491,10 +511,6 @@ class BusinessAnalytics(object):
             catalog_clauses.append("(p.excel_name_raw LIKE ? OR coalesce(b.name,p.excel_brand,'') LIKE ? OR coalesce(p.excel_article,'') LIKE ?)")
             pattern = "%{}%".format(filters["q"])
             catalog_values.extend([pattern, pattern, pattern])
-        if filters["stock_state"] == "out":
-            catalog_clauses.append("p.stock<=0")
-        elif filters["stock_state"] == "positive":
-            catalog_clauses.append("p.stock>0")
         demand_query = (
             "SELECT i.product_id,"
             "coalesce(sum(CASE WHEN date(s.created_at) BETWEEN ? AND ? THEN max(i.quantity-i.returned_quantity,0) ELSE 0 END),0) units_30,"
@@ -508,7 +524,7 @@ class BusinessAnalytics(object):
             demand_query, demand_values,
         ).fetchall()}
         catalog_query = (
-            "SELECT p.id,p.excel_name_raw name,coalesce(b.name,p.excel_brand,'Без бренда') brand,p.stock "
+            "SELECT p.id,p.excel_name_raw name,coalesce(b.name,p.excel_brand,'Без бренда') brand,0 AS stock "
             "FROM catalog_excel_products p LEFT JOIN erp_brands b ON b.id=p.brand_id "
             "LEFT JOIN erp_categories c ON c.id=p.category_id LEFT JOIN erp_models m ON m.id=p.model_id "
             "WHERE " + " AND ".join(catalog_clauses)
@@ -517,6 +533,7 @@ class BusinessAnalytics(object):
         rows = []
         for row in connection.execute(catalog_query, catalog_values).fetchall():
             item = dict(row)
+            item["stock"] = stock_by_product.get(int(item["id"]), 0.0)
             item.update(demand.get(int(item["id"]), {}))
             item.setdefault("units_30", 0)
             item.setdefault("units_60", 0)
@@ -528,6 +545,10 @@ class BusinessAnalytics(object):
             item.setdefault("requested_quantity", 0)
             item["days_since_sale"] = ((anchor - _date(item["last_sale"], anchor)).days if item["last_sale"] else None)
             rows.append(self._stock_classify(item, filters["horizon"]))
+        if filters["stock_state"] == "out":
+            rows = [row for row in rows if float(row["stock"] or 0) <= 0]
+        elif filters["stock_state"] == "positive":
+            rows = [row for row in rows if float(row["stock"] or 0) > 0]
         if filters["recommendation"] != "all":
             rows = [row for row in rows if row["recommendation_code"] == filters["recommendation"]]
         if filters["confidence"] != "all":

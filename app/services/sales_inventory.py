@@ -217,7 +217,7 @@ class SalesInventory:
     @staticmethod
     def _product_snapshot(connection, product_id):
         row = connection.execute(
-            "SELECT p.id, p.stock, p.brand_id, p.category_id, "
+            "SELECT p.id, 0 AS stock, p.brand_id, p.category_id, "
             "p.excel_name_raw AS name, p.model, p.excel_article AS article, "
             "COALESCE(b.name, p.excel_brand, '') AS brand, "
             "COALESCE(c.name, p.excel_category, '') AS category "
@@ -240,7 +240,10 @@ class SalesInventory:
         article = text(article)
         rows = connection.execute(
             "SELECT p.id, p.excel_name_raw AS name, p.model, "
-            "p.excel_article AS article, p.stock, "
+            "p.excel_article AS article, "
+            "COALESCE((SELECT ws.quantity FROM erp_product_warehouse_stock ws "
+            "JOIN erp_warehouses w ON w.id=ws.warehouse_id WHERE ws.product_id=p.id "
+            "AND w.code='udelnaya'),0) AS stock, "
             "COALESCE(b.name,p.excel_brand,'') AS brand, "
             "COALESCE(c.name,p.excel_category,'') AS category "
             "FROM catalog_excel_products p "
@@ -254,7 +257,7 @@ class SalesInventory:
             "(?<>'' AND lower(replace(trim(COALESCE(p.model,'')),' ',''))="
             "lower(replace(trim(?),' ','')) AND "
             "COALESCE(b.normalized_name,'')=?)"
-            ") ORDER BY p.stock DESC,p.id LIMIT 10",
+            ") ORDER BY stock DESC,p.id LIMIT 10",
             (
                 article, article, name_key, brand_key,
                 model_key, model_key, brand_key,
@@ -529,7 +532,7 @@ class SalesInventory:
 
             def move(product_id, delta, sale_item_id, kind, movement_type):
                 row = connection.execute(
-                    "SELECT stock FROM catalog_excel_products WHERE id=? AND active=1",
+                    "SELECT 1 FROM catalog_excel_products WHERE id=? AND active=1",
                     (product_id,),
                 ).fetchone()
                 remember(connection, product_id, ("sale", sale_id))
@@ -542,11 +545,10 @@ class SalesInventory:
                     raise InsufficientStockError(before)
                 cursor = write_balance(connection, product_id, after, "order_strap_replacement", inserted_at, ("sale", sale_id), warehouse_id)
                 if cursor.rowcount != 1:
-                    latest = connection.execute(
-                        "SELECT stock FROM catalog_excel_products WHERE id=?",
-                        (product_id,),
-                    ).fetchone()
-                    raise InsufficientStockError(latest["stock"] if latest else before)
+                    raise InsufficientStockError(
+                        balance(connection, product_id, ("sale", sale_id),
+                                warehouse_id=warehouse_id)
+                    )
                 connection.execute(
                     "INSERT INTO catalog_stock_movements (id,product_id,movement_type,"
                     "quantity_delta,stock_before,stock_after,sale_id,sale_item_id,"
@@ -705,7 +707,7 @@ class SalesInventory:
         assert_products_unlocked(connection, [line[0] for line in lines], SalesInventoryError)
         for index, (physical_id, required) in enumerate(lines):
             product = connection.execute(
-                "SELECT stock,excel_name_raw,excel_article FROM catalog_excel_products "
+                "SELECT 0 AS stock,excel_name_raw,excel_article FROM catalog_excel_products "
                 "WHERE id=? AND active=1", (physical_id,),
             ).fetchone()
             if product is None:
@@ -826,7 +828,7 @@ class SalesInventory:
                     existing["id"],
                 )
             product = connection.execute(
-                "SELECT id, stock, brand_id, category_id "
+                "SELECT id, 0 AS stock, brand_id, category_id "
                 "FROM catalog_excel_products "
                 "WHERE id = ? AND active = 1",
                 (product_id,),
@@ -1014,7 +1016,7 @@ class SalesInventory:
 
             placeholders = ",".join("?" for _ in required_by_product)
             product_rows = connection.execute(
-                "SELECT p.id, p.stock, p.brand_id, p.category_id, "
+                "SELECT p.id, 0 AS stock, p.brand_id, p.category_id, "
                 "p.excel_name_raw AS name FROM catalog_excel_products p "
                 "WHERE p.active = 1 AND p.id IN ({})".format(placeholders),
                 list(required_by_product),
@@ -1271,7 +1273,7 @@ class SalesInventory:
                 "returned" if fully_reversed else "partially_returned"
             )
             product = connection.execute(
-                "SELECT stock, active, category_id "
+                "SELECT 0 AS stock, active, category_id "
                 "FROM catalog_excel_products WHERE id = ?",
                 (item["product_id"],),
             ).fetchone()
@@ -1403,7 +1405,7 @@ class SalesInventory:
             if net is None or -float(net) < required:
                 raise ReturnConflictError("Не удалось доказать исходное списание компонентов.")
             product = connection.execute(
-                "SELECT stock FROM catalog_excel_products WHERE id=?", (physical_id,),
+                "SELECT 0 AS stock FROM catalog_excel_products WHERE id=?", (physical_id,),
             ).fetchone()
             if product is None:
                 raise ReturnConflictError("Исторический компонент не найден.")
@@ -1739,7 +1741,7 @@ class SalesInventory:
                 quantity_delta = reversal["quantity"]
                 warehouse_id = int(items[0]["warehouse_id"])
                 product = connection.execute(
-                    "SELECT stock FROM catalog_excel_products WHERE id = ?",
+                    "SELECT 0 AS stock FROM catalog_excel_products WHERE id = ?",
                     (product_id,),
                 ).fetchone()
                 if product is None:

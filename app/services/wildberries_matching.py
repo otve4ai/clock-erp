@@ -156,7 +156,10 @@ def order_product_candidates(connection, product, saved_id=None):
     found, match_method = {}, ""
     for clause, params, method in attempts:
         rows = connection.execute(
-            "SELECT DISTINCT p.id,p.excel_name_raw name,p.excel_article article,p.stock,p.active "
+            "SELECT DISTINCT p.id,p.excel_name_raw name,p.excel_article article,"
+            "COALESCE((SELECT ws.quantity FROM erp_product_warehouse_stock ws "
+            "JOIN erp_warehouses w ON w.id=ws.warehouse_id "
+            "WHERE ws.product_id=p.id AND w.code='udelnaya'),0) stock,p.active "
             "FROM catalog_excel_products p LEFT JOIN catalog_products cp ON cp.id=p.bitrix_catalog_product_id "
             "WHERE p.deleted_at IS NULL AND (" + clause + ") ORDER BY p.id LIMIT 2", params).fetchall()
         if rows and not match_method:

@@ -72,20 +72,21 @@ class ProductExcelExportTest(unittest.TestCase):
         ).active
         self.assertEqual(filtered.max_row, 2)
         self.assertEqual(filtered.freeze_panes, "A2")
-        self.assertEqual(filtered.auto_filter.ref, "A1:Q2")
+        self.assertEqual(filtered.auto_filter.ref, "A1:R2")
         values = [cell.value for cell in filtered[2]]
         self.assertEqual(values[0], self.ziiiro["id"])
         self.assertEqual(values[5], "Celeste")
         self.assertIsInstance(values[8], (int, float))
-        self.assertEqual(values[9], 1234.5)
-        self.assertIsInstance(values[16], datetime)
-        self.assertEqual(values[13:16], ["Нет", "Нет", "Нет"])
+        self.assertEqual(values[9], 0)
+        self.assertEqual(values[10], 1234.5)
+        self.assertIsInstance(values[17], datetime)
+        self.assertEqual(values[14:17], ["Нет", "Нет", "Нет"])
 
         all_products = self.workbook(
             "/app/products/export.xlsx?scope=all&q=Celeste&per_page=1"
         ).active
         self.assertEqual(all_products.max_row, 3)
-        self.assertEqual(all_products.auto_filter.ref, "A1:Q3")
+        self.assertEqual(all_products.auto_filter.ref, "A1:R3")
         with CatalogDatabase(self.database_path).connect() as connection:
             cycles_after = connection.execute(
                 "SELECT COUNT(*) FROM erp_out_of_stock_cycles"

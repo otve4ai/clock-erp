@@ -95,7 +95,10 @@ class ComponentInventory:
             raise ValueError("Укажите целое фактическое количество от 0.")
         with self.database.transaction() as connection:
             assert_products_unlocked(connection, [int(product_id)], ValueError)
-            row = connection.execute("SELECT physical_stock FROM erp_component_inventory WHERE product_id=?", (int(product_id),)).fetchone()
+            row = connection.execute(
+                "SELECT 1 FROM erp_component_inventory WHERE product_id=?",
+                (int(product_id),),
+            ).fetchone()
             if row is None:
                 raise ValueError("Сначала сохраните товар в составе как компонент.")
             timestamp = now()

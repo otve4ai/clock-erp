@@ -28,18 +28,34 @@ class OutOfStockChecks:
 
     @staticmethod
     def _sync(connection):
+        from app.services.excel_product_catalog import warehouse_stock_cte
         now = utc_now()
-        connection.execute(
-            "UPDATE erp_out_of_stock_cycles SET ended_at = ?, updated_at = ? "
-            "WHERE ended_at IS NULL AND product_id IN ("
-            "SELECT id FROM catalog_excel_products WHERE stock > 0 OR active = 0)",
-            (now, now),
-        )
+        warehouse_ids = [int(row[0]) for row in connection.execute(
+            "SELECT id FROM erp_warehouses WHERE is_active=1 ORDER BY id"
+        ).fetchall()]
+        stock_cte, stock_parameters = warehouse_stock_cte(warehouse_ids)
+        replenished = connection.execute(
+            stock_cte + "SELECT p.id FROM catalog_excel_products p "
+            "JOIN warehouse_stock_view s ON s.product_id=p.id "
+            "WHERE s.quantity > 0 OR p.active = 0",
+            stock_parameters,
+        ).fetchall()
+        replenished_ids = [int(row["id"]) for row in replenished]
+        if replenished_ids:
+            connection.execute(
+                "UPDATE erp_out_of_stock_cycles SET ended_at = ?, updated_at = ? "
+                "WHERE ended_at IS NULL AND product_id IN ({})".format(
+                    ",".join("?" for _ in replenished_ids)
+                ),
+                [now, now] + replenished_ids,
+            )
         missing = connection.execute(
-            "SELECT p.id FROM catalog_excel_products p "
-            "WHERE p.active = 1 AND p.stock <= 0 AND NOT EXISTS ("
+            stock_cte + "SELECT p.id FROM catalog_excel_products p "
+            "JOIN warehouse_stock_view s ON s.product_id=p.id "
+            "WHERE p.active = 1 AND s.quantity <= 0 AND NOT EXISTS ("
             "SELECT 1 FROM erp_out_of_stock_cycles c "
-            "WHERE c.product_id = p.id AND c.ended_at IS NULL)"
+            "WHERE c.product_id = p.id AND c.ended_at IS NULL)",
+            stock_parameters,
         ).fetchall()
         for row in missing:
             connection.execute(
@@ -97,6 +113,7 @@ class OutOfStockChecks:
         return result
 
     def set_check(self, product_id, platform, checked, actor_id="", actor_name=""):
+        from app.services.excel_product_catalog import warehouse_stock_cte
         if platform not in PLATFORMS:
             raise ValueError("Неизвестная площадка.")
         product_id = int(product_id)
@@ -104,10 +121,16 @@ class OutOfStockChecks:
         self.database.initialize()
         with self.database.transaction() as connection:
             self._sync(connection)
+            warehouse_ids = [int(item[0]) for item in connection.execute(
+                "SELECT id FROM erp_warehouses WHERE is_active=1 ORDER BY id"
+            ).fetchall()]
+            stock_cte, stock_parameters = warehouse_stock_cte(warehouse_ids)
             product = connection.execute(
-                "SELECT id, excel_name_raw, excel_article, stock "
-                "FROM catalog_excel_products WHERE id = ? AND active = 1",
-                (product_id,),
+                stock_cte + "SELECT p.id, p.excel_name_raw, p.excel_article, "
+                "s.quantity AS stock FROM catalog_excel_products p "
+                "JOIN warehouse_stock_view s ON s.product_id=p.id "
+                "WHERE p.id = ? AND p.active = 1",
+                stock_parameters + [product_id],
             ).fetchone()
             if product is None:
                 raise ValueError("Товар не найден.")

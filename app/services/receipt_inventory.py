@@ -566,7 +566,7 @@ class ReceiptInventory:
             if receipt["status"] == "cancelled":
                 return True
             rows = connection.execute(
-                "SELECT i.product_id, SUM(i.quantity) AS quantity, p.stock "
+                "SELECT i.product_id, SUM(i.quantity) AS quantity, 0 AS stock "
                 "FROM erp_receipt_items i "
                 "JOIN catalog_excel_products p ON p.id = i.product_id "
                 "WHERE i.receipt_id = ? AND i.active = 1 GROUP BY i.product_id",
@@ -614,7 +614,7 @@ class ReceiptInventory:
             if receipt["status"] == "cancelled":
                 return self._receipt_payload(connection, receipt_id)
             rows = connection.execute(
-                "SELECT i.*, p.stock FROM erp_receipt_items i "
+                "SELECT i.*, 0 AS stock FROM erp_receipt_items i "
                 "JOIN catalog_excel_products p ON p.id = i.product_id "
                 "WHERE i.receipt_id = ? AND i.active = 1 ORDER BY i.id",
                 (receipt_id,),
@@ -736,7 +736,7 @@ class ReceiptInventory:
                     "receipt_delete",
                     now,
                     ("receipt", receipt_id),
-                    receipt["warehouse_id"],
+                    plan["warehouse_id"],
                 )
             connection.execute(
                 "DELETE FROM catalog_stock_movements WHERE receipt_id = ?",
@@ -841,7 +841,7 @@ class ReceiptInventory:
         except (TypeError, ValueError):
             receipt_metadata = {}
         rows = connection.execute(
-            "SELECT i.product_id, SUM(i.quantity) AS quantity, p.stock, "
+            "SELECT i.product_id, SUM(i.quantity) AS quantity, 0 AS stock, "
             "p.excel_name_raw AS product_name, p.excel_article AS article, "
             "COALESCE(p.bitrix_thumbnail_url, p.bitrix_primary_image_url, '') AS image_url "
             "FROM erp_receipt_items i JOIN catalog_excel_products p ON p.id = i.product_id "
@@ -916,6 +916,7 @@ class ReceiptInventory:
             })
         return {
             "receipt_id": receipt_id, "number": receipt["number"] or receipt_id,
+            "warehouse_id": receipt["warehouse_id"],
             "name": str(receipt_metadata.get("title") or receipt_metadata.get("name") or ""),
             "comment": receipt["comment"] or "",
             "receipt_status": receipt["status"], "posted_at": posted_at, "items": items,
@@ -1197,7 +1198,7 @@ class ReceiptInventory:
         placeholders = ", ".join("?" for _ in product_ids)
         active_sql = "" if include_archived else " AND active = 1"
         rows = connection.execute(
-            "SELECT id, stock, brand_id, category_id, active "
+            "SELECT id, 0 AS stock, brand_id, category_id, active "
             "FROM catalog_excel_products WHERE id IN ({}){}".format(
                 placeholders,
                 active_sql,

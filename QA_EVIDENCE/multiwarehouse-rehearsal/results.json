@@ -1,0 +1,65 @@
+{
+  "pages": {
+    "products": {
+      "status": 200,
+      "duration_ms": 443.793
+    },
+    "search": {
+      "status": 200,
+      "duration_ms": 383.777
+    },
+    "in_stock": {
+      "status": 200,
+      "duration_ms": 327.222
+    },
+    "out_of_stock": {
+      "status": 200,
+      "duration_ms": 705.283
+    },
+    "pagination": {
+      "status": 200,
+      "duration_ms": 425.704
+    },
+    "products_for_admin": {
+      "status": 200,
+      "duration_ms": 773.024
+    },
+    "receipts": {
+      "status": 200,
+      "duration_ms": 70.899
+    },
+    "sales": {
+      "status": 200,
+      "duration_ms": 362.787
+    },
+    "inventory": {
+      "status": 200,
+      "duration_ms": 129.97
+    },
+    "writeoffs": {
+      "status": 200,
+      "duration_ms": 409.721
+    },
+    "analytics": {
+      "status": 200,
+      "duration_ms": 408.726
+    },
+    "products_mobile": {
+      "status": 200,
+      "duration_ms": 405.083
+    }
+  },
+  "checks": {
+    "warehouse_count_before_create": 2,
+    "selected_warehouses": 2,
+    "search_rows": 2,
+    "in_stock_rows": 50,
+    "out_of_stock_rows": 50,
+    "pagination_rows": 50,
+    "created_warehouse_id": 4,
+    "new_warehouse_unselected": true,
+    "transfer_round_trip": true,
+    "keyboard_escape": true,
+    "mobile_no_horizontal_document_overflow": true
+  }
+}

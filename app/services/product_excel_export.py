@@ -92,7 +92,7 @@ class ProductExcelExport:
             product["_export_inventory"] = inventory.get(int(product["id"]))
         return products
 
-    def build(self, products, total):
+    def build(self, products, total, warehouses=None):
         from openpyxl import Workbook
         from openpyxl.cell import WriteOnlyCell
         from openpyxl.styles import Alignment, Font, PatternFill
@@ -101,11 +101,17 @@ class ProductExcelExport:
         workbook = Workbook(write_only=True)
         sheet = workbook.create_sheet("Товары")
         sheet.freeze_panes = "A2"
-        sheet.auto_filter.ref = "A1:Q{}".format(max(1, int(total) + 1))
-        for index, width in enumerate(WIDTHS, 1):
+        warehouses = list(warehouses or [])
+        warehouse_headers = tuple(str(item.get("name") or "Склад") for item in warehouses)
+        headers = HEADERS[:9] + warehouse_headers + HEADERS[9:]
+        widths = WIDTHS[:9] + tuple(14 for _ in warehouses) + WIDTHS[9:]
+        sheet.auto_filter.ref = "A1:{}{}".format(
+            get_column_letter(len(headers)), max(1, int(total) + 1)
+        )
+        for index, width in enumerate(widths, 1):
             sheet.column_dimensions[get_column_letter(index)].width = width
         header = []
-        for value in HEADERS:
+        for value in headers:
             cell = WriteOnlyCell(sheet, value=value)
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = PatternFill("solid", fgColor="174887")
@@ -118,6 +124,10 @@ class ProductExcelExport:
             platform_checks = checks.get("checks") or {}
             inventory_status = product.get("_export_inventory")
             updated = excel_datetime(product.get("updated_at"))
+            breakdown = {
+                int(item.get("id")): excel_number(item.get("quantity")) or 0
+                for item in (product.get("warehouse_breakdown") or [])
+            }
             values = (
                 int(product["id"]),
                 safe_excel_text(
@@ -132,6 +142,7 @@ class ProductExcelExport:
                 safe_excel_text(product.get("excel_article")),
                 safe_excel_text(product.get("bitrix_barcode")),
                 excel_number(product.get("stock")) or 0,
+                *(breakdown.get(int(warehouse["id"]), 0) for warehouse in warehouses),
                 excel_number(product.get("bitrix_price_amount")),
                 "Да" if product.get("active") else "Нет",
                 "В наличии" if float(product.get("stock") or 0) > 0 else "Нет в наличии",
@@ -144,9 +155,13 @@ class ProductExcelExport:
             row = []
             for index, value in enumerate(values, 1):
                 cell = WriteOnlyCell(sheet, value=value)
-                if index in (9, 10):
-                    cell.number_format = '#,##0.00' if index == 10 else '#,##0.###'
-                elif index == 17 and value is not None:
+                price_index = 10 + len(warehouses)
+                updated_index = 17 + len(warehouses)
+                if index == 9 or 10 <= index < price_index:
+                    cell.number_format = '#,##0.###'
+                elif index == price_index:
+                    cell.number_format = '#,##0.00'
+                elif index == updated_index and value is not None:
                     cell.number_format = "DD.MM.YYYY HH:MM"
                 cell.alignment = Alignment(vertical="top")
                 row.append(cell)

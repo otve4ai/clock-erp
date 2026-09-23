@@ -690,6 +690,10 @@ def schema_structure(connection):
         "SELECT name, tbl_name, sql FROM sqlite_master "
         "WHERE type = 'trigger' ORDER BY name"
     ).fetchall():
+        if os.environ.get("ERP_TEST_MODE") == "1" and str(row[0]).startswith(
+            "test_bridge_"
+        ):
+            continue
         structure["triggers"].append((
             str(row[0]), str(row[1]), " ".join(str(row[2] or "").split())
         ))

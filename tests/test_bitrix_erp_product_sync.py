@@ -354,10 +354,13 @@ class BitrixERPProductSyncTest(unittest.TestCase):
         )
         with self.database.connect() as connection:
             cards = connection.execute(
-                "SELECT source_key, stock, stock_source FROM catalog_excel_products"
+                "SELECT p.source_key,ws.quantity FROM catalog_excel_products p "
+                "JOIN erp_product_warehouse_stock ws ON ws.product_id=p.id "
+                "JOIN erp_warehouses w ON w.id=ws.warehouse_id "
+                "WHERE w.code='udelnaya'"
             ).fetchall()
         self.assertEqual(len(cards), 1)
-        self.assertEqual(tuple(cards[0]), ("excel-row:00000002", 6, "excel"))
+        self.assertEqual(tuple(cards[0]), ("excel-row:00000002", 6))
 
     def test_missing_quality_fields_are_reported(self):
         report = self.run_sync([

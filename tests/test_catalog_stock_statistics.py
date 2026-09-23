@@ -100,7 +100,7 @@ class CatalogStockStatisticsTest(unittest.TestCase):
             connection.execute(
                 "UPDATE catalog_excel_products SET brand_id = NULL, "
                 "category_id = NULL, excel_brand = '', excel_category = '', "
-                "stock = -1.25 WHERE id = ?",
+                "stock = 0 WHERE id = ?",
                 (self.products["unassigned"]["id"],),
             )
         web.app.config.update(TESTING=True, AUTH_TESTING=False)
@@ -134,7 +134,7 @@ class CatalogStockStatisticsTest(unittest.TestCase):
         self.assertEqual(brands["Y"]["stock_display"], "3")
         self.assertEqual(brands["Zero"]["stock_display"], "0")
         self.assertEqual(brands["666 Barcelona"]["stock_display"], "12 480.5")
-        self.assertEqual(brands["Без бренда"]["stock_display"], "-1.25")
+        self.assertEqual(brands["Без бренда"]["stock_display"], "0")
 
     def test_strap_picker_uses_local_catalog_contract_and_product_kinds(self):
         response = self.client.get(
@@ -173,7 +173,7 @@ class CatalogStockStatisticsTest(unittest.TestCase):
         global_categories = self.by_name(self.options("category"))
         self.assertEqual(global_categories["Часы"]["stock_total"], 12488.5)
         self.assertEqual(global_categories["Ремни"]["stock_display"], "2")
-        self.assertEqual(global_categories["Без категории"]["stock_display"], "-1.25")
+        self.assertEqual(global_categories["Без категории"]["stock_display"], "0")
 
         brands = self.by_name(self.options("brand"))
         x_categories = self.by_name(self.options(

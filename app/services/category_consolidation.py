@@ -3,7 +3,9 @@
 import hashlib
 import json
 
-from app.services.shared_catalog import catalog_name, normalized_name, utc_now
+from app.services.shared_catalog import (
+    ALL_ACTIVE_STOCK_SQL, catalog_name, normalized_name, utc_now,
+)
 
 
 class CategoryConsolidationError(RuntimeError):
@@ -75,18 +77,18 @@ class CategoryConsolidation:
     def _global_snapshot(self):
         row = self.connection.execute(
             "SELECT COUNT(*) AS active_products, "
-            "COALESCE(SUM(stock), 0) AS total_stock, "
-            "COALESCE(SUM(CASE WHEN stock != 0 THEN 1 ELSE 0 END), 0) "
+            "COALESCE(SUM(" + ALL_ACTIVE_STOCK_SQL + "), 0) AS total_stock, "
+            "COALESCE(SUM(CASE WHEN " + ALL_ACTIVE_STOCK_SQL + " != 0 THEN 1 ELSE 0 END), 0) "
             "AS nonzero_positions, "
             "COALESCE(SUM(CASE WHEN category_id IS NULL THEN 1 ELSE 0 END), 0) "
             "AS uncategorized_products, "
-            "COALESCE(SUM(CASE WHEN category_id IS NULL THEN stock ELSE 0 END), 0) "
+            "COALESCE(SUM(CASE WHEN p.category_id IS NULL THEN " + ALL_ACTIVE_STOCK_SQL + " ELSE 0 END), 0) "
             "AS uncategorized_stock, "
             "COALESCE(SUM(CASE WHEN brand_id IS NOT NULL THEN 1 ELSE 0 END), 0) "
             "AS product_brand_assignments, COUNT(DISTINCT id) AS product_identities, "
             "COUNT(DISTINCT CASE WHEN trim(COALESCE(excel_article, '')) <> '' "
             "THEN excel_article END) AS distinct_skus "
-            "FROM catalog_excel_products WHERE active = 1"
+            "FROM catalog_excel_products p WHERE p.active = 1"
         ).fetchone()
         immutable_product_state = [
             [
@@ -94,8 +96,9 @@ class CategoryConsolidation:
                 item["brand_id"], _number(item["stock"]), item["active"],
             ]
             for item in self.connection.execute(
-                "SELECT id, source_key, excel_article, brand_id, stock, active "
-                "FROM catalog_excel_products ORDER BY id"
+                "SELECT p.id, p.source_key, p.excel_article, p.brand_id, "
+                + ALL_ACTIVE_STOCK_SQL + " AS stock, p.active "
+                "FROM catalog_excel_products p ORDER BY p.id"
             ).fetchall()
         ]
         return {

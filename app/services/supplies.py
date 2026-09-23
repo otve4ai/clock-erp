@@ -255,7 +255,7 @@ class SupplyEngine:
 
     @staticmethod
     def _product(connection, product_id):
-        row = connection.execute("SELECT p.id, p.local_image_path, p.excel_name_raw AS name, COALESCE(p.excel_article, '') AS article, COALESCE(b.name, p.excel_brand, '') AS brand, COALESCE(c.name, p.excel_category, '') AS category, COALESCE(p.bitrix_thumbnail_url, p.bitrix_primary_image_url, '') AS image_url, p.stock FROM catalog_excel_products p LEFT JOIN erp_brands b ON b.id = p.brand_id LEFT JOIN erp_categories c ON c.id = p.category_id WHERE p.id = ?", (product_id,)).fetchone()
+        row = connection.execute("SELECT p.id, p.local_image_path, p.excel_name_raw AS name, COALESCE(p.excel_article, '') AS article, COALESCE(b.name, p.excel_brand, '') AS brand, COALESCE(c.name, p.excel_category, '') AS category, COALESCE(p.bitrix_thumbnail_url, p.bitrix_primary_image_url, '') AS image_url, 0 AS stock FROM catalog_excel_products p LEFT JOIN erp_brands b ON b.id = p.brand_id LEFT JOIN erp_categories c ON c.id = p.category_id WHERE p.id = ?", (product_id,)).fetchone()
         if row is None:
             raise SupplyError('Товар не найден.')
         result = dict(row)

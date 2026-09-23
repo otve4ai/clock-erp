@@ -1,12 +1,17 @@
 import tempfile
 import unittest
 import inspect
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from datetime import date
+from io import BytesIO
 from pathlib import Path
 
 from app.catalog_db import CatalogDatabase
 from app.schema_migrations import apply_migrations
 from app.services.excel_product_catalog import ExcelProductBatchService, ExcelProductCatalog
+from app.services.business_analytics import BusinessAnalytics, parse_filters
+from app.services.product_excel_export import ProductExcelExport
 from app.services.product_bundles import ProductBundles
 from app.services.warehouse_stock import WarehouseStockError, WarehouseStockService, set_balance
 
@@ -194,10 +199,92 @@ class MultiwarehouseStage5Test(unittest.TestCase):
         writeoffs = (root / "app/templates/_writeoffs.html").read_text(encoding="utf-8")
         inventory = (root / "app/static/js/warehouse-operation-selectors.js").read_text(encoding="utf-8")
         receipts = (root / "app/templates/excel_receipt_preview.html").read_text(encoding="utf-8")
+        bundle = (root / "app/templates/product_bundle.html").read_text(encoding="utf-8")
         self.assertIn('name="warehouse_id"', sales)
         self.assertIn('name="warehouse_id"', writeoffs)
         self.assertIn("startForm", inventory)
         self.assertIn('name="warehouse_id"', receipts)
+        self.assertIn('name="warehouse_id"', bundle)
+        self.assertNotIn("Остаток Удельной", bundle)
+
+    def test_analytics_stock_uses_selected_warehouses(self):
+        self.stock("ORDINARY", self.hong_kong, 7)
+        filters = parse_filters({"stock_state": "positive"}, today=date(2026, 9, 23))
+        with self.db.connect() as connection:
+            udelnaya = BusinessAnalytics(
+                self.db, warehouse_ids=[self.udelnaya]
+            )._stock_rows(connection, filters)["stock_all_rows"]
+            hong_kong = BusinessAnalytics(
+                self.db, warehouse_ids=[self.hong_kong]
+            )._stock_rows(connection, filters)["stock_all_rows"]
+        self.assertEqual(next(row for row in udelnaya if row["id"] == self.products["ORDINARY"])["stock"], 5)
+        self.assertEqual(next(row for row in hong_kong if row["id"] == self.products["ORDINARY"])["stock"], 7)
+
+    def test_export_contains_dynamic_warehouse_breakdown(self):
+        self.stock("ORDINARY", self.hong_kong, 3)
+        item = ExcelProductCatalog(self.db).list_products(
+            product_id=self.products["ORDINARY"],
+            warehouse_ids=[self.udelnaya, self.hong_kong], include_facets=False,
+        )["items"][0]
+        payload = ProductExcelExport(self.db).build(
+            [item], 1, warehouses=[
+                {"id": self.udelnaya, "name": "Удельная"},
+                {"id": self.hong_kong, "name": "Гонконг"},
+            ],
+        )
+        from openpyxl import load_workbook
+        sheet = load_workbook(BytesIO(payload), read_only=True).active
+        rows = list(sheet.iter_rows(values_only=True))
+        self.assertEqual(rows[0][8:11], ("Остаток", "Удельная", "Гонконг"))
+        self.assertEqual(rows[1][8:11], (8, 5, 3))
+
+    def test_concurrent_transfers_cannot_overspend_source(self):
+        def transfer(key):
+            try:
+                self.service.transfer(
+                    self.products["ORDINARY"], self.udelnaya, self.hong_kong, 3,
+                    idempotency_key=key,
+                )
+                return True
+            except WarehouseStockError:
+                return False
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(transfer, ("concurrent-a", "concurrent-b")))
+        self.assertEqual(results.count(True), 1)
+        self.assertEqual(self.service.get_balance(self.products["ORDINARY"], self.udelnaya), 2)
+        self.assertEqual(self.service.get_balance(self.products["ORDINARY"], self.hong_kong), 3)
+
+    def test_admin_actions_and_transfer_are_audited(self):
+        actor = {"actor_id": "7", "actor_name": "Максим"}
+        reserve = self.service.create_warehouse("Резерв QA", "reserve-qa", actor=actor)
+        self.service.rename_warehouse(reserve["id"], "Резерв QA 2", actor=actor)
+        self.service.archive_warehouse(reserve["id"], actor=actor)
+        self.service.transfer(
+            self.products["ORDINARY"], self.udelnaya, self.hong_kong, 1,
+            actor=actor, idempotency_key="audit-transfer",
+        )
+        with self.db.connect() as connection:
+            actions = [row[0] for row in connection.execute(
+                "SELECT action FROM erp_audit_events WHERE actor_id='7' ORDER BY id"
+            ).fetchall()]
+        self.assertEqual(actions, ["created", "updated", "archived", "updated"])
+
+    def test_database_constraints_and_indexes_cover_stock_keys(self):
+        with self.db.connect() as connection:
+            foreign_keys = {
+                (row["from"], row["table"])
+                for row in connection.execute(
+                    "PRAGMA foreign_key_list(erp_product_warehouse_stock)"
+                )
+            }
+            indexes = {
+                row["name"] for row in connection.execute(
+                    "PRAGMA index_list(erp_product_warehouse_stock)"
+                )
+            }
+        self.assertIn(("product_id", "catalog_excel_products"), foreign_keys)
+        self.assertIn(("warehouse_id", "erp_warehouses"), foreign_keys)
+        self.assertTrue(any("warehouse" in name for name in indexes))
 
 
 if __name__ == "__main__":

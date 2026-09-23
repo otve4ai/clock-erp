@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from app.catalog_db import CatalogDatabase
 from app.multiwarehouse_migration import DEFAULT_WAREHOUSE_CODE
+from app.services.audit_journal import AuditJournal
 
 
 class WarehouseStockError(ValueError):
@@ -245,13 +246,16 @@ class WarehouseStockService:
             ).fetchall()
         return [{**dict(row), "selected": int(row["id"]) in selected} for row in rows]
 
-    def rename_warehouse(self, warehouse_id, name):
+    def rename_warehouse(self, warehouse_id, name, actor=None):
         name = " ".join(str(name or "").split())
         if not name:
             raise WarehouseStockError("Название склада обязательно.")
         self.database.initialize()
         with self.database.transaction() as connection:
             warehouse_id = require_warehouse(connection, warehouse_id)
+            before = dict(connection.execute(
+                "SELECT * FROM erp_warehouses WHERE id=?", (warehouse_id,)
+            ).fetchone())
             try:
                 connection.execute(
                     "UPDATE erp_warehouses SET name=?,normalized_name=?,updated_at=? WHERE id=?",
@@ -261,11 +265,21 @@ class WarehouseStockService:
                 if "UNIQUE" in str(error).upper():
                     raise WarehouseStockError("Склад с таким названием уже существует.")
                 raise
-            return dict(connection.execute(
+            result = dict(connection.execute(
                 "SELECT * FROM erp_warehouses WHERE id=?", (warehouse_id,)
             ).fetchone())
+            actor = actor or {}
+            AuditJournal(self.database).record(
+                "settings", "warehouse:{}".format(warehouse_id), "updated",
+                "Склад {}".format(result["name"]),
+                changes={"name": {"before": before["name"], "after": result["name"]}},
+                metadata={"warehouse_id": warehouse_id, "code": result["code"]},
+                actor_id=actor.get("actor_id"), actor_name=actor.get("actor_name"),
+                connection=connection,
+            )
+            return result
 
-    def archive_warehouse(self, warehouse_id):
+    def archive_warehouse(self, warehouse_id, actor=None):
         self.database.initialize()
         with self.database.transaction() as connection:
             warehouse_id = require_warehouse(connection, warehouse_id)
@@ -278,6 +292,9 @@ class WarehouseStockService:
             ).fetchone()
             if nonempty is not None:
                 raise WarehouseStockError("Архивировать можно только пустой склад.")
+            warehouse = dict(connection.execute(
+                "SELECT * FROM erp_warehouses WHERE id=?", (warehouse_id,)
+            ).fetchone())
             connection.execute(
                 "UPDATE erp_warehouses SET is_active=0,updated_at=? WHERE id=?",
                 (utc_now(), warehouse_id),
@@ -286,9 +303,18 @@ class WarehouseStockService:
                 "DELETE FROM erp_user_warehouse_preferences WHERE warehouse_id=?",
                 (warehouse_id,),
             )
+            actor = actor or {}
+            AuditJournal(self.database).record(
+                "settings", "warehouse:{}".format(warehouse_id), "archived",
+                "Склад {}".format(warehouse["name"]),
+                changes={"active": {"before": True, "after": False}},
+                metadata={"warehouse_id": warehouse_id, "code": warehouse["code"]},
+                actor_id=actor.get("actor_id"), actor_name=actor.get("actor_name"),
+                connection=connection,
+            )
         return True
 
-    def create_warehouse(self, name, code=None):
+    def create_warehouse(self, name, code=None, actor=None):
         name = " ".join(str(name or "").split())
         if not name:
             raise WarehouseStockError("Название склада обязательно.")
@@ -310,9 +336,19 @@ class WarehouseStockService:
                     raise WarehouseStockError("Склад с таким названием или кодом уже существует.")
                 raise
             warehouse_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
-            return dict(connection.execute(
+            result = dict(connection.execute(
                 "SELECT * FROM erp_warehouses WHERE id=?", (warehouse_id,)
             ).fetchone())
+            actor = actor or {}
+            AuditJournal(self.database).record(
+                "settings", "warehouse:{}".format(warehouse_id), "created",
+                "Склад {}".format(result["name"]),
+                changes={"value": {"before": None, "after": result["name"]}},
+                metadata={"warehouse_id": warehouse_id, "code": result["code"]},
+                actor_id=actor.get("actor_id"), actor_name=actor.get("actor_name"),
+                connection=connection,
+            )
+            return result
 
     def get_balance(self, product_id, warehouse_id):
         self.database.initialize()
@@ -406,6 +442,17 @@ class WarehouseStockService:
                 )
             if failure_hook:
                 failure_hook(connection)
+            AuditJournal(self.database).record(
+                "product", str(product_id), "updated", "Перемещение товара",
+                changes={"stock": {"before": before_source, "after": after_source}},
+                metadata={
+                    "transfer_id": transfer_id, "from_warehouse_id": source,
+                    "to_warehouse_id": target, "quantity": amount,
+                    "comment": str(comment or ""),
+                },
+                actor_id=actor.get("actor_id"), actor_name=actor.get("actor_name"),
+                connection=connection,
+            )
             return dict(connection.execute(
                 "SELECT * FROM erp_stock_transfers WHERE id=?", (transfer_id,)
             ).fetchone())

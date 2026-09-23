@@ -127,7 +127,10 @@ class WildberriesRecoveryTest(unittest.TestCase):
         other = self.catalog.create_product('Другие часы', article='OTHER', brand='Brand', category='Часы', stock=2)
         with self.catalog_db.transaction() as connection:
             connection.execute("UPDATE catalog_excel_products SET excel_article='DUP' WHERE id=?",(other['id'],))
-            connection.execute("UPDATE catalog_excel_products SET stock=0 WHERE id=?",(self.product['id'],))
+            connection.execute(
+                "UPDATE erp_product_warehouse_stock SET quantity=0 WHERE product_id=?",
+                (self.product['id'],),
+            )
         second = self.catalog.create_product('Дубль', article='SECOND', brand='Brand', category='Часы', stock=1)
         with self.catalog_db.transaction() as connection:
             connection.execute("UPDATE catalog_excel_products SET excel_article='DUP' WHERE id=?",(second['id'],))

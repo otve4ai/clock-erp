@@ -190,9 +190,13 @@ class ReceiptRecovery:
         mode,
     ):
         items = connection.execute(
-            "SELECT i.*, p.excel_name_raw AS product_name, p.stock, p.active "
+            "SELECT i.*, p.excel_name_raw AS product_name, "
+            "COALESCE(ws.quantity,0) AS stock, p.active "
             "FROM erp_receipt_items i "
             "LEFT JOIN catalog_excel_products p ON p.id = i.product_id "
+            "JOIN erp_receipts receipt_stock ON receipt_stock.id=i.receipt_id "
+            "LEFT JOIN erp_product_warehouse_stock ws ON ws.product_id=i.product_id "
+            "AND ws.warehouse_id=receipt_stock.warehouse_id "
             "WHERE i.receipt_id = ? AND i.active = 1 ORDER BY i.id",
             (receipt["id"],),
         ).fetchall()

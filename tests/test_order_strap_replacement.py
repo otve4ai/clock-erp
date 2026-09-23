@@ -91,9 +91,23 @@ class OrderStrapReplacementTest(unittest.TestCase):
             return {
                 int(row["id"]): float(row["stock"])
                 for row in connection.execute(
-                    "SELECT id,stock FROM catalog_excel_products"
+                    "SELECT p.id,COALESCE(ws.quantity,0) AS stock "
+                    "FROM catalog_excel_products p "
+                    "LEFT JOIN erp_product_warehouse_stock ws ON ws.product_id=p.id "
+                    "AND ws.warehouse_id=(SELECT id FROM erp_warehouses "
+                    "WHERE code='udelnaya')"
                 ).fetchall()
             }
+
+    def set_stock(self, product_id, quantity):
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE erp_product_warehouse_stock SET quantity=?,"
+                "initialized_at=COALESCE(initialized_at,datetime('now')) "
+                "WHERE product_id=? AND warehouse_id=(SELECT id "
+                "FROM erp_warehouses WHERE code='udelnaya')",
+                (quantity, product_id),
+            )
 
     def test_existing_removed_strap_moves_all_real_stock_and_sells_ordered_sku(self):
         sale = self.conduct()
@@ -136,7 +150,11 @@ class OrderStrapReplacementTest(unittest.TestCase):
                 (sale["id"],),
             ).fetchone()
             product = connection.execute(
-                "SELECT p.stock,c.name AS category FROM catalog_excel_products p "
+                "SELECT COALESCE(ws.quantity,0) AS stock,c.name AS category "
+                "FROM catalog_excel_products p "
+                "LEFT JOIN erp_product_warehouse_stock ws ON ws.product_id=p.id "
+                "AND ws.warehouse_id=(SELECT id FROM erp_warehouses "
+                "WHERE code='udelnaya') "
                 "JOIN erp_categories c ON c.id=p.category_id WHERE p.id=?",
                 (operation["removed_strap_product_id"],),
             ).fetchone()
@@ -182,11 +200,7 @@ class OrderStrapReplacementTest(unittest.TestCase):
         self.assertEqual(count, 5)
 
     def test_zero_installed_strap_is_rejected_with_exact_message(self):
-        with self.database.transaction() as connection:
-            connection.execute(
-                "UPDATE catalog_excel_products SET stock=0 WHERE id=?",
-                (self.installed["id"],),
-            )
+        self.set_stock(self.installed["id"], 0)
         with self.assertRaisesRegex(
             SalesInventoryError,
             "Выбранный ремешок закончился: требуется 1, доступно 0",
@@ -194,11 +208,7 @@ class OrderStrapReplacementTest(unittest.TestCase):
             self.conduct()
 
     def test_zero_base_watch_is_rejected_with_exact_message(self):
-        with self.database.transaction() as connection:
-            connection.execute(
-                "UPDATE catalog_excel_products SET stock=0 WHERE id=?",
-                (self.base["id"],),
-            )
+        self.set_stock(self.base["id"], 0)
         with self.assertRaisesRegex(
             SalesInventoryError,
             "Часы-основа закончились: требуется 1, доступно 0",
@@ -234,11 +244,7 @@ class OrderStrapReplacementTest(unittest.TestCase):
     def test_stock_change_after_form_open_is_rechecked_in_transaction(self):
         selected_when_opened = self.catalog.get_product(self.installed["id"])
         self.assertEqual(selected_when_opened["stock"], 1)
-        with self.database.transaction() as connection:
-            connection.execute(
-                "UPDATE catalog_excel_products SET stock=0 WHERE id=?",
-                (self.installed["id"],),
-            )
+        self.set_stock(self.installed["id"], 0)
         with self.assertRaises(SalesInventoryError):
             self.conduct()
         self.assertEqual(self.inventory.list_sales(), [])
@@ -307,11 +313,7 @@ class OrderStrapReplacementTest(unittest.TestCase):
         self.assertEqual(len(self.inventory.list_sales()), 1)
 
     def test_ordinary_sale_still_uses_original_product(self):
-        with self.database.transaction() as connection:
-            connection.execute(
-                "UPDATE catalog_excel_products SET stock=1 WHERE id=?",
-                (self.ordered["id"],),
-            )
+        self.set_stock(self.ordered["id"], 1)
         sale = self.inventory.create_sale_batch(
             {"source": "tictactoy", "order_id": "ordinary"}, [self.item()],
             idempotency_key="ordinary", enforce_external_unique=True,
@@ -354,11 +356,7 @@ class OrderStrapReplacementTest(unittest.TestCase):
 
     def test_cancellation_is_blocked_when_removed_strap_was_consumed(self):
         sale = self.conduct()
-        with self.database.transaction() as connection:
-            connection.execute(
-                "UPDATE catalog_excel_products SET stock=0 WHERE id=?",
-                (self.removed["id"],),
-            )
+        self.set_stock(self.removed["id"], 0)
         before = self.stocks()
         with self.assertRaisesRegex(
             CancellationConflictError, "Снятый ремешок уже использован"

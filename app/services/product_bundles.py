@@ -29,7 +29,7 @@ def compositions(connection, product_ids, warehouse_id=None):
         chunk = ids[offset:offset + 400]
         warehouse_id = warehouse_id or default_warehouse_id(connection)
         rows = connection.execute(
-            "SELECT b.product_id,c.component_id,c.quantity,p.stock AS legacy_stock,"
+            "SELECT b.product_id,c.component_id,c.quantity,"
             "COALESCE(ws.quantity,0) AS stock,ws.initialized_at,p.active,"
             "p.excel_name_raw AS name,p.excel_article AS article "
             "FROM erp_product_bundles b LEFT JOIN erp_bundle_components c "
@@ -170,7 +170,11 @@ class ProductBundles:
                 prepared[component_id] = component_quantity(part.get("quantity"))
         with self.database.transaction() as connection:
             product = connection.execute(
-                "SELECT stock FROM catalog_excel_products WHERE id=? AND active=1",
+                "SELECT COALESCE((SELECT SUM(ws.quantity) "
+                "FROM erp_product_warehouse_stock ws JOIN erp_warehouses w "
+                "ON w.id=ws.warehouse_id WHERE ws.product_id=p.id "
+                "AND w.is_active=1),0) AS stock "
+                "FROM catalog_excel_products p WHERE p.id=? AND p.active=1",
                 (product_id,),
             ).fetchone()
             if product is None:
@@ -198,15 +202,18 @@ class ProductBundles:
                     ).fetchone():
                         raise BundleError("Многоуровневые составы запрещены.")
                 for component_id in prepared:
-                    connection.execute("INSERT OR IGNORE INTO erp_component_inventory(product_id,updated_at) VALUES (?,?)",
-                                       (component_id, datetime.now(timezone.utc).isoformat()))
+                    timestamp = datetime.now(timezone.utc).isoformat()
+                    connection.execute(
+                        "INSERT OR IGNORE INTO erp_component_inventory"
+                        "(product_id,updated_at) VALUES (?,?)",
+                        (component_id, timestamp),
+                    )
                     warehouse_id = default_warehouse_id(connection)
                     connection.execute(
                         "INSERT OR IGNORE INTO erp_product_warehouse_stock "
                         "(product_id,warehouse_id,quantity,initialized_at,updated_at) "
                         "VALUES (?,?,0,NULL,?)",
-                        (component_id, warehouse_id,
-                         datetime.now(timezone.utc).isoformat()),
+                        (component_id, warehouse_id, timestamp),
                     )
                 connection.execute(
                     "INSERT OR IGNORE INTO erp_product_bundles(product_id,updated_at) VALUES (?,?)",
