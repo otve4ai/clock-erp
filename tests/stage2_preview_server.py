@@ -8,9 +8,22 @@ import hashlib
 import threading
 import sqlite3
 import time
-from datetime import datetime, timedelta
+import types
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+
+if os.name == "nt":
+    # The preview server is single-process and uses isolated temporary data.
+    # A minimal compatibility module lets the browser fixture run on Windows;
+    # production locking remains unchanged on Unix.
+    fcntl = types.ModuleType("fcntl")
+    fcntl.LOCK_EX = 2
+    fcntl.LOCK_NB = 4
+    fcntl.LOCK_UN = 8
+    fcntl.flock = lambda _handle, _operation: None
+    sys.modules["fcntl"] = fcntl
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -485,7 +498,12 @@ with sqlite3.connect(str(PREVIEW_ROOT / "auth.db")) as task_auth_connection:
 from app.services.tasks import TaskStore  # noqa: E402
 
 preview_task_store = TaskStore(PREVIEW_ROOT / "tasks.db")
-preview_today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+try:
+    preview_timezone = ZoneInfo("Europe/Moscow")
+except Exception:
+    # Windows test runtimes may not ship the optional IANA tzdata package.
+    preview_timezone = timezone(timedelta(hours=3))
+preview_today = datetime.now(preview_timezone).date()
 
 
 def preview_task_entity(entity_type, entity_id):

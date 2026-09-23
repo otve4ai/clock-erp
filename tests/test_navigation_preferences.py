@@ -137,6 +137,34 @@ class NavigationPreferencesTest(unittest.TestCase):
             item for item in self.get_items() if item["key"] == "analytics"
         )["visible"])
 
+    def test_employee_cannot_see_or_configure_journal_and_team(self):
+        employee = web.app.test_client()
+        self.login(employee, 2)
+
+        keys = [item["key"] for item in self.get_items(employee)]
+        self.assertNotIn("journal", keys)
+        self.assertNotIn("team", keys)
+        self.assertEqual(employee.get("/app/journal").status_code, 403)
+        self.assertEqual(employee.get("/api/v1/journal").status_code, 403)
+        self.assertEqual(employee.get("/app/team").status_code, 403)
+        self.assertEqual(
+            employee.post(
+                "/api/v1/presence/heartbeat",
+                json={"section": "Товары"},
+                headers={"X-CSRF-Token": "navigation-csrf"},
+            ).status_code,
+            403,
+        )
+
+        settings = employee.get("/app/settings").get_data(as_text=True)
+        self.assertNotIn('data-navigation-key="journal"', settings)
+        self.assertNotIn('data-navigation-key="team"', settings)
+        self.assertNotIn('data-navigation-preference-key="journal"', settings)
+        self.assertNotIn('data-navigation-preference-key="team"', settings)
+        self.assertNotIn('<div class="sidebar-presence" data-presence-root', settings)
+        self.assertEqual(self.save(keys + ["journal"], [], employee).status_code, 422)
+        self.assertEqual(self.save(keys + ["team"], [], employee).status_code, 422)
+
     def test_unknown_duplicate_forbidden_and_required_keys_are_rejected(self):
         order = [item["key"] for item in self.get_items()]
         self.assertEqual(self.save(order + ["unknown"], []).status_code, 422)

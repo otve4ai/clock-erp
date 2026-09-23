@@ -6,7 +6,6 @@
         const root = document.querySelector("[data-erp-focus-mode]");
         const toggle = document.getElementById("warehouseFocusModeToggle");
         const search = document.getElementById("warehouseSearchInput");
-        const more = document.getElementById("warehouseMoreTrigger");
         const columns = document.getElementById("warehouseColumnSettingsTrigger");
         const columnsPanel = document.getElementById("warehouseColumnSettingsPanel");
 
@@ -17,7 +16,7 @@
         }
 
         try {
-            assert(root && toggle && search && more && columns && columnsPanel, "contract");
+            assert(root && toggle && search && columns && columnsPanel, "contract");
             const initialQuery = search.value;
             const tableHeader = document.querySelector(
                 "#warehouseProductsTable thead th"
@@ -33,7 +32,8 @@
             [
                 "warehouseSearchInput",
                 "warehouseFilterTrigger",
-                "warehouseMoreTrigger",
+                "warehouseColumnSettingsTrigger",
+                "warehouseFocusModeToggle",
                 "warehouseProductsTable",
                 "erpPagination",
             ].forEach(function (id) {
@@ -72,8 +72,6 @@
                 "horizontal-overflow"
             );
 
-            more.click();
-            assert(!document.getElementById("warehouseMoreMenu").hidden, "more-open");
             columns.click();
             const optionalColumn = columnsPanel.querySelector(
                 'input:not([disabled])'

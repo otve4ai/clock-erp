@@ -7,6 +7,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LAYOUT_SCRIPT = PROJECT_ROOT / "app/static/js/erp-table-layout.js"
+NATIVE_COLUMNS_SCRIPT = (
+    PROJECT_ROOT / "app/static/js/erp-native-table-columns.js"
+)
 INITIAL_LAYOUT_SCRIPT = (
     PROJECT_ROOT / "app/static/js/sales-table-initial-layout.js"
 )
@@ -87,17 +90,45 @@ process.stdout.write(JSON.stringify(layout.computeColumnWidths(options)));
         self.assertEqual(result["widths"], {"a": 250, "b": 120, "c": 100})
         self.assertTrue(result["overflow"])
 
+    def test_shared_native_controller_moves_only_requested_column(self):
+        if not self.node:
+            self.skipTest("Node.js is unavailable")
+        program = """
+const columns = require(process.argv[1]);
+const order = JSON.parse(process.argv[2]);
+process.stdout.write(JSON.stringify(columns.moveColumnOrder(
+    order, "price", "name", false
+)));
+"""
+        completed = subprocess.run(
+            [
+                self.node,
+                "-e",
+                program,
+                str(NATIVE_COLUMNS_SCRIPT),
+                json.dumps(["photo", "name", "stock", "price"]),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            json.loads(completed.stdout),
+            ["photo", "price", "name", "stock"],
+        )
+
 
 class SalesTableLayoutContractTest(unittest.TestCase):
     def test_sales_keeps_independent_widths_on_layout_changes(self):
         template = (PROJECT_ROOT / "app/templates/sales.html").read_text(
             encoding="utf-8"
         )
-        self.assertIn("view.customWidths.length", template)
-        self.assertIn("window.ErpTableLayout.computeColumnWidths", template)
-        self.assertIn("view.widths[columnKey] = actualWidths[columnKey]", template)
-        self.assertIn('"erp:focus-mode-change"', template)
-        self.assertIn('"erp:sidebar-change"', template)
+        controller = NATIVE_COLUMNS_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("window.ErpNativeTableColumns.create({", template)
+        self.assertIn("snapshotVisibleWidths();", controller)
+        self.assertIn("root.ErpTableLayout.computeColumnWidths", controller)
+        self.assertIn('"erp:focus-mode-change"', controller)
+        self.assertIn('"erp:sidebar-change"', controller)
         self.assertIn("customWidths", template)
         self.assertIn("getActualWidths", template)
 
