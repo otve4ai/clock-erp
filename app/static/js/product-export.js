@@ -1,48 +1,6 @@
 (function () {
     "use strict";
 
-    var STORAGE_KEY = "vechasu.erp.products.export-selection.v1";
-    var selected = new Set();
-    try {
-        JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "[]").forEach(function (id) {
-            if (/^\d+$/.test(String(id))) selected.add(String(id));
-        });
-    } catch (_error) {
-        selected = new Set();
-    }
-
-    function saveSelection() {
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(selected)));
-    }
-
-    function visibleSelectionInputs() {
-        return Array.from(document.querySelectorAll("[data-export-select]"));
-    }
-
-    function syncSelection() {
-        var inputs = visibleSelectionInputs();
-        inputs.forEach(function (input) {
-            input.checked = selected.has(String(input.dataset.exportSelect));
-        });
-        var page = document.querySelector("[data-export-select-page]");
-        if (page) {
-            var checked = inputs.filter(function (input) { return input.checked; }).length;
-            page.checked = Boolean(inputs.length && checked === inputs.length);
-            page.indeterminate = checked > 0 && checked < inputs.length;
-        }
-        var count = document.querySelector("[data-export-selected-count]");
-        if (count) count.textContent = selected.size + " товаров выбрано";
-        var selectedScope = document.querySelector('[name="scope"][value="selected"]');
-        if (selectedScope) {
-            selectedScope.disabled = selected.size === 0;
-            if (!selected.size && selectedScope.checked) {
-                var fallback = document.querySelector('[name="scope"][value="filtered"]:checked')
-                    || document.querySelector('[name="scope"][value="all"]');
-                if (fallback) fallback.checked = true;
-            }
-        }
-    }
-
     function filterLabels(currentState) {
         var params = new URLSearchParams(window.location.search);
         var labels = [];
@@ -121,30 +79,9 @@
     };
 
     document.addEventListener("click", function (event) {
-        var item = event.target.closest("[data-export-select]");
-        if (item) {
-            var id = String(item.dataset.exportSelect);
-            if (item.checked) selected.add(id);
-            else selected.delete(id);
-            saveSelection();
-            syncSelection();
-            return;
-        }
-        var page = event.target.closest("[data-export-select-page]");
-        if (page) {
-            visibleSelectionInputs().forEach(function (input) {
-                var id = String(input.dataset.exportSelect);
-                if (page.checked) selected.add(id);
-                else selected.delete(id);
-            });
-            saveSelection();
-            syncSelection();
-            return;
-        }
         if (event.target.closest("#openProductExport")) {
             var dialog = document.getElementById("productExportDialog");
             closeMenus();
-            syncSelection();
             syncFilters();
             if (dialog && !dialog.open) dialog.showModal();
             return;
@@ -167,12 +104,10 @@
     document.addEventListener("warehouse:results-updated", function (event) {
         var count = document.querySelector("[data-export-filtered-count]");
         if (count) count.textContent = Number(event.detail?.total || 0) + " товаров";
-        syncSelection();
         syncFilters(event.detail);
     });
 
     document.addEventListener("DOMContentLoaded", function () {
-        syncSelection();
         var form = document.getElementById("productExportForm");
         if (!form) return;
         form.addEventListener("submit", async function (event) {
@@ -181,11 +116,6 @@
             var fields = form.querySelectorAll('[name="fields"]:checked');
             if (!fields.length) {
                 error.textContent = "Выберите хотя бы одно поле для экспорта.";
-                return;
-            }
-            var scope = form.querySelector('[name="scope"]:checked')?.value;
-            if (scope === "selected" && !selected.size) {
-                error.textContent = "Выберите хотя бы один товар в таблице.";
                 return;
             }
             error.textContent = "";
@@ -197,7 +127,6 @@
                 var params = new URLSearchParams(window.location.search);
                 ["page", "per_page", "scope", "fields", "selected_ids", "filename"].forEach(function (key) { params.delete(key); });
                 params.forEach(function (value, key) { data.set(key, value); });
-                if (scope === "selected") selected.forEach(function (id) { data.append("selected_ids", id); });
                 var response = await fetch(form.action, {
                     method: "POST",
                     body: data,

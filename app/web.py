@@ -6487,20 +6487,12 @@ def _safe_product_export_filename(value):
 def warehouse_products_export():
     values = request.values
     scope = (values.get("scope") or "filtered").strip()
-    if scope not in {"filtered", "all", "selected"}:
+    if scope not in {"filtered", "all"}:
         return jsonify(ok=False, message="Неизвестный режим экспорта."), 400
 
     filters = {"sort_by": "name", "sort_dir": "asc"}
-    selected_product_ids = []
     if scope == "filtered":
         filters = _product_export_filters(values)
-    elif scope == "selected":
-        raw_ids = values.getlist("selected_ids")
-        if len(raw_ids) == 1 and "," in raw_ids[0]:
-            raw_ids = raw_ids[0].split(",")
-        if not raw_ids or any(not str(value).strip().isdigit() for value in raw_ids):
-            return jsonify(ok=False, message="Выберите хотя бы один товар."), 400
-        selected_product_ids = list(dict.fromkeys(int(value) for value in raw_ids))
 
     catalog = ExcelProductCatalog()
     warehouse_service = WarehouseStockService()
@@ -6521,25 +6513,11 @@ def warehouse_products_export():
     except ValueError as error:
         return jsonify(ok=False, message=str(error)), 400
     page_size = 1000
-    selected_items = []
-    if scope == "selected":
-        for start in range(0, len(selected_product_ids), 400):
-            result = catalog.list_products(
-                page=1, per_page=400, include_facets=False,
-                include_cell_item_names=False,
-                product_ids=selected_product_ids[start:start + 400],
-                warehouse_ids=selected_warehouse_ids, **filters
-            )
-            selected_items.extend(result["items"])
-        first = {"total": len(selected_items), "items": selected_items, "pages": 1}
-        if not first["total"]:
-            return jsonify(ok=False, message="Выбранные товары больше недоступны."), 400
-    else:
-        first = catalog.list_products(
-            page=1, per_page=page_size, include_facets=False,
-            include_cell_item_names=False,
-            warehouse_ids=selected_warehouse_ids, **filters
-        )
+    first = catalog.list_products(
+        page=1, per_page=page_size, include_facets=False,
+        include_cell_item_names=False,
+        warehouse_ids=selected_warehouse_ids, **filters
+    )
 
     def products():
         page = 1
@@ -18857,8 +18835,8 @@ NAVIGATION_DEFINITIONS = [
     },
     {
         "key": "receipts",
-        "label": "Поступления",
-        "description": "Поставки и приходные движения товаров.",
+        "label": "Приход",
+        "description": "Приход товаров.",
         "icon": "receipts",
         "href": "/app/receipts",
         "mobile_href": "/app/receipts",

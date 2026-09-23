@@ -138,25 +138,22 @@ class ProductExcelExportTest(unittest.TestCase):
         )
         self.assertTrue(all(cell.data_type != "f" for cell in sheet[2]))
 
-    def test_selected_export_returns_only_authorized_active_selected_products(self):
-        response, workbook = self.workbook("/app/products/export.xlsx", data={
+    def test_selected_export_mode_is_removed(self):
+        response = self.client.post("/app/products/export.xlsx", data={
             "scope": "selected",
             "selected_ids": str(self.other["id"]),
             "fields": ["sku", "name"],
             "filename": "Товары_выбранные.xlsx",
         })
-        self.assertEqual(response.headers["X-Export-Count"], "1")
-        self.assertEqual(workbook.active.max_row, 2)
-        self.assertEqual(
-            [cell.value for cell in workbook.active[2]], ["SAFE", "Обычные часы"]
-        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("режим", response.get_json()["message"])
 
-    def test_post_requires_scope_selection_and_at_least_one_field(self):
-        no_selection = self.client.post(
+    def test_post_rejects_removed_scope_and_requires_at_least_one_field(self):
+        removed_scope = self.client.post(
             "/app/products/export.xlsx", data={"scope": "selected", "fields": "name"}
         )
-        self.assertEqual(no_selection.status_code, 400)
-        self.assertIn("Выберите", no_selection.get_json()["message"])
+        self.assertEqual(removed_scope.status_code, 400)
+        self.assertIn("режим", removed_scope.get_json()["message"])
         no_fields = self.client.post(
             "/app/products/export.xlsx", data={"scope": "all"}
         )
@@ -172,7 +169,7 @@ class ProductExcelExportTest(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login", response.headers["Location"])
 
-    def test_export_modal_actions_filters_counts_and_selection_are_rendered(self):
+    def test_export_modal_keeps_all_and_filtered_without_table_selection(self):
         page = self.client.get(
             "/app/products?stock_state=in&q=Celeste"
         )
@@ -182,7 +179,11 @@ class ProductExcelExportTest(unittest.TestCase):
         self.assertIn("Сейчас применены фильтры", markup)
         self.assertIn("Поиск: Celeste", markup)
         self.assertIn("Наличие: В наличии", markup)
-        self.assertIn('data-export-select="{}"'.format(self.ziiiro["id"]), markup)
+        self.assertIn('name="scope" value="all"', markup)
+        self.assertIn('name="scope" value="filtered"', markup)
+        self.assertNotIn('name="scope" value="selected"', markup)
+        self.assertNotIn("data-export-select", markup)
+        self.assertNotIn("Только выбранные", markup)
         self.assertIn("warehouse:Москва", markup)
 
     def test_export_enrichment_chunks_more_than_sqlite_variable_limit(self):

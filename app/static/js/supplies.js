@@ -21,8 +21,6 @@
       : "—";
   const labels = {
     supply: "Поставка",
-    manual_receipt: "Приход",
-    manual_receipt_reversal: "Отмена прихода",
     sale_cancellation: "Отмена продажи",
     receipt: "Старый приход",
     legacy: "Архивная запись",
@@ -40,8 +38,6 @@
     current = null,
     items = [],
     busy = false;
-  let editorType = "supply",
-    warehouses = [];
   const hidden = new Set();
   let sortDirection = "desc";
   const storageKey = () => "erp-supply-columns-" + tab;
@@ -64,14 +60,13 @@
   ];
   const supplyColumns = [
     { key: "date", label: "Дата" },
-    { key: "type", label: "Тип" },
+    { key: "comment", label: "Комментарий" },
+    { key: "author", label: "Автор" },
     { key: "number", label: "Номер" },
-    { key: "title", label: "Название / описание" },
-    { key: "warehouse", label: "Склад" },
+    { key: "title", label: "Название" },
     { key: "positions", label: "Позиций", numeric: true },
     { key: "quantity", label: "Единиц", numeric: true },
     { key: "status", label: "Статус" },
-    { key: "author", label: "Автор" },
     { key: "actions", label: "Действия" },
   ];
   const legacyColumnKeys = {
@@ -200,17 +195,7 @@
     el.value = previous;
   }
   async function load() {
-    if (!warehouses.length) {
-      warehouses = await api("warehouses");
-      const choices = warehouses.map((warehouse) =>
-        `<option value="${esc(warehouse.id)}">${esc(warehouse.name)}</option>`,
-      ).join("");
-      $("receipt-warehouse").innerHTML = choices;
-      $("warehouse-filter").innerHTML = '<option value="">Все склады</option>' + choices;
-    }
-    rows = await api(
-      tab === "supplies" ? "supplies" : tab === "receipts" ? "manual" : "documents",
-    );
+    rows = await api(tab === "supplies" ? "supplies" : "movements");
     if (tab === "cancellations")
       rows = rows.filter((r) => r.source_type === "sale_cancellation");
     options(
@@ -249,9 +234,6 @@
         r.user_name,
         r.created_by,
         r.source_id,
-        r.reason_label,
-        r.warehouse_name,
-        ...(r.items || []).flatMap((item) => [item.name, item.product_name, item.article, item.brand, item.category]),
       ]
         .join(" ")
         .toLocaleLowerCase();
@@ -275,9 +257,7 @@
           r.items?.some((i) => i.brand === $("brand").value)) &&
         (!$("category").value ||
           r.category === $("category").value ||
-          r.items?.some((i) => i.category === $("category").value)) &&
-        (!$("warehouse-filter").value ||
-          r.warehouse_id === $("warehouse-filter").value)
+          r.items?.some((i) => i.category === $("category").value))
       );
     });
     filtered.sort((a, b) =>
@@ -285,9 +265,9 @@
         ? b.created_at.localeCompare(a.created_at)
         : a.created_at.localeCompare(b.created_at),
     );
-    const supplies = true;
+    const supplies = tab === "supplies";
     $("count-label").textContent = supplies
-      ? tab === "supplies" ? "Поставок" : tab === "receipts" ? "Приходов" : tab === "all" ? "Всего операций" : "Отмен продаж"
+      ? "Поставок"
       : tab === "cancellations"
         ? "Отмен"
         : "Записей прихода";
@@ -362,14 +342,12 @@
             : esc(r.created_at || "—");
           const button = `<button class="button" data-open="${esc(r.id)}">Открыть</button>`;
           const values = supplies
-              ? {
+            ? {
                 date: dateText,
-                type: `<span class="type-badge type-${esc(r.source_type || "legacy")}">${esc(labels[r.source_type] || "Архивная запись")}</span>`,
                 comment: esc(r.comment || "—"),
-                author: esc(r.created_by || r.user_name || "—"),
+                author: esc(r.created_by || "—"),
                 number: esc(r.number || "—"),
-                title: esc(r.title || r.reason_label || r.comment || "—"),
-                warehouse: esc(r.warehouse_name || "—"),
+                title: esc(r.title || "—"),
                 positions: number(r.position_count),
                 quantity: number(r.total_quantity),
                 status: labels[r.status] || esc(r.status || "—"),
@@ -406,12 +384,10 @@
     $("next").disabled = page >= pages;
   }
   async function openSupply(id) {
-    editorType = "supply";
     current = id ? await api("supplies/" + encodeURIComponent(id)) : null;
     items = current ? current.items.map((i) => ({ ...i })) : [];
     $("title").value = current?.title || "";
     $("comment").value = current?.comment || "";
-    $("receipt-warehouse").value = current?.warehouse_id || warehouses.find((row) => row.is_default)?.id || "";
     $("supply-heading").textContent = current
       ? `Поставка ${current.number}`
       : "Новая поставка";
@@ -423,52 +399,20 @@
     renderItems();
     if (!$("supply-dialog").open) $("supply-dialog").showModal();
   }
-  async function openManualReceipt(id) {
-    editorType = "manual_receipt";
-    current = id ? await api("manual/" + encodeURIComponent(id)) : null;
-    items = current ? current.items.map((item) => ({ ...item })) : [];
-    $("title").value = "";
-    $("comment").value = current?.comment || "";
-    $("receipt-warehouse").value = current?.warehouse_id || warehouses.find((row) => row.is_default)?.id || "";
-    $("receipt-reason").value = current?.reason_code || "stock_adjustment";
-    $("supply-heading").textContent = current ? `Приход ${current.number}` : "Новый приход";
-    $("supply-meta").textContent = current
-      ? `${labels[current.status]} · ${current.warehouse_name} · Создан ${current.created_at}${current.posted_at ? " · Проведён " + current.posted_at + " · " + (current.posted_by || "") : ""}${current.cancelled_at ? " · Отменён " + current.cancelled_at : ""}`
-      : "";
-    message("", true);
-    renderItems();
-    if (!$("supply-dialog").open) $("supply-dialog").showModal();
-  }
   function renderItems() {
     const posted = current?.status === "posted";
-    const manual = editorType === "manual_receipt";
-    $("manual-fields").hidden = false;
-    $("receipt-reason-field").hidden = !manual;
-    $("title-field").hidden = manual;
-    $("title").required = !manual;
-    $("receipt-warehouse").disabled = Boolean(current);
-    $("receipt-reason").disabled = manual && Boolean(current) && current.status !== "draft";
-    $("add-item").hidden = Boolean(
-      current && (manual ? current.status !== "draft" : !["draft", "posted"].includes(current.status)),
-    );
-    $("title").disabled = posted && (!isAdmin || manual);
-    $("comment").disabled = posted && manual;
+    $("add-item").hidden =
+      current && !["draft", "posted"].includes(current.status);
+    $("title").disabled = posted && !isAdmin;
+    $("comment").disabled = posted && !isAdmin;
     $("draft-actions").hidden = posted;
     $("save-first-hint").hidden = Boolean(current);
-    $("save-supply").hidden = posted && (!isAdmin || manual);
+    $("save-supply").hidden = posted && !isAdmin;
     $("save-supply").textContent = posted
       ? "Сохранить реквизиты"
       : "Сохранить черновик";
-    $("post-supply").hidden = posted || current?.status === "cancelled";
-    $("post-supply").textContent = manual ? "Провести приход" : "Провести поставку";
-    $("save-first-hint").textContent = manual
-      ? "Добавьте товары и укажите количество до проведения прихода."
-      : "Добавьте товары и укажите количество до проведения поставки.";
-    $("preview-hint").textContent = manual
-      ? "«Было» и «Станет» до проведения прихода — предварительные значения"
-      : "«Было» и «Станет» до проведения поставки — предварительные значения";
-    $("delete-supply").hidden = !current || (!manual && !isAdmin) || current.status === "cancelled";
-    $("delete-supply").textContent = manual && posted ? "Отменить приход" : manual ? "Удалить черновик" : "Удалить поставку";
+    $("post-supply").hidden = posted;
+    $("delete-supply").hidden = !current || !isAdmin;
     $("items").querySelector("tbody").innerHTML = items
       .map(
         (i, index) =>
@@ -479,27 +423,6 @@
       `Позиций: ${items.length} · Единиц: ${number(items.reduce((sum, i) => sum + Number(i.quantity), 0))}`;
   }
   async function save() {
-    if (editorType === "manual_receipt") {
-      if (!$("receipt-warehouse").value) throw new Error("Выберите склад.");
-      if (!items.length) throw new Error("Добавьте хотя бы один товар.");
-      if ($("receipt-reason").value === "other" && !$("comment").value.trim())
-        throw new Error("Для причины «Другое» укажите комментарий.");
-      if (items.some((item) => !Number.isInteger(item.quantity) || item.quantity <= 0))
-        throw new Error("Количество должно быть целым положительным числом.");
-      const body = JSON.stringify({
-        warehouse_id: $("receipt-warehouse").value,
-        reason_code: $("receipt-reason").value,
-        comment: $("comment").value,
-        items: items.map((item) => ({ product_id: Number(item.product_id ?? item.id), quantity: item.quantity })),
-      });
-      current = await api(current ? "manual/" + encodeURIComponent(current.id) : "manual", {
-        method: current ? "PATCH" : "POST",
-        headers: current ? {} : { "Idempotency-Key": crypto.randomUUID() },
-        body,
-      });
-      items = current.items.map((item) => ({ ...item }));
-      return current;
-    }
     if (!$("title").value.trim()) throw new Error("Укажите название поставки.");
     if (items.some((i) => !Number.isInteger(i.quantity) || i.quantity <= 0))
       throw new Error("Количество должно быть целым положительным числом.");
@@ -509,7 +432,6 @@
         body: JSON.stringify({
           title: $("title").value,
           comment: $("comment").value,
-          warehouse_id: $("receipt-warehouse").value,
         }),
       });
     current = await api("supplies/" + encodeURIComponent(current.id), {
@@ -570,18 +492,7 @@
     page++;
     render();
   };
-  const addMenu = document.querySelector(".add-menu");
-  document.addEventListener("click", (event) => {
-    if (addMenu?.open && !addMenu.contains(event.target)) addMenu.open = false;
-  });
-  $("new-supply").onclick = () => {
-    addMenu.open = false;
-    action(() => openSupply());
-  };
-  $("new-receipt").onclick = () => {
-    addMenu.open = false;
-    action(() => openManualReceipt());
-  };
+  $("new-supply").onclick = () => action(() => openSupply());
   $("close-supply").onclick = () => $("supply-dialog").close();
   $("close-source").onclick = () => $("source-dialog").close();
   $("records").onclick = (e) => {
@@ -595,11 +506,7 @@
     const r = rows.find((i) => String(i.id) === b.dataset.open);
     action(async () => {
       if (tab === "supplies" || r.source_type === "supply") {
-        await openSupply(r.source_id || r.id);
-        return;
-      }
-      if (tab === "receipts" || r.source_type === "manual_receipt") {
-        await openManualReceipt(r.id || r.source_id);
+        await openSupply(tab === "supplies" ? r.id : r.source_id);
         return;
       }
       $("source-content").innerHTML =
@@ -799,7 +706,6 @@
     action(async () => {
       // Persist an uncertain request across refresh. Retrying keeps its original payload and key.
       if (
-        editorType === "supply" &&
         (!current || current.status === "draft") &&
         (!current ||
           JSON.stringify(items) !== JSON.stringify(current.items) ||
@@ -873,22 +779,13 @@
           const imported = await window.ERPProductPicker.bitrix.import(
             p.bitrix_id,
             {
-              supply_id: current?.id || null,
+              supply_id: current.id,
               brand_id: p.brand_id || $("supply-brand").value || null,
               category_id: p.category_id || $("supply-category").value || null,
             },
           );
           p.id = imported.erp_product_id;
           p.cardResolved = true;
-        }
-        if (editorType === "manual_receipt") {
-          const existing = items.find((item) => Number(item.product_id ?? item.id) === Number(p.id));
-          if (existing) existing.quantity = Number(existing.quantity) + quantity;
-          else items.push({ ...p, product_id: Number(p.id), quantity, stock_before: Number(p.stock || 0) });
-          $("add-item-dialog").close();
-          renderItems();
-          message(`${p.name} добавлен в приход: +${quantity} шт.`, true);
-          return;
         }
         addition = {
           cardResolved: Boolean(p.cardResolved),
@@ -943,7 +840,7 @@
   };
   $("save-supply").onclick = () =>
     action(async () => {
-      if (editorType === "supply" && current?.status === "posted") {
+      if (current?.status === "posted") {
         current = await api(
           "supplies/" + encodeURIComponent(current.id) + "/details",
           {
@@ -959,8 +856,7 @@
         await save();
       }
       await load();
-      if (editorType === "manual_receipt") await openManualReceipt(current.id);
-      else await openSupply(current.id);
+      await openSupply(current.id);
       message(
         current.status === "posted"
           ? "Название и комментарий сохранены. Остаток не изменён."
@@ -972,13 +868,12 @@
     action(async () => {
       await save();
       const id = current.id;
-      await api((editorType === "manual_receipt" ? "manual/" : "supplies/") + encodeURIComponent(id) + "/post", {
+      await api("supplies/" + encodeURIComponent(id) + "/post", {
         method: "POST",
       });
       await load();
-      if (editorType === "manual_receipt") await openManualReceipt(id);
-      else await openSupply(id);
-      message(editorType === "manual_receipt" ? "Приход проведён. Остатки обновлены." : "Поставка проведена. Остатки обновлены.", true);
+      await openSupply(id);
+      message("Поставка проведена. Остатки обновлены.", true);
     }, true);
   const deleteLabels = {
     DRAFT_DELETE: "Черновик будет удалён",
@@ -1027,21 +922,6 @@
       : "";
   }
   $("delete-supply").onclick = () => {
-    if (editorType === "manual_receipt") {
-      action(async () => {
-        const posted = current.status === "posted";
-        if (!window.confirm(posted
-          ? "Отменить проведённый приход обратным движением?"
-          : "Удалить черновик прихода?")) return;
-        await api("manual/" + encodeURIComponent(current.id) + (posted ? "/cancel" : ""), {
-          method: posted ? "POST" : "DELETE",
-        });
-        $("supply-dialog").close();
-        await load();
-        message(posted ? "Приход отменён. Создано обратное движение." : "Черновик прихода удалён.");
-      }, true);
-      return;
-    }
     $("delete-confirm-heading").textContent =
       `Удалить поставку ${current.number}?`;
     $("delete-confirm-text").textContent =
