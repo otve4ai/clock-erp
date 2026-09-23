@@ -73,7 +73,7 @@
     }
     form.addEventListener('submit',async (event) => {
         event.preventDefault(); error.textContent = '';
-        const payload = {product_id:form.elements.product_id.value,quantity:form.elements.quantity.value,reason:reason.value,comment:form.elements.comment.value};
+        const payload = {product_id:form.elements.product_id.value,warehouse_id:form.elements.warehouse_id.value,quantity:form.elements.quantity.value,reason:reason.value,comment:form.elements.comment.value};
         if (!payload.product_id || available === null) { error.textContent = 'Выберите товар.'; return; }
         if (!validateQuantity()) return;
         const next = JSON.stringify(payload);

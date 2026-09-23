@@ -119,6 +119,7 @@ from app.services.excel_product_catalog import (
     ExcelProductCatalog,
     ProductDeleteBlockedError,
 )
+from app.services.warehouse_stock import WarehouseStockError, WarehouseStockService
 from app.services.excel_receipt_import import (
     MAX_EXCEL_FILE_SIZE,
     ExcelDraftBlockedError,
@@ -5111,6 +5112,7 @@ def build_excel_warehouse_items(products):
             "stock_display": format_stock_number(stock),
             "reserve": 0,
             "quantity": stock,
+            "warehouse_breakdown": list(product.get("warehouse_breakdown") or []),
             "created_at": created_at,
             "created_at_display": created_at_display,
             "local_image_url": local_image_url,
@@ -5522,6 +5524,7 @@ def inventory_start_api():
             category_id=payload.get("category_id"),
             model_id=payload.get("model_id"),
             idempotency_key=payload.get("idempotency_key", ""),
+            warehouse_id=payload.get("warehouse_id"),
         )
         return {
             "ok": True,
@@ -5632,6 +5635,115 @@ def inventory_cancel_api(inventory_id):
     })
 
 
+def _warehouse_user_id():
+    return str((current_auth_user() or {}).get("id") or "anonymous")
+
+
+def _warehouse_api_error(error):
+    return jsonify({"ok": False, "message": str(error)}), 400
+
+
+@app.route("/api/v1/warehouses", methods=["GET", "POST"])
+def warehouses_api():
+    service = WarehouseStockService()
+    if request.method == "GET":
+        return jsonify({"ok": True, "warehouses": service.list_for_user(_warehouse_user_id())})
+    require_csrf_when_authenticated()
+    payload = request.get_json(silent=True) or {}
+    try:
+        warehouse = service.create_warehouse(payload.get("name"), payload.get("code"))
+        return jsonify({"ok": True, "warehouse": warehouse}), 201
+    except WarehouseStockError as error:
+        return _warehouse_api_error(error)
+
+
+@app.route("/api/v1/warehouse-preferences", methods=["PUT"])
+def warehouse_preferences_api():
+    require_csrf_when_authenticated()
+    payload = request.get_json(silent=True) or {}
+    try:
+        selected = WarehouseStockService().set_selected_warehouses(
+            _warehouse_user_id(), payload.get("warehouse_ids") or []
+        )
+        return jsonify({"ok": True, "warehouse_ids": selected})
+    except WarehouseStockError as error:
+        return _warehouse_api_error(error)
+
+
+@app.route("/api/v1/warehouses/<int:warehouse_id>", methods=["PATCH"])
+def warehouse_update_api(warehouse_id):
+    require_csrf_when_authenticated()
+    try:
+        warehouse = WarehouseStockService().rename_warehouse(
+            warehouse_id, (request.get_json(silent=True) or {}).get("name")
+        )
+        return jsonify({"ok": True, "warehouse": warehouse})
+    except WarehouseStockError as error:
+        return _warehouse_api_error(error)
+
+
+@app.route("/api/v1/warehouses/<int:warehouse_id>/archive", methods=["POST"])
+def warehouse_archive_api(warehouse_id):
+    require_csrf_when_authenticated()
+    try:
+        WarehouseStockService().archive_warehouse(warehouse_id)
+        return jsonify({"ok": True})
+    except WarehouseStockError as error:
+        return _warehouse_api_error(error)
+
+
+@app.route("/api/v1/products/<int:product_id>/warehouse-stock")
+def product_warehouse_stock_api(product_id):
+    service = WarehouseStockService()
+    warehouse_ids = service.selected_warehouse_ids(_warehouse_user_id())
+    result = ExcelProductCatalog().list_products(
+        product_id=product_id, per_page=1, include_facets=False,
+        warehouse_ids=warehouse_ids,
+    )
+    if not result["items"]:
+        return jsonify({"ok": False, "message": "Товар не найден."}), 404
+    product = result["items"][0]
+    return jsonify({"ok": True, "product_id": product_id,
+                    "total": float(product.get("stock") or 0),
+                    "warehouses": product.get("warehouse_breakdown") or []})
+
+
+@app.route("/api/v1/warehouse-products/search")
+def warehouse_products_search_api():
+    try:
+        warehouse_id = int(request.args.get("warehouse_id") or 0)
+        items = ExcelProductCatalog().list_products(
+            query=(request.args.get("q") or "").strip(), per_page=20,
+            include_facets=False, warehouse_ids=[warehouse_id],
+        )["items"]
+        return jsonify({"ok": True, "items": [{
+            "id": item["id"], "name": item.get("excel_name_raw") or "",
+            "article": item.get("excel_article") or "",
+            "stock": float(item.get("stock") or 0),
+            "is_bundle": bool(item.get("is_bundle")),
+        } for item in items]})
+    except (ValueError, WarehouseStockError) as error:
+        return _warehouse_api_error(error)
+
+
+@app.route("/api/v1/warehouse-transfers", methods=["POST"])
+def warehouse_transfers_api():
+    require_csrf_when_authenticated()
+    payload = request.get_json(silent=True) or {}
+    user = current_auth_user() or {}
+    try:
+        transfer = WarehouseStockService().transfer(
+            payload.get("product_id"), payload.get("from_warehouse_id"),
+            payload.get("to_warehouse_id"), payload.get("quantity"),
+            actor={"actor_id": user.get("id"), "actor_name": user.get("login")},
+            comment=payload.get("comment") or "",
+            idempotency_key=payload.get("idempotency_key") or "",
+        )
+        return jsonify({"ok": True, "transfer": transfer}), 201
+    except WarehouseStockError as error:
+        return _warehouse_api_error(error)
+
+
 @app.route("/warehouse")
 @app.route("/app/products")
 def warehouse_page():
@@ -5640,7 +5752,14 @@ def warehouse_page():
         request.headers.get("X-ERP-Partial") == "products-v1"
     )
     product_catalog = ExcelProductCatalog()
-    tab_counts = product_catalog.stock_tab_counts()
+    warehouse_service = WarehouseStockService()
+    warehouse_user_id = str((current_auth_user() or {}).get("id") or "anonymous")
+    selected_warehouse_ids = warehouse_service.selected_warehouse_ids(warehouse_user_id)
+    warehouses = warehouse_service.list_for_user(warehouse_user_id)
+    try:
+        tab_counts = product_catalog.stock_tab_counts(selected_warehouse_ids)
+    except TypeError:
+        tab_counts = product_catalog.stock_tab_counts()
     if not isinstance(tab_counts, dict):
         # Keeps route-level test doubles and extensions that predate tab counts
         # compatible while the real catalog service always returns this shape.
@@ -5962,6 +6081,7 @@ def warehouse_page():
         include_facets=False,
         stock_state=stock_state,
         check_state=check_state if out_of_stock else "all",
+        warehouse_ids=selected_warehouse_ids,
     )
     catalog_stats = catalog.get("stats") or {}
     product_metrics = {
@@ -6120,6 +6240,8 @@ def warehouse_page():
             total_found=catalog["total"],
             pagination=pagination,
             active_brand_inventory=active_brand_inventory,
+            warehouses=warehouses,
+            selected_warehouse_ids=selected_warehouse_ids,
             warehouse_table_ui_e2e=(
                 app.testing
                 and request.args.get("table_ui_e2e") == "1"
@@ -10957,6 +11079,7 @@ def manual_sale_add():
         "category": catalog_product["category"],
         "brand_id": catalog_product.get("brand_id"),
         "category_id": catalog_product.get("category_id"),
+        "warehouse_id": request.form.get("warehouse_id"),
         "quantity": quantity,
         **pricing,
         "unit_price": unit_price,
@@ -18129,7 +18252,7 @@ def excel_receipt_draft_page(draft_id):
 def excel_receipt_post(draft_id):
     service = ExcelReceiptImportService()
     try:
-        receipt = service.post(draft_id)
+        receipt = service.post(draft_id, warehouse_id=request.form.get("warehouse_id"))
     except ExcelDraftBlockedError as error:
         _publish_system_event(
             "receipt_import:error:{}:{}".format(draft_id, getattr(g, "operation_id", "") or uuid.uuid4().hex),

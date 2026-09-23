@@ -183,6 +183,111 @@ class WarehouseStockService:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def selected_warehouse_ids(self, user_id):
+        """Return an always non-empty, active per-user warehouse selection."""
+        user_id = str(user_id or "anonymous")
+        self.database.initialize()
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT w.id FROM erp_user_warehouse_preferences p "
+                "JOIN erp_warehouses w ON w.id=p.warehouse_id "
+                "WHERE p.user_id=? AND w.is_active=1 ORDER BY w.id",
+                (user_id,),
+            ).fetchall()
+            if rows:
+                return [int(row[0]) for row in rows]
+            return [default_warehouse_id(connection)]
+
+    def set_selected_warehouses(self, user_id, warehouse_ids):
+        user_id = str(user_id or "anonymous")
+        try:
+            warehouse_ids = sorted({int(value) for value in warehouse_ids})
+        except (TypeError, ValueError):
+            raise WarehouseStockError("Некорректный список складов.")
+        if not warehouse_ids:
+            raise WarehouseStockError("Выберите хотя бы один склад.")
+        self.database.initialize()
+        with self.database.transaction() as connection:
+            active = {
+                int(row[0]) for row in connection.execute(
+                    "SELECT id FROM erp_warehouses WHERE is_active=1 AND id IN ({})".format(
+                        ",".join("?" for _ in warehouse_ids)
+                    ), warehouse_ids,
+                ).fetchall()
+            }
+            if active != set(warehouse_ids):
+                raise WarehouseStockError("Один из складов не найден или архивирован.")
+            connection.execute(
+                "DELETE FROM erp_user_warehouse_preferences WHERE user_id=?",
+                (user_id,),
+            )
+            timestamp = utc_now()
+            connection.executemany(
+                "INSERT INTO erp_user_warehouse_preferences"
+                "(user_id,warehouse_id,selected_at) VALUES (?,?,?)",
+                [(user_id, warehouse_id, timestamp) for warehouse_id in warehouse_ids],
+            )
+        return self.selected_warehouse_ids(user_id)
+
+    def list_for_user(self, user_id):
+        selected = set(self.selected_warehouse_ids(user_id))
+        self.database.initialize()
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT w.id,w.code,w.name,w.is_active,"
+                "COALESCE(SUM(CASE WHEN p.active=1 AND b.product_id IS NULL "
+                "THEN s.quantity ELSE 0 END),0) AS total "
+                "FROM erp_warehouses w "
+                "LEFT JOIN erp_product_warehouse_stock s ON s.warehouse_id=w.id "
+                "LEFT JOIN catalog_excel_products p ON p.id=s.product_id "
+                "LEFT JOIN erp_product_bundles b ON b.product_id=p.id "
+                "WHERE w.is_active=1 GROUP BY w.id ORDER BY w.id"
+            ).fetchall()
+        return [{**dict(row), "selected": int(row["id"]) in selected} for row in rows]
+
+    def rename_warehouse(self, warehouse_id, name):
+        name = " ".join(str(name or "").split())
+        if not name:
+            raise WarehouseStockError("Название склада обязательно.")
+        self.database.initialize()
+        with self.database.transaction() as connection:
+            warehouse_id = require_warehouse(connection, warehouse_id)
+            try:
+                connection.execute(
+                    "UPDATE erp_warehouses SET name=?,normalized_name=?,updated_at=? WHERE id=?",
+                    (name, name.casefold(), utc_now(), warehouse_id),
+                )
+            except Exception as error:
+                if "UNIQUE" in str(error).upper():
+                    raise WarehouseStockError("Склад с таким названием уже существует.")
+                raise
+            return dict(connection.execute(
+                "SELECT * FROM erp_warehouses WHERE id=?", (warehouse_id,)
+            ).fetchone())
+
+    def archive_warehouse(self, warehouse_id):
+        self.database.initialize()
+        with self.database.transaction() as connection:
+            warehouse_id = require_warehouse(connection, warehouse_id)
+            if warehouse_id == default_warehouse_id(connection):
+                raise WarehouseStockError("Склад по умолчанию нельзя архивировать.")
+            nonempty = connection.execute(
+                "SELECT 1 FROM erp_product_warehouse_stock "
+                "WHERE warehouse_id=? AND abs(quantity)>0.000001 LIMIT 1",
+                (warehouse_id,),
+            ).fetchone()
+            if nonempty is not None:
+                raise WarehouseStockError("Архивировать можно только пустой склад.")
+            connection.execute(
+                "UPDATE erp_warehouses SET is_active=0,updated_at=? WHERE id=?",
+                (utc_now(), warehouse_id),
+            )
+            connection.execute(
+                "DELETE FROM erp_user_warehouse_preferences WHERE warehouse_id=?",
+                (warehouse_id,),
+            )
+        return True
+
     def create_warehouse(self, name, code=None):
         name = " ".join(str(name or "").split())
         if not name:

@@ -47,6 +47,7 @@
   </div>
 </div>
 <h3 class="erp-form-section-title field-wide sale-section-title">Списание</h3>
+<div class="field"><label for="writeoffWarehouse">Склад *</label><select id="writeoffWarehouse" class="control" name="warehouse_id" data-operational-warehouse required><option value="">Загрузка…</option></select></div>
 <div class="field"><label for="writeoffQuantity">Количество *</label><input id="writeoffQuantity" class="control" aria-describedby="writeoffQuantityError" name="quantity" type="number" min="1" step="1" required value="1"><span id="writeoffQuantityError" class="erp-field-error" role="alert" hidden></span></div>
 <div class="field"><label for="writeoffReason">Причина *</label><select id="writeoffReason" class="control" name="reason" required><option value="">Выберите причину</option>{% for reason in reasons %}<option>{{ reason }}</option>{% endfor %}</select></div>
 <div class="field field-wide"><label for="writeoffComment">Комментарий</label><textarea id="writeoffComment" class="control" name="comment" maxlength="2000"></textarea></div>
@@ -54,3 +55,4 @@
 </form></div></div>
 <script src="{{ url_for('static',filename='js/catalog-combobox.js') }}"></script>
 <script src="{{ url_for('static',filename='js/writeoffs.js') }}"></script>
+<script src="{{ url_for('static',filename='js/warehouse-operation-selectors.js') }}"></script>

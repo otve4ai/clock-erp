@@ -74,6 +74,53 @@ PRODUCT_MUTABLE_COLUMNS = (
 UNSET = object()
 
 
+def warehouse_stock_cte(warehouse_ids):
+    """Build the canonical selected-warehouse stock read model."""
+    warehouse_ids = sorted({int(value) for value in warehouse_ids})
+    if not warehouse_ids:
+        raise ValueError("At least one warehouse is required")
+    values = ",".join("(?)" for _ in warehouse_ids)
+    sql = """WITH selected_warehouses(warehouse_id) AS (VALUES {values}),
+ordinary_stock AS (
+    SELECT p.id AS product_id, COALESCE(SUM(s.quantity),0) AS quantity
+    FROM catalog_excel_products p CROSS JOIN selected_warehouses sw
+    LEFT JOIN erp_product_warehouse_stock s
+      ON s.product_id=p.id AND s.warehouse_id=sw.warehouse_id
+    GROUP BY p.id
+),
+bundle_per_warehouse AS (
+    SELECT bundle.product_id, sw.warehouse_id,
+      CASE WHEN COUNT(component.component_id)=0 THEN 0
+           WHEN SUM(CASE WHEN physical.active<>1 OR stock.initialized_at IS NULL
+                         THEN 1 ELSE 0 END)>0 THEN 0
+           ELSE MIN(CAST(COALESCE(stock.quantity,0) / component.quantity AS INTEGER)) END
+      AS quantity
+    FROM erp_product_bundles bundle CROSS JOIN selected_warehouses sw
+    LEFT JOIN erp_bundle_components component
+      ON component.product_id=bundle.product_id
+    LEFT JOIN catalog_excel_products physical ON physical.id=component.component_id
+    LEFT JOIN erp_product_warehouse_stock stock
+      ON stock.product_id=component.component_id AND stock.warehouse_id=sw.warehouse_id
+    GROUP BY bundle.product_id,sw.warehouse_id
+),
+bundle_stock AS (
+    SELECT product_id,COALESCE(SUM(quantity),0) AS quantity
+    FROM bundle_per_warehouse GROUP BY product_id
+),
+warehouse_stock_view AS (
+    SELECT p.id AS product_id,
+      CASE WHEN bundle.product_id IS NULL THEN ordinary.quantity
+           ELSE COALESCE(bundle_stock.quantity,0) END AS quantity,
+      CASE WHEN bundle.product_id IS NULL THEN 0 ELSE 1 END AS is_bundle
+    FROM catalog_excel_products p
+    LEFT JOIN ordinary_stock ordinary ON ordinary.product_id=p.id
+    LEFT JOIN erp_product_bundles bundle ON bundle.product_id=p.id
+    LEFT JOIN bundle_stock ON bundle_stock.product_id=p.id
+)
+""".format(values=values)
+    return sql, warehouse_ids
+
+
 def canonical_model_text(value):
     value = unicodedata.normalize("NFKC", str(value or ""))
     return re.sub(r"\s+", " ", value).strip()
@@ -835,9 +882,15 @@ class ExcelProductCatalog:
                       category_id=None, model_id=None, product_id=None,
                       include_cell_item_names=True, include_facets=True,
                       include_inventory_locked=False, stock_state="all",
-                      check_state="all"):
+                      check_state="all", warehouse_ids=None):
         self.database.initialize()
-        if stock_state == "out" or check_state != "all":
+        warehouse_selection_provided = warehouse_ids is not None
+        if warehouse_ids is None:
+            with self.database.connect() as connection:
+                warehouse_ids = [default_warehouse_id(connection)]
+        stock_cte, stock_parameters = warehouse_stock_cte(warehouse_ids)
+        if not warehouse_selection_provided and (
+                stock_state == "out" or check_state != "all"):
             OutOfStockChecks(self.database).sync()
         page = max(1, int(page))
         per_page = max(1, min(int(per_page), 100000))
@@ -847,7 +900,7 @@ class ExcelProductCatalog:
             "article": "COALESCE(p.excel_article, '')",
             "brand": "COALESCE(p.excel_brand, '')",
             "category": "COALESCE(p.excel_category, '')",
-            "stock": "p.stock",
+            "stock": "warehouse_stock_view.quantity",
             "cell": "COALESCE(p.cell, '')",
             "created_at": "p.created_at",
             "price": "CAST(NULLIF(p.bitrix_price_amount, '') AS REAL)",
@@ -903,11 +956,11 @@ class ExcelProductCatalog:
                 where.append("trim(COALESCE(p.cell, '')) = ?")
                 parameters.append(cell)
         if hide_zero:
-            where.append("p.stock > 0 AND CAST(p.stock AS REAL) > 0")
+            where.append("warehouse_stock_view.quantity > 0")
         if stock_state == "out":
-            where.append("p.stock = 0")
+            where.append("warehouse_stock_view.quantity = 0")
         elif stock_state == "in":
-            where.append("p.stock > 0")
+            where.append("warehouse_stock_view.quantity > 0")
         if check_state in {"unchecked", "partial", "complete"}:
             count_sql = (
                 "SELECT COUNT(*) FROM erp_out_of_stock_checks k "
@@ -949,14 +1002,17 @@ class ExcelProductCatalog:
             " WHERE " + " AND ".join(brand_facet_where)
         )
         select_sql = (
-            "SELECT p.*, c.name AS category_name, cp.barcode AS bitrix_barcode, "
+            "SELECT p.*, warehouse_stock_view.quantity AS warehouse_stock, "
+            "warehouse_stock_view.is_bundle AS is_bundle, "
+            "c.name AS category_name, cp.barcode AS bitrix_barcode, "
             "b.source_filename, b.applied_at, b.row_count AS batch_row_count "
             "FROM catalog_excel_products p JOIN catalog_excel_batches b "
             "ON b.id = p.current_batch_id "
             "LEFT JOIN catalog_products cp "
             "ON cp.id = p.bitrix_catalog_product_id "
             "LEFT JOIN erp_categories c "
-            "ON c.id = p.category_id"
+            "ON c.id = p.category_id "
+            "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id"
         )
         with self.database.connect() as connection:
             if query or model:
@@ -966,28 +1022,32 @@ class ExcelProductCatalog:
                 "ORDER BY applied_at DESC LIMIT 1"
             ).fetchone()
             total = connection.execute(
-                "SELECT COUNT(*) FROM catalog_excel_products p "
+                stock_cte + "SELECT COUNT(*) FROM catalog_excel_products p "
                 "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
                 "LEFT JOIN catalog_products cp "
-                "ON cp.id = p.bitrix_catalog_product_id" + where_sql,
-                parameters,
+                "ON cp.id = p.bitrix_catalog_product_id "
+                "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id" + where_sql,
+                stock_parameters + parameters,
             ).fetchone()[0]
             pages = (total + per_page - 1) // per_page
             if pages and page > pages:
                 page = pages
             stats = dict(connection.execute(
-                "SELECT COUNT(*) AS positions, COALESCE(SUM(p.stock), 0) AS total_stock, "
-                "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
+                stock_cte + "SELECT COUNT(*) AS positions, "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.is_bundle=0 "
+                "THEN warehouse_stock_view.quantity ELSE 0 END),0) AS total_stock, "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity > 0 THEN 1 ELSE 0 END), 0) "
                 "AS positive_positions, "
-                "COALESCE(SUM(CASE WHEN p.stock = 0 THEN 1 ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity = 0 THEN 1 ELSE 0 END), 0) "
                 "AS zero_positions, "
                 "COALESCE(SUM(CASE WHEN p.bitrix_catalog_product_id IS NOT NULL "
                 "THEN 1 ELSE 0 END), 0) "
                 "AS matched_positions FROM catalog_excel_products p "
                 "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
                 "LEFT JOIN catalog_products cp "
-                "ON cp.id = p.bitrix_catalog_product_id" + where_sql,
-                parameters,
+                "ON cp.id = p.bitrix_catalog_product_id "
+                "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id" + where_sql,
+                stock_parameters + parameters,
             ).fetchone())
             missing_price_sql = (
                 "CASE WHEN NULLIF(p.bitrix_price_amount, '') IS NULL THEN 1 ELSE 0 END, "
@@ -1007,9 +1067,9 @@ class ExcelProductCatalog:
                 )
                 stable_order_sql = ", p.excel_row ASC, p.id ASC"
             rows = connection.execute(
-                select_sql + where_sql + order_sql + stable_order_sql
+                stock_cte + select_sql + where_sql + order_sql + stable_order_sql
                 + " LIMIT ? OFFSET ?",
-                parameters + [per_page, (page - 1) * per_page],
+                stock_parameters + parameters + [per_page, (page - 1) * per_page],
             ).fetchall()
             brands = []
             categories = []
@@ -1021,25 +1081,27 @@ class ExcelProductCatalog:
             status_counts = {}
             if include_facets:
                 brand_groups = [dict(row) for row in connection.execute(
-                    "SELECT trim(p.excel_brand) AS name, COUNT(*) AS count "
+                    stock_cte + "SELECT trim(p.excel_brand) AS name, COUNT(*) AS count "
                     "FROM catalog_excel_products p JOIN catalog_excel_batches b "
                     "ON b.id = p.current_batch_id "
                     "LEFT JOIN catalog_products cp "
-                    "ON cp.id = p.bitrix_catalog_product_id"
+                    "ON cp.id = p.bitrix_catalog_product_id "
+                    "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id"
                     + brand_facet_where_sql + " "
                     "AND trim(COALESCE(p.excel_brand, '')) <> '' "
                     "AND trim(p.excel_brand) GLOB '*[^0-9]*' "
                     "GROUP BY trim(p.excel_brand) COLLATE NOCASE "
                     "HAVING COUNT(*) > 0 ORDER BY name COLLATE NOCASE",
-                    brand_facet_parameters,
+                    stock_parameters + brand_facet_parameters,
                 ).fetchall()]
                 brand_all_count = connection.execute(
-                    "SELECT COUNT(*) FROM catalog_excel_products p "
+                    stock_cte + "SELECT COUNT(*) FROM catalog_excel_products p "
                     "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
                     "LEFT JOIN catalog_products cp "
-                    "ON cp.id = p.bitrix_catalog_product_id"
+                    "ON cp.id = p.bitrix_catalog_product_id "
+                    "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id"
                     + brand_facet_where_sql,
-                    brand_facet_parameters,
+                    stock_parameters + brand_facet_parameters,
                 ).fetchone()[0]
                 brands = [group["name"] for group in brand_groups]
                 categories = [row[0] for row in connection.execute(
@@ -1074,18 +1136,19 @@ class ExcelProductCatalog:
                     else ""
                 )
                 cell_groups = [dict(row) for row in connection.execute(
-                    "SELECT CASE WHEN trim(COALESCE(p.cell, '')) = '' THEN "
+                    stock_cte + "SELECT CASE WHEN trim(COALESCE(p.cell, '')) = '' THEN "
                     "'Без ячейки' ELSE trim(p.cell) END AS cell, "
-                    "COUNT(*) AS count, COALESCE(SUM(p.stock), 0) AS stock "
+                    "COUNT(*) AS count, COALESCE(SUM(warehouse_stock_view.quantity), 0) AS stock "
                     + cell_item_names_sql
                     + "FROM catalog_excel_products p "
                     "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
+                    "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id "
                     "WHERE p.active = 1 AND " + visible_cards_sql + " "
                     "GROUP BY CASE WHEN trim(COALESCE(p.cell, '')) = '' "
                     "THEN 'Без ячейки' ELSE trim(p.cell) END "
                     "ORDER BY CASE WHEN trim(COALESCE(p.cell, '')) = '' "
                     "THEN 1 ELSE 0 END, cell"
-                ).fetchall()]
+                , stock_parameters).fetchall()]
                 status_counts = {
                     row["match_status"]: row["count"]
                     for row in connection.execute(
@@ -1096,7 +1159,47 @@ class ExcelProductCatalog:
                         + visible_cards_sql + " GROUP BY p.match_status"
                     ).fetchall()
                 }
-        items = [self._prepare_product(dict(row)) for row in rows]
+            prepared_rows = []
+            for row in rows:
+                prepared = dict(row)
+                prepared["stock"] = float(prepared.pop("warehouse_stock") or 0)
+                prepared_rows.append(prepared)
+            product_ids = [int(row["id"]) for row in prepared_rows]
+            breakdown = {}
+            if product_ids:
+                product_marks = ",".join("?" for _ in product_ids)
+                warehouse_marks = ",".join("?" for _ in warehouse_ids)
+                detail_rows = connection.execute(
+                    "SELECT p.id AS product_id,w.id AS warehouse_id,w.name,"
+                    "CASE WHEN bundle.product_id IS NULL THEN COALESCE(stock.quantity,0) "
+                    "ELSE COALESCE((SELECT MIN(CASE WHEN physical.active<>1 "
+                    "OR component_stock.initialized_at IS NULL THEN 0 "
+                    "ELSE CAST(COALESCE(component_stock.quantity,0)/component.quantity AS INTEGER) END) "
+                    "FROM erp_bundle_components component "
+                    "LEFT JOIN catalog_excel_products physical ON physical.id=component.component_id "
+                    "LEFT JOIN erp_product_warehouse_stock component_stock "
+                    "ON component_stock.product_id=component.component_id "
+                    "AND component_stock.warehouse_id=w.id "
+                    "WHERE component.product_id=p.id),0) END AS quantity "
+                    "FROM catalog_excel_products p CROSS JOIN erp_warehouses w "
+                    "LEFT JOIN erp_product_bundles bundle ON bundle.product_id=p.id "
+                    "LEFT JOIN erp_product_warehouse_stock stock "
+                    "ON stock.product_id=p.id AND stock.warehouse_id=w.id "
+                    "WHERE p.id IN ({}) AND w.id IN ({}) "
+                    "ORDER BY p.id,w.id".format(product_marks, warehouse_marks),
+                    product_ids + list(warehouse_ids),
+                ).fetchall()
+                for detail in detail_rows:
+                    breakdown.setdefault(int(detail["product_id"]), []).append({
+                        "id": int(detail["warehouse_id"]),
+                        "name": detail["name"],
+                        "quantity": float(detail["quantity"] or 0),
+                    })
+        items = []
+        for row in prepared_rows:
+            item = self._prepare_product(row)
+            item["warehouse_breakdown"] = breakdown.get(int(row["id"]), [])
+            items.append(item)
         return {
             "items": items, "total": total, "page": page, "per_page": per_page,
             "pages": pages,
@@ -1109,19 +1212,26 @@ class ExcelProductCatalog:
             "active_batch": dict(active_batch) if active_batch else None,
         }
 
-    def stock_tab_counts(self):
+    def stock_tab_counts(self, warehouse_ids=None):
         """Return unfiltered active-product counts for persistent catalog tabs."""
         self.database.initialize()
         with self.database.connect() as connection:
+            if warehouse_ids is None:
+                warehouse_ids = [default_warehouse_id(connection)]
+            stock_cte, stock_parameters = warehouse_stock_cte(warehouse_ids)
             row = connection.execute(
-                "SELECT COUNT(*) AS positions, "
-                "COALESCE(SUM(CASE WHEN stock > 0 THEN 1 ELSE 0 END), 0) "
-                "AS in_stock, COALESCE(SUM(CASE WHEN stock = 0 THEN 1 ELSE 0 END), 0) "
-                "AS out_of_stock, COALESCE(SUM(CASE WHEN stock > 0 THEN stock ELSE 0 END), 0) "
-                "AS units_in_stock, COALESCE(SUM(stock), 0) AS units_total "
+                stock_cte + "SELECT COUNT(*) AS positions, "
+                "COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity > 0 THEN 1 ELSE 0 END), 0) "
+                "AS in_stock, COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity = 0 THEN 1 ELSE 0 END), 0) "
+                "AS out_of_stock, COALESCE(SUM(CASE WHEN warehouse_stock_view.quantity > 0 "
+                "AND warehouse_stock_view.is_bundle=0 THEN warehouse_stock_view.quantity ELSE 0 END), 0) "
+                "AS units_in_stock, COALESCE(SUM(CASE WHEN warehouse_stock_view.is_bundle=0 "
+                "THEN warehouse_stock_view.quantity ELSE 0 END), 0) AS units_total "
                 "FROM catalog_excel_products p "
                 "LEFT JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
-                "WHERE p.active = 1 AND " + VISIBLE_PRODUCT_SQL
+                "JOIN warehouse_stock_view ON warehouse_stock_view.product_id=p.id "
+                "WHERE p.active = 1 AND " + VISIBLE_PRODUCT_SQL,
+                stock_parameters,
             ).fetchone()
         return {
             "positions": int(row["positions"] or 0),
