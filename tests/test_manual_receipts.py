@@ -169,7 +169,7 @@ class ManualReceiptTest(unittest.TestCase):
         self.assertEqual([row["id"] for row in self.supplies.list()], [supply["id"]])
         self.assertEqual([row["id"] for row in self.manual.list()], [manual["id"]])
 
-    def test_http_routes_expose_tabs_warehouses_and_lifecycle(self):
+    def test_http_routes_restore_historical_workspace_without_schema_rollback(self):
         import app.web as web
 
         product = self.product()
@@ -179,8 +179,17 @@ class ManualReceiptTest(unittest.TestCase):
             page = client.get("/app/receipts")
             self.assertEqual(page.status_code, 200)
             html = page.get_data(as_text=True)
-            for text in ("Поступления", "Все записи", "Поставки", "Приходы", "Отмены продаж", "+ Добавить"):
+            for text in ("Приход", "Все записи", "Поставки", "Отмены продаж", "+ Новая поставка"):
                 self.assertIn(text, html)
+            for text in ("Поступления", 'data-tab="receipts"', 'id="new-receipt"', 'class="add-menu"', "+ Добавить</summary>"):
+                self.assertNotIn(text, html)
+            with patch.object(web, "load_receipts", return_value=[{
+                "id": "legacy-receipt", "number": "ПР-OLD", "status": "posted",
+                "created_at": "2026-01-01T10:00:00+00:00",
+                "positions": [{"product_id": product, "product_name": "Watch 1", "quantity": 4}],
+            }]):
+                movements = client.get("/api/v1/receipts/movements").get_json()["data"]
+            self.assertIn("legacy:legacy-receipt:0", {row["id"] for row in movements})
             warehouses = client.get("/api/v1/receipts/warehouses").get_json()["data"]
             self.assertEqual({row["id"] for row in warehouses}, {"default", "hong-kong"})
             created = client.post("/api/v1/receipts/manual", json={
