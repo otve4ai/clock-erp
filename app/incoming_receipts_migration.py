@@ -31,6 +31,14 @@ def _columns(connection, table):
 
 def apply_incoming_receipts_migration(connection, ddl_observer=None):
     for statement in INCOMING_RECEIPTS_SQL:
+        tokens = statement.split()
+        object_type = tokens[1].lower()
+        object_name = tokens[2]
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type=? AND name=?",
+            (object_type, object_name),
+        ).fetchone() is not None:
+            continue
         if ddl_observer:
             ddl_observer(statement)
         connection.execute(statement)

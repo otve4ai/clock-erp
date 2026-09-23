@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.catalog_db import CatalogDatabase
 from app.remove_product_collections_migration import apply_remove_collections_migration
+from app.incoming_receipts_migration import apply_incoming_receipts_migration
 from app.catalog_migration_steps import apply_fresh_catalog_schema
 from app.services.excel_product_catalog import (
     ExcelProductBatchService,
@@ -875,6 +876,7 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
             connection.row_factory = sqlite3.Row
             apply_fresh_catalog_schema(connection)
             apply_remove_collections_migration(connection)
+            apply_incoming_receipts_migration(connection)
         self.database.initialize()
 
         with self.database.connect() as connection:
@@ -937,6 +939,7 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
             connection.row_factory = sqlite3.Row
             apply_fresh_catalog_schema(connection)
             apply_remove_collections_migration(connection)
+            apply_incoming_receipts_migration(connection)
         self.database.initialize()
 
         restored = self.receipts.get_receipt(receipt["id"])

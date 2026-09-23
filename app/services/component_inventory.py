@@ -49,7 +49,7 @@ def write_balance(connection, product_id, value, source, timestamp, document=Non
     value = float(value)
     if not math.isfinite(value) or value < 0:
         raise ValueError("Физический остаток не может быть отрицательным.")
-    previous = balance(connection, product_id, document, require_initialized=False)
+    balance(connection, product_id, document, require_initialized=False)
     if physical(connection, product_id, document):
         cursor = connection.execute("UPDATE erp_component_inventory SET physical_stock=?,updated_at=? WHERE product_id=?",
                                     (value, timestamp, int(product_id)))
@@ -64,12 +64,15 @@ def write_balance(connection, product_id, value, source, timestamp, document=Non
             "SELECT id FROM erp_warehouses WHERE active=1 AND is_default=1"
         ).fetchone()
         if warehouse is not None:
-            row = connection.execute(
-                "SELECT quantity FROM erp_warehouse_stocks WHERE warehouse_id=? AND product_id=?",
+            other_total = connection.execute(
+                "SELECT COALESCE(SUM(quantity),0) FROM erp_warehouse_stocks "
+                "WHERE warehouse_id<>? AND product_id=?",
                 (warehouse[0], int(product_id)),
-            ).fetchone()
-            before = float(row[0]) if row is not None else previous
-            after = before + (value - previous)
+            ).fetchone()[0]
+            # Reconcile the default warehouse against the authoritative total.
+            # This also tolerates legacy callers and tests that still update the
+            # aggregate catalog stock directly between inventory operations.
+            after = value - float(other_total or 0)
             if after < -0.000001:
                 raise ValueError("Остаток основного склада не может быть отрицательным.")
             connection.execute(

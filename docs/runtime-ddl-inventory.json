@@ -98,7 +98,7 @@
     },
     {
       "file": "app/incoming_receipts_migration.py",
-      "sha256": "62924381cac53a2cbdc348f26b12b3a94f2c6853645256a2a10f7e228de3666e",
+      "sha256": "69805257f29f6f4da2bb6e6f6e38d7e7d6252ecdda76596a15676a4488473557",
       "owner": "catalog-migrations"
     },
     {
