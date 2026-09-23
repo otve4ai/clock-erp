@@ -58,6 +58,13 @@ class CatalogNormalizationTest(unittest.TestCase):
         self.assertEqual(product["external_sku"], "")
         self.assertEqual(product["external_xml_id"], "")
         self.assertEqual(product["images"], [])
+        self.assertFalse(product["active_known"])
+
+    def test_exported_active_value_is_marked_as_known(self):
+        active = normalize_product({"ID": 1, "NAME": "Active", "active": True})
+        inactive = normalize_product({"ID": 2, "NAME": "Inactive", "active": False})
+        self.assertTrue(active["active_known"])
+        self.assertTrue(inactive["active_known"])
 
     def test_code_is_used_as_article_when_article_is_missing(self):
         product = normalize_product({"ID": 1, "CODE": "Z031-TITI-W15BK"})

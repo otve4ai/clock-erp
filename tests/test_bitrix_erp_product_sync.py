@@ -8,6 +8,7 @@ from app.services.bitrix_catalog_importer import BitrixCatalogImporter
 from app.services.bitrix_erp_product_sync import (
     BitrixERPProductSync,
     create_database_backup,
+    enrichment_from_product,
 )
 from app.services.excel_product_catalog import ExcelProductBatchService, ExcelProductCatalog
 from scripts.sync_bitrix_products import sync_bitrix_products
@@ -110,6 +111,15 @@ def excel_result(row, name, brand, stock, article="", category=""):
 
 
 class BitrixERPProductSyncTest(unittest.TestCase):
+    def test_missing_source_active_is_preserved_as_unknown(self):
+        missing = product()
+        missing.pop("active")
+        known = product(identity="2")
+        known["active"] = False
+
+        self.assertIsNone(enrichment_from_product(missing)["bitrix_active"])
+        self.assertEqual(enrichment_from_product(known)["bitrix_active"], 0)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.path = Path(self.temp.name) / "catalog.db"

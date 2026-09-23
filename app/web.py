@@ -63,6 +63,7 @@ from app.services.bitrix_erp_product_sync import (
     enrichment_from_product,
     single_import_quantity,
 )
+from app.services.bitrix_site_status import bitrix_site_status
 from app.services.audit_journal import AuditJournal
 from app.services.order_presentation import present_order, status_key, status_label, navigation_counts
 from app.services.service_vault import (
@@ -5033,6 +5034,12 @@ def build_bitrix_product_links(element_id, public_product_url=""):
 def build_excel_warehouse_items(products):
     items = []
     for product in products:
+        bitrix_element_id = str(
+            product.get("bitrix_external_product_id") or ""
+        ).strip()
+        site_status = bitrix_site_status(
+            bitrix_element_id, product.get("bitrix_active")
+        )
         created_text = str(product.get("created_at") or "")
         try:
             created_at = time.mktime(time.strptime(created_text[:19], "%Y-%m-%dT%H:%M:%S"))
@@ -5110,12 +5117,14 @@ def build_excel_warehouse_items(products):
                 float(price) if price not in (None, "") else None
             ),
             "price_display": price_display,
+            "site_status_key": site_status["key"],
+            "site_status_label": site_status["label"],
             # Legacy export field retained for compatibility. UI links use the
             # explicit admin/public fields below.
             "moysklad_url": product.get("bitrix_source_url") or "",
         }
         item.update(build_bitrix_product_links(
-            product.get("bitrix_external_product_id"),
+            bitrix_element_id,
             product.get("bitrix_source_url"),
         ))
         items.append(item)

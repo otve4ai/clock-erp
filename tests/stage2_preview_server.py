@@ -175,6 +175,26 @@ with CatalogDatabase(PREVIEW_ROOT / "catalog.db").transaction() as connection:
         "WHERE id = ?",
         ("/product-images/{}".format(fixture_local_name), product_ids[1]),
     )
+    for article, external_id, active in (
+        ("PAGE-121", "204701", 1),
+        ("PAGE-120", "204702", 0),
+        ("PAGE-119", "204703", None),
+    ):
+        connection.execute(
+            "UPDATE catalog_excel_products SET bitrix_external_product_id = ?, "
+            "bitrix_active = ? WHERE excel_article = ?",
+            (external_id, active, article),
+        )
+
+preview_site_statuses = {
+    "PAGE-121": ("active", "Активен"),
+    "PAGE-120": ("inactive", "Неактивен"),
+    "PAGE-119": ("unknown", "Статус неизвестен"),
+}
+for item in projected_products:
+    status = preview_site_statuses.get(item.get("article"))
+    if status:
+        item["site_status_key"], item["site_status_label"] = status
 
 
 def fixture_live_bitrix_product(product, force=False):

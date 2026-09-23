@@ -107,6 +107,9 @@ def enrichment_from_product(product, catalog_product_id=None):
         if part
     )
     classification = _classification(product)
+    active_known = product.get("active_known")
+    if active_known is None:
+        active_known = "active" in product
     return {
         "bitrix_catalog_product_id": catalog_product_id,
         "bitrix_external_product_id": _text(product.get("external_product_id")),
@@ -122,7 +125,9 @@ def enrichment_from_product(product, catalog_product_id=None):
         "bitrix_price_currency": currency or None,
         "bitrix_description": description or None,
         "bitrix_properties_json": _json(properties),
-        "bitrix_active": int(bool(product.get("active", True))),
+        "bitrix_active": (
+            int(bool(product.get("active"))) if active_known else None
+        ),
     }
 
 
