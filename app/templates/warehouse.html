@@ -770,6 +770,7 @@
         .warehouse-product-name-cell {
             display: flex;
             align-items: center;
+            gap: 8px;
             min-width: 0;
         }
 
@@ -4752,7 +4753,6 @@
             >
                     <table id="warehouseProductsTable" class="warehouse-products-table erp-data-table erp-native-columns-table">
                         <colgroup>
-                            <col class="warehouse-col-select" data-system-column="select">
                             <col class="warehouse-col-photo" data-column-key="photo">
                             <col class="warehouse-col-name" data-column-key="name">
                             <col data-column-key="model">
@@ -4768,15 +4768,13 @@
                         </colgroup>
                         <thead>
                             <tr>
-                                <th data-system-column="select">
-                                    <input type="checkbox" data-export-select-page aria-label="Выбрать все товары на странице">
-                                </th>
                                 <th data-column-key="photo">
                                     <div class="warehouse-product-photo-cell">
                                         <span>Фото</span>
                                     </div>
                                 </th>
                                 <th data-column-key="name">
+                                    <input type="checkbox" data-export-select-page aria-label="Выбрать все товары на странице">
                                     <span
                                         class="warehouse-sort-label erp-sort-label{% if sort_by == 'name' %} is-active{% endif %}"
                                         data-sort-field="name"
@@ -4907,9 +4905,6 @@
                                     data-article="{{ (item.article or '')|lower|e }}"
                                     data-barcode="{{ (item.barcode or '')|lower|e }}"
                                 >
-                                    <td data-system-column="select">
-                                        <input type="checkbox" data-export-select="{{ item.id }}" aria-label="Выбрать товар {{ item.name|e }} для экспорта">
-                                    </td>
                                     <td data-column-key="photo">
                                         <div class="warehouse-product-photo-cell">
                                             {% set photo_url = item.local_image_url or item.thumbnail_url %}
@@ -4942,6 +4937,7 @@
 
                                     <td data-column-key="name">
                                         <div class="warehouse-product-name-cell">
+                                            <input type="checkbox" data-export-select="{{ item.id }}" aria-label="Выбрать товар {{ item.name|e }} для экспорта">
                                             <div class="name warehouse-ellipsis" title="{{ item.name|e }}">{{ item.name }}</div>
                                         </div>
                                     </td>
