@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="csrf-token" content="{{ csrf_token() }}">
-<title>ТТТ ERP — Приход</title>
+<title>ТТТ ERP — Поступления</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/erp-components.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/supplies.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/product-picker.css') }}">
@@ -21,13 +21,17 @@
 <main class="main" id="main-content" tabindex="-1">
 <header class="page-header">
 <div>
-<h1>Приход</h1>
+<h1>Поступления</h1>
 <p>Поставки и приходные движения товаров</p>
 </div>
 <div class="actions">
 <label class="button">Импорт Excel<input type="file" id="excel" accept=".xlsx,.xlsm" hidden>
 </label>
-<button id="new-supply" class="button primary erp-primary-action">+ Новая поставка</button>
+<details class="add-menu"><summary class="button primary erp-primary-action">+ Добавить</summary>
+<div class="add-menu-panel">
+<button id="new-supply" type="button"><strong>Новая поставка</strong><span>Поступление товара от поставщика</span></button>
+<button id="new-receipt" type="button"><strong>Новый приход</strong><span>Ручное увеличение остатка</span></button>
+</div></details>
 </div>
 </header>
 <div id="message" role="status" aria-live="polite" aria-atomic="true" hidden>
@@ -35,6 +39,7 @@
 <nav class="tabs" aria-label="Вкладки прихода">
 <button data-tab="all" aria-current="page">Все записи</button>
 <button data-tab="supplies">Поставки</button>
+<button data-tab="receipts">Приходы</button>
 <button data-tab="cancellations">Отмены продаж</button>
 </nav>
 <section class="stats">
@@ -50,8 +55,9 @@
 <form id="filters" class="filters">
 <input id="query" type="search" placeholder="Поиск товара, документа, автора" aria-label="Поиск">
 <select id="type" aria-label="Тип прихода">
-<option value="">Все типы</option value="supply">Поставка</option value="sale_cancellation">Отмена продажи</option value="receipt">Старый приход</option value="legacy_excel">Excel — история</option value="legacy">Архивная запись</option value="draft">Черновик</option value="posted">Проведена</option>
+<option value="">Все типы</option><option value="supply">Поставка</option><option value="manual_receipt">Приход</option><option value="sale_cancellation">Отмена продажи</option>
 </select>
+<select id="warehouse-filter" aria-label="Склад"><option value="">Все склады</option></select>
 <select id="brand" aria-label="Бренд">
 <option value="">Все бренды</option>
 </select>
@@ -100,7 +106,17 @@
 </header>
 <div id="supply-meta">
 </div>
-<label>Название<input id="title" maxlength="200" required>
+<div id="manual-fields" class="manual-fields">
+<label>Склад *<select id="receipt-warehouse" required></select></label>
+<label id="receipt-reason-field">Причина *<select id="receipt-reason" required>
+<option value="stock_adjustment">Корректировка остатка</option>
+<option value="found">Найденный товар</option>
+<option value="manual_return">Возврат на склад</option>
+<option value="initial_stock">Начальный остаток</option>
+<option value="other">Другое</option>
+</select></label>
+</div>
+<label id="title-field">Название<input id="title" maxlength="200" required>
 </label>
 <label>Комментарий<textarea id="comment" maxlength="2000">
 </textarea>
@@ -108,7 +124,7 @@
 <button id="add-item" class="button" hidden>+ Добавить товар</button>
 <div id="draft-actions" class="actions">
 <p id="save-first-hint">Добавьте товары и укажите количество до проведения поставки.</p>
-<span>«Было» и «Станет» до проведения — предварительные значения</span>
+<span id="preview-hint">«Было» и «Станет» до проведения — предварительные значения</span>
 </div>
 <div class="table-scroll">
 <table id="items" aria-label="Таблица позиций поставки">

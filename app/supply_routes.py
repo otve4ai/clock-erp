@@ -4,7 +4,8 @@ from functools import wraps
 from flask import request, jsonify, render_template, abort, redirect
 from app.auth import current_auth_user, auth_is_enabled, require_csrf_when_authenticated
 from app.services.supplies import SupplyEngine, SupplyError
-from app.services.receipt_inventory import ReceiptInventoryError
+from app.services.receipt_inventory import ReceiptInventory, ReceiptInventoryError
+from app.services.manual_receipts import ManualReceipts, ManualReceiptError, REASONS
 from app.services.excel_receipt_import import ExcelDraftError, MAX_EXCEL_FILE_SIZE
 from app.clients.bitrix_catalog import BitrixCatalogReadOnlyError
 
@@ -36,7 +37,7 @@ def register_supply_routes(w):
                 if request.method != 'GET':
                     writable()
                 return fn(*args, **kwargs)
-            except (SupplyError, ReceiptInventoryError, ExcelDraftError, ValueError) as error:
+            except (SupplyError, ReceiptInventoryError, ManualReceiptError, ExcelDraftError, ValueError) as error:
                 preview = getattr(error, 'preview', None)
                 return jsonify(ok=False, message=str(error), data=preview), 409 if preview else 422
             except BitrixCatalogReadOnlyError:
@@ -58,8 +59,76 @@ def register_supply_routes(w):
             p = request.get_json(silent=True) or {}
             if not isinstance(p, dict):
                 raise SupplyError('Некорректные данные поставки.')
-            return jsonify(ok=True, data=engine.create(p.get('title'), p.get('comment'), actor(), items=p.get('items'), key=request.headers.get('Idempotency-Key'))), 201
+            return jsonify(ok=True, data=engine.create(p.get('title'), p.get('comment'), actor(), items=p.get('items'), key=request.headers.get('Idempotency-Key'), warehouse_id=p.get('warehouse_id'))), 201
         return jsonify(ok=True, data=engine.list())
+
+    @app.route('/api/v1/receipts/warehouses', methods=['GET'])
+    @guarded
+    def warehouses():
+        return jsonify(ok=True, data=ManualReceipts().warehouses())
+
+    @app.route('/api/v1/receipts/manual', methods=['GET', 'POST'])
+    @guarded
+    def manual_receipts():
+        engine = ManualReceipts()
+        if request.method == 'GET':
+            return jsonify(ok=True, data=engine.list(), reasons=REASONS)
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            raise ManualReceiptError('Некорректные данные прихода.')
+        result = engine.create(
+            payload.get('warehouse_id'), payload.get('reason_code'),
+            payload.get('items'), payload.get('comment'), actor(),
+            request.headers.get('Idempotency-Key'),
+        )
+        return jsonify(ok=True, data=result), 201
+
+    @app.route('/api/v1/receipts/manual/<receipt_id>', methods=['GET', 'PATCH', 'DELETE'])
+    @guarded
+    def manual_receipt(receipt_id):
+        engine = ManualReceipts()
+        if request.method == 'GET':
+            return jsonify(ok=True, data=engine.get(receipt_id))
+        if request.method == 'DELETE':
+            return jsonify(ok=True, data=engine.delete(receipt_id, actor()))
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            raise ManualReceiptError('Некорректные данные прихода.')
+        return jsonify(ok=True, data=engine.update(
+            receipt_id, payload.get('warehouse_id'), payload.get('reason_code'),
+            payload.get('items'), payload.get('comment'), actor(),
+        ))
+
+    @app.route('/api/v1/receipts/manual/<receipt_id>/post', methods=['POST'])
+    @guarded
+    def post_manual_receipt(receipt_id):
+        return jsonify(ok=True, data=ManualReceipts().post(receipt_id, actor()))
+
+    @app.route('/api/v1/receipts/manual/<receipt_id>/cancel', methods=['POST'])
+    @guarded
+    def cancel_manual_receipt(receipt_id):
+        return jsonify(ok=True, data=ManualReceipts().cancel(receipt_id, actor()))
+
+    @app.route('/api/v1/receipts/documents', methods=['GET'])
+    @guarded
+    def incoming_documents():
+        supplies_rows = [dict(row, source_type='supply') for row in SupplyEngine().list()]
+        manual_rows = [dict(row, source_type='manual_receipt') for row in ManualReceipts().list()]
+        cancellations = []
+        for row in ReceiptInventory().list_sale_cancellation_receipts():
+            cancellations.append({
+                'id': row.get('id'), 'source_id': row.get('source_sale_id'),
+                'source_type': 'sale_cancellation', 'number': row.get('number'),
+                'title': row.get('number'), 'comment': row.get('note') or '',
+                'created_at': row.get('created_at') or row.get('receipt_date') or '',
+                'created_by': row.get('user_name') or '', 'warehouse_name': 'Основной склад',
+                'position_count': row.get('positions_count') or len(row.get('positions') or []),
+                'total_quantity': row.get('total_quantity') or sum(float(item.get('quantity') or 0) for item in row.get('positions') or []),
+                'status': row.get('status') or 'posted', 'items': row.get('positions') or [],
+            })
+        data = sorted(supplies_rows + manual_rows + cancellations,
+                      key=lambda row: (row.get('created_at') or '', str(row.get('id') or '')), reverse=True)
+        return jsonify(ok=True, data=data)
 
     @app.route('/api/v1/receipts/supplies/<supply_id>', methods=['GET', 'PATCH', 'DELETE'])
     @guarded
