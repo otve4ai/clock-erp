@@ -61,7 +61,10 @@
                             {% if order.get('comment') %}<p>Покупатель: {{ order.comment }}</p>{% endif %}
                             <p>Исходный статус: {{ order.get('source_status', order.get('status')) }}{% if is_wb %} · WB: {{ order.get('wb_status') or 'не передан' }}{% endif %}</p>
                             {% if order.get('status_event') %}<p>{{ order.status_event.get('actor') }} · {{ order.status_event.get('created_at') }}</p>{% endif %}
-                            <a href="{{ order_url }}">Открыть карточку</a>
+                            <div class="order-row-secondary-actions">
+                                <a href="{{ order_url }}">Открыть карточку</a>
+                                {% if can_delete_orders %}<a class="order-delete-link" href="#" data-open-order-delete data-order-source="{{ order.get('source') or 'tictactoy' }}" data-order-external-id="{{ order.get('wb_order_id') if is_wb else order.get('external_order_id') or oid }}" data-order-number="{{ number }}">Удалить заказ</a>{% endif %}
+                            </div>
                         </details>
                     </td>
                     <td><span class="date-value date-stacked" data-date="{{ order.get('created_at') or order.get('date') }}">—</span></td>

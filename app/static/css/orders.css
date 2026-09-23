@@ -67,6 +67,10 @@ h1 { font-size:27px; line-height:1.15; letter-spacing:-.025em; }
 .badge-refused { color:#9f3a38; background:#f8e9e8; }
 .badge-cancel { color:#b91c1c; background:#fee2e2; }
 .badge-default { color:#475569; background:#e8edf3; }
+.order-row-secondary-actions { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.order-row-secondary-actions > a { font:inherit; }
+.order-row-secondary-actions .order-delete-link { color:#a34b4b; }
+.order-row-secondary-actions .order-delete-link:hover { color:var(--danger); }
 .list-footer { display:flex; flex:0 0 auto; justify-content:space-between; align-items:center; gap:8px 12px; padding:10px 12px; color:var(--muted); border-top:1px solid var(--line); font-size:12px; }
 .pagination { gap:5px; }
 .page-link { padding:4px 7px; color:#334155; text-decoration:none; border:1px solid var(--line); border-radius:5px; background:#fff; }
@@ -425,6 +429,22 @@ html[data-theme] .orders-page .orders-secondary-submit:hover:not(:disabled) {
 }
 
 body.orders-page.has-open-sale-dialog { overflow:hidden; }
+body.orders-page.has-open-delete-dialog { overflow:hidden; }
+.orders-page .order-delete-modal { background:rgba(15,31,50,.52); backdrop-filter:blur(1.5px); }
+.orders-page .order-delete-dialog { position:relative; align-self:center; width:min(390px,100%); border-radius:10px; box-shadow:0 20px 52px rgba(15,23,42,.28); }
+.orders-page .order-delete-dialog .sale-dialog-head { padding:18px 20px 5px; border-bottom:0; }
+.orders-page .order-delete-dialog .sale-dialog-head h2 { padding-right:28px; font-size:16px; line-height:1.3; }
+.orders-page .order-delete-close { position:absolute; top:9px; right:9px; display:grid; width:28px; height:28px; place-items:center; padding:0; border:0; border-radius:6px; background:transparent; color:var(--theme-text-muted,#64748b); font:inherit; font-size:21px; line-height:1; cursor:pointer; }
+.orders-page .order-delete-close:hover:not(:disabled) { background:var(--theme-surface-muted,#f1f5f9); color:var(--theme-text,#34445b); }
+.orders-page .order-delete-close:focus-visible { outline:2px solid var(--theme-accent,#2563eb); outline-offset:2px; }
+.orders-page .order-delete-dialog .sale-dialog-body { padding:3px 20px 14px; }
+.orders-page .order-delete-dialog .sale-dialog-body > p:first-child { margin:0; color:var(--theme-text-muted,#64748b); font-size:12px; line-height:1.45; }
+.orders-page .order-delete-dialog .sale-dialog-actions { display:block; padding:0 20px 18px; border-top:0; }
+.orders-page .order-delete-dialog .sale-dialog-buttons { display:grid; grid-template-columns:1fr 1fr; gap:8px; width:100%; }
+.orders-page .order-delete-dialog .sale-dialog-buttons .button { min-width:0; min-height:38px; padding:6px 10px; border-radius:8px; font-size:12px; }
+.orders-page .order-delete-dialog .button-danger { border-color:var(--theme-error,#dc3f3f)!important; background:var(--theme-error,#dc3f3f)!important; color:#fff!important; }
+.orders-page .order-delete-dialog .button-danger:hover:not(:disabled) { border-color:#c93737!important; background:#c93737!important; color:#fff!important; }
+.orders-page .order-delete-error { margin:14px 0 0; }
 .orders-page .order-sale-modal { padding:20px; overflow:hidden; }
 .orders-page .sale-dialog { display:flex; width:min(940px,100%); max-width:100%; max-height:calc(100dvh - 40px); overflow:hidden; flex-direction:column; border-radius:var(--erp-radius); background:var(--theme-surface,#fff); }
 .orders-page .sale-dialog-head { flex:0 0 auto; align-items:center; padding:12px 16px; }
