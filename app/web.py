@@ -27,7 +27,7 @@ import requests
 from decimal import Decimal, InvalidOperation
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache, wraps
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from app.time_ranking import erp_timestamp, parse_erp_datetime, receipt_business_timestamp
 from app.clients.moysklad import MoySkladClient
 from app.clients.smsbliss import (
@@ -259,6 +259,7 @@ from app.services.repair_cases import (
     normalize_date,
     normalize_money,
     repair_attention_key,
+    repair_created_key,
     repair_now,
     save_repair_file,
 )
@@ -1331,7 +1332,6 @@ def refresh_orders_cache():
     """Incrementally refresh the recent Bitrix window without deleting history."""
     now = time.time()
     try:
-        order_status_service().retry_pending(update_order_status, limit=10)
         # The ordinary list endpoint is intentionally a bounded recent window.
         # Full cursor traversal belongs only to the explicit history backfill.
         short_orders = bitrix_orders_client().list_orders(limit=50)
@@ -3915,14 +3915,6 @@ def _conduct_order_sale(order_id):
             "user_name": actor,
             "idempotency_key": "bitrix-order:{}".format(order_id),
             "enforce_external_unique": True,
-            "failure_hook": lambda connection: sale_status_service.change(
-                order_id,
-                ERP_ASSEMBLED,
-                current_audit_actor(),
-                sale_id=payload["id"],
-                connection=connection,
-                order_number=order_number,
-            ),
             "audit_actor": current_audit_actor(),
         }
         if strap_replacement_requested:
@@ -3933,20 +3925,10 @@ def _conduct_order_sale(order_id):
             sale = inventory.create_sale_batch(
                 payload, prepared_items, **create_arguments
             )
-        status_synced = sale_status_service.sync_one(
-            order_id, update_order_status
-        )
         WAREHOUSE_CACHE["items"] = []
         WAREHOUSE_CACHE["loaded_at"] = 0
         _cached_api_sales_records.cache_clear()
-        success_message = (
-            f"Заказ №{order_number} проведён в продажу"
-            + (
-                ""
-                if status_synced
-                else "; статус ожидает синхронизации с Bitrix"
-            )
-        )
+        success_message = f"Заказ №{order_number} проведён в продажу"
         stock_notification = None
         if str(sale.get("id") or "") == payload["id"]:
             stock_notification = build_automatic_sale_stock_notification(
@@ -6197,6 +6179,46 @@ def warehouse_page():
     pagination = build_erp_pagination(
         "warehouse_page", catalog["total"], page, per_page
     )
+    export_filter_labels = []
+    if query:
+        export_filter_labels.append("Поиск: {}".format(query))
+    if selected_brand_id or selected_brand:
+        export_filter_labels.append("Бренд: {}".format(
+            selected_brand or "Без бренда"
+        ))
+    if selected_category_id or selected_category:
+        export_filter_labels.append("Категория: {}".format(
+            selected_category or "Без категории"
+        ))
+    if selected_model_id or selected_model:
+        export_filter_labels.append("Модель: {}".format(selected_model))
+    if selected_cell:
+        export_filter_labels.append("Ячейка: {}".format(selected_cell))
+    if created_date_from or created_date_to:
+        export_filter_labels.append("Период: {} — {}".format(
+            created_date_from or "…", created_date_to or "…"
+        ))
+    if stock_state != "all":
+        export_filter_labels.append(
+            "Наличие: {}".format(
+                "В наличии" if stock_state == "in" else "Нет в наличии"
+            )
+        )
+    if check_state != "all":
+        export_filter_labels.append("Статус проверки: {}".format({
+            "unchecked": "Не проверены",
+            "partial": "Проверены частично",
+            "complete": "Проверены полностью",
+        }[check_state]))
+    product_exporter = ProductExcelExport(product_catalog.database)
+    try:
+        export_warehouses = product_exporter.available_warehouses(
+            selected_warehouse_ids
+        )
+    except AttributeError:
+        # Route-level test doubles predating configurable export do not expose
+        # a real database connection. Production catalog instances always do.
+        export_warehouses = []
     rendered = render_template(
             "warehouse.html",
             partial_only=partial_requested,
@@ -6227,6 +6249,15 @@ def warehouse_page():
                    if key not in {"page", "scope"}}
             ),
             export_all_url=url_for("warehouse_products_export", scope="all"),
+            export_all_count=int(tab_counts.get("positions") or 0),
+            export_filtered_count=int(catalog["total"]),
+            export_filter_labels=export_filter_labels,
+            export_filters_applied=bool(export_filter_labels),
+            export_field_groups=product_exporter.field_groups(),
+            export_warehouses=export_warehouses,
+            export_default_filename="Товары_{}.xlsx".format(
+                datetime.now(ERP_TIMEZONE).date().isoformat()
+            ),
             warehouse_active_filter_count=warehouse_active_filter_count,
             warehouse_active_filter_label=warehouse_active_filter_label,
             open_add=False,
@@ -6301,88 +6332,222 @@ def warehouse_page():
     return response
 
 
-@app.route("/app/products/export.xlsx")
+def _product_export_filters(values):
+    """Parse the same catalogue filters used by the products workspace."""
+    view = (values.get("view") or "products").strip()
+    check_state = (values.get("check_state") or "all").strip()
+    if check_state not in {"all", "unchecked", "partial", "complete"}:
+        check_state = "all"
+    sort_by = (values.get("sort_by") or "created_at").strip()
+    if sort_by not in {
+        "name", "article", "brand", "category", "stock", "created_at",
+        "cell", "model",
+    }:
+        sort_by = "created_at"
+    sort_dir = (values.get("sort_dir") or (
+        "desc" if sort_by == "created_at" else "asc"
+    )).strip()
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "desc" if sort_by == "created_at" else "asc"
+    created_from = (values.get("date_from") or "").strip()
+    created_to = (values.get("date_to") or "").strip()
+    for value_name, value in (("from", created_from), ("to", created_to)):
+        try:
+            time.strptime(value, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            if value_name == "from":
+                created_from = ""
+            else:
+                created_to = ""
+    if created_from and created_to and created_from > created_to:
+        created_from, created_to = created_to, created_from
+    brand = (values.get("brand") or "").strip()
+    category = (values.get("category") or "").strip()
+    model = (values.get("model") or "").strip()
+    brand_id = (values.get("brand_id") or "").strip()
+    category_id = (values.get("category_id") or "").strip()
+    model_id = (values.get("model_id") or "").strip()
+    # Normalize taxonomy identifiers exactly as the products page does. This
+    # matters for stale bookmarked URLs: the page discards an invalid or
+    # impossible brand/category/model chain, so the export must discard it too.
+    shared_catalog = SharedCatalog()
+    shared_brands = shared_catalog.list_brands(limit=200)
+    if not brand_id and brand:
+        match = next((
+            item for item in shared_brands
+            if str(item.get("name") or "").strip().casefold() == brand.casefold()
+        ), None)
+        if match:
+            brand_id = str(match["id"])
+    if brand_id:
+        match = next((
+            item for item in shared_brands
+            if str(item.get("id") if item.get("id") is not None else "") == brand_id
+        ), None)
+        if match:
+            brand = match["name"]
+        else:
+            brand_id = ""
+            brand = ""
+    if not category_id and category and brand_id:
+        match = next((
+            item for item in shared_catalog.list_category_options(
+                brand_id=brand_id, limit=200, only_used_by_brand=True
+            )
+            if str(item.get("name") or "").strip().casefold() == category.casefold()
+        ), None)
+        if match:
+            category_id = str(match["id"])
+    if category_id == "0" and not brand_id:
+        category = "Без категории"
+    elif category_id:
+        match = next((
+            item for item in shared_catalog.list_category_options(
+                brand_id=brand_id or None, limit=200,
+                only_used_by_brand=bool(brand_id),
+            )
+            if category_id in {
+                str(item.get("id") if item.get("id") is not None else ""),
+                *(str(value) for value in item.get("category_ids", [])),
+            }
+        ), None)
+        if match:
+            category = match["name"]
+        else:
+            category_id = ""
+            category = ""
+            model_id = ""
+            model = ""
+    if not brand_id:
+        if category_id != "0":
+            category_id = ""
+            category = ""
+        model_id = ""
+        model = ""
+    if (model_id or model) and brand_id and category_id:
+        match = next((
+            item for item in shared_catalog.list_model_options(
+                brand_id, category_id, limit=200
+            )
+            if (
+                str(item.get("id") or "") == model_id if model_id else
+                str(item.get("name") or "").strip().casefold() == model.casefold()
+            )
+        ), None)
+        if match:
+            model_id = str(match["id"])
+            model = match["name"]
+        else:
+            model_id = ""
+            model = ""
+    elif not category_id:
+        model_id = ""
+        model = ""
+    stock_state = (values.get("stock_state") or "all").strip()
+    if view == "out_of_stock":
+        stock_state = "out"
+    elif view == "in_stock":
+        stock_state = "in"
+    if stock_state not in {"all", "in", "out"}:
+        stock_state = "all"
+    if stock_state != "out":
+        check_state = "all"
+    return {
+        "query": (values.get("q") or "").strip(),
+        "brand": "" if brand_id else brand,
+        "category": "" if category_id else category,
+        "model": "" if model_id else model,
+        "model_id": model_id or None,
+        "cell": (values.get("cell") or "").strip(),
+        "hide_zero": False,
+        "sort_by": sort_by,
+        "sort_dir": sort_dir,
+        "created_from": created_from,
+        "created_to": created_to,
+        "brand_id": brand_id or None,
+        "category_id": category_id or None,
+        "stock_state": stock_state,
+        "check_state": check_state,
+    }
+
+
+def _safe_product_export_filename(value):
+    default = "Товары_{}.xlsx".format(datetime.now(ERP_TIMEZONE).date().isoformat())
+    name = str(value or default).strip()
+    name = "".join(character for character in name if ord(character) >= 32)
+    name = name.replace("/", "_").replace("\\", "_")[:120].strip(" .")
+    if not name:
+        name = default
+    if not name.lower().endswith(".xlsx"):
+        name += ".xlsx"
+    return name
+
+
+@app.route("/app/products/export.xlsx", methods=["GET", "POST"])
 def warehouse_products_export():
-    scope = (request.args.get("scope") or "filtered").strip()
-    if scope not in {"filtered", "all"}:
+    values = request.values
+    scope = (values.get("scope") or "filtered").strip()
+    if scope not in {"filtered", "all", "selected"}:
         return jsonify(ok=False, message="Неизвестный режим экспорта."), 400
 
-    filters = {}
+    filters = {"sort_by": "name", "sort_dir": "asc"}
+    selected_product_ids = []
     if scope == "filtered":
-        view = (request.args.get("view") or "products").strip()
-        check_state = (request.args.get("check_state") or "all").strip()
-        if check_state not in {"all", "unchecked", "partial", "complete"}:
-            check_state = "all"
-        sort_by = (request.args.get("sort_by") or "created_at").strip()
-        if sort_by not in {
-            "name", "article", "brand", "category", "stock", "created_at",
-            "cell", "model",
-        }:
-            sort_by = "created_at"
-        sort_dir = (request.args.get("sort_dir") or (
-            "desc" if sort_by == "created_at" else "asc"
-        )).strip()
-        if sort_dir not in {"asc", "desc"}:
-            sort_dir = "desc" if sort_by == "created_at" else "asc"
-        created_from = (request.args.get("date_from") or "").strip()
-        created_to = (request.args.get("date_to") or "").strip()
-        for value_name, value in (("from", created_from), ("to", created_to)):
-            try:
-                time.strptime(value, "%Y-%m-%d")
-            except (TypeError, ValueError):
-                if value_name == "from":
-                    created_from = ""
-                else:
-                    created_to = ""
-        if created_from and created_to and created_from > created_to:
-            created_from, created_to = created_to, created_from
-        brand_id = (request.args.get("brand_id") or "").strip()
-        category_id = (request.args.get("category_id") or "").strip()
-        model_id = (request.args.get("model_id") or "").strip()
-        filters = {
-            "query": (request.args.get("q") or "").strip(),
-            "brand": "" if brand_id.isdigit() else (request.args.get("brand") or "").strip(),
-            "category": "" if category_id.isdigit() else (request.args.get("category") or "").strip(),
-            "model": (request.args.get("model") or "").strip(),
-            "model_id": model_id if model_id.isdigit() else None,
-            "cell": (request.args.get("cell") or "").strip(),
-            "hide_zero": request.args.get("in_stock") == "1",
-            "sort_by": sort_by,
-            "sort_dir": sort_dir,
-            "created_from": created_from,
-            "created_to": created_to,
-            "brand_id": brand_id if brand_id.isdigit() else None,
-            "category_id": category_id if category_id.isdigit() else None,
-            "stock_state": "out" if view == "out_of_stock" else "all",
-            "check_state": check_state if view == "out_of_stock" else "all",
-        }
-    else:
-        filters = {"sort_by": "name", "sort_dir": "asc"}
+        filters = _product_export_filters(values)
+    elif scope == "selected":
+        raw_ids = values.getlist("selected_ids")
+        if len(raw_ids) == 1 and "," in raw_ids[0]:
+            raw_ids = raw_ids[0].split(",")
+        if not raw_ids or any(not str(value).strip().isdigit() for value in raw_ids):
+            return jsonify(ok=False, message="Выберите хотя бы один товар."), 400
+        selected_product_ids = list(dict.fromkeys(int(value) for value in raw_ids))
 
     catalog = ExcelProductCatalog()
     warehouse_service = WarehouseStockService()
     selected_warehouse_ids = warehouse_service.selected_warehouse_ids(
         _warehouse_user_id()
     )
-    active_warehouses = warehouse_service.list_warehouses()
-    selected_warehouses = [
-        warehouse for warehouse in warehouse_service.list_for_user(
-            _warehouse_user_id()
-        ) if int(warehouse["id"]) in set(selected_warehouse_ids)
-    ]
-    page_size = 1000
-    first = catalog.list_products(
-        page=1, per_page=page_size, include_facets=False,
-        include_cell_item_names=False, warehouse_ids=selected_warehouse_ids,
-        **filters
-    )
     exporter = ProductExcelExport(catalog.database)
+    warehouses = exporter.available_warehouses(selected_warehouse_ids)
+    requested_fields = values.getlist("fields")
+    if len(requested_fields) == 1 and "," in requested_fields[0]:
+        requested_fields = requested_fields[0].split(",")
+    if request.method == "POST" and not requested_fields:
+        return jsonify(
+            ok=False, message="Выберите хотя бы одно поле для экспорта."
+        ), 400
+    try:
+        selected_fields = exporter.validate_fields(requested_fields, warehouses)
+    except ValueError as error:
+        return jsonify(ok=False, message=str(error)), 400
+    page_size = 1000
+    selected_items = []
+    if scope == "selected":
+        for start in range(0, len(selected_product_ids), 400):
+            result = catalog.list_products(
+                page=1, per_page=400, include_facets=False,
+                include_cell_item_names=False,
+                product_ids=selected_product_ids[start:start + 400],
+                warehouse_ids=selected_warehouse_ids, **filters
+            )
+            selected_items.extend(result["items"])
+        first = {"total": len(selected_items), "items": selected_items, "pages": 1}
+        if not first["total"]:
+            return jsonify(ok=False, message="Выбранные товары больше недоступны."), 400
+    else:
+        first = catalog.list_products(
+            page=1, per_page=page_size, include_facets=False,
+            include_cell_item_names=False,
+            warehouse_ids=selected_warehouse_ids, **filters
+        )
 
     def products():
         page = 1
         result = first
         while True:
-            items = exporter.enrich(result["items"])
+            items = exporter.enrich(
+                result["items"], warehouse_ids=selected_warehouse_ids
+            )
             for item in items:
                 yield item
             if page >= result["pages"]:
@@ -6395,18 +6560,25 @@ def warehouse_products_export():
             )
 
     payload = exporter.build(
-        products(), first["total"], warehouses=selected_warehouses
+        products(), first["total"], selected_fields, warehouses
     )
-    filename = "products-{}-{}.xlsx".format(
-        "filtered" if scope == "filtered" else "all",
-        datetime.now(ERP_TIMEZONE).date().isoformat(),
+    filename = _safe_product_export_filename(values.get("filename"))
+    fallback_name = "products-{}.xlsx".format(
+        datetime.now(ERP_TIMEZONE).date().isoformat()
     )
     response = Response(
         payload,
         mimetype=(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
-        headers={"Content-Disposition": 'attachment; filename="{}"'.format(filename)},
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="{}"; filename*=UTF-8\'\'{}'.format(
+                    fallback_name, quote(filename)
+                )
+            ),
+            "X-Export-Count": str(first["total"]),
+        },
     )
     response.headers["Cache-Control"] = "no-store"
     return response
@@ -8654,7 +8826,7 @@ def repair_page():
     }
     if repair_view == "active" and queue:
         cases = [case for case in cases if matches_queue(case, queue)]
-    cases.sort(key=repair_attention_key)
+    cases.sort(key=repair_created_key, reverse=True)
 
     page, per_page = parse_erp_pagination()
     total = len(cases)
@@ -12001,9 +12173,7 @@ def sale_cancel():
     managed = inventory.get_sale(sale_id)
     if managed is not None:
         try:
-            external_order_id = str(managed.get("external_order_id") or "").strip()
             actor = current_audit_actor()
-            sale_number = str(managed.get("order_number") or sale_id)
             inventory.cancel_sale(
                 sale_id,
                 reason=reason,
@@ -12014,27 +12184,8 @@ def sale_cancel():
                     or "sale-cancel:{}".format(sale_id)
                 ),
                 audit_actor=actor,
-                failure_hook=(
-                    lambda connection: OrderStatusService(
-                        inventory.database
-                    ).change(
-                        external_order_id, ERP_REFUSED, actor,
-                        sale_id=sale_id, connection=connection,
-                        order_number=external_order_id,
-                        event_message=(
-                            "Статус автоматически изменён на “Отказ” "
-                            "при отмене продажи №{}"
-                        ).format(sale_number),
-                    )
-                    if external_order_id else None
-                ),
             )
             _cached_api_receipt_records.cache_clear()
-            if external_order_id:
-                synced = OrderStatusService(inventory.database).sync_one(
-                    external_order_id, update_order_status
-                )
-                cache_order_status(external_order_id, "C", synced=synced)
         except CancellationConflictError as error:
             return respond_to_sales_action(
                 str(error), notice="error", status_code=409,
@@ -12047,13 +12198,9 @@ def sale_cancel():
                 status_code=500,
             )
         _cached_api_sales_records.cache_clear()
-        message = (
-            "Продажа отменена. Товар возвращён на склад, приход создан, "
-            "заказ переведён в статус “Отказ”"
-            if external_order_id else
+        return respond_to_sales_action(
             "Продажа отменена. Товар возвращён на склад, приход создан"
         )
-        return respond_to_sales_action(message)
 
     record = _sales_action_record(sale_id, sale_type)
     if record is None:
@@ -23765,9 +23912,7 @@ def api_sale_cancel(sale_id):
         inventory = SalesInventory()
         managed = inventory.get_sale(sale_id)
         if managed is not None:
-            external_order_id = str(managed.get("external_order_id") or "").strip()
             actor = current_audit_actor()
-            sale_number = str(managed.get("order_number") or sale_id)
             sale = inventory.cancel_sale(
                 sale_id=sale_id,
                 reason=reason,
@@ -23779,27 +23924,8 @@ def api_sale_cancel(sale_id):
                     or "sale-cancel:{}".format(sale_id)
                 ),
                 audit_actor=actor,
-                failure_hook=(
-                    lambda connection: OrderStatusService(
-                        inventory.database
-                    ).change(
-                        external_order_id, ERP_REFUSED, actor,
-                        sale_id=sale_id, connection=connection,
-                        order_number=external_order_id,
-                        event_message=(
-                            "Статус автоматически изменён на “Отказ” "
-                            "при отмене продажи №{}"
-                        ).format(sale_number),
-                    )
-                    if external_order_id else None
-                ),
             )
             _cached_api_receipt_records.cache_clear()
-            if external_order_id:
-                synced = OrderStatusService(inventory.database).sync_one(
-                    external_order_id, update_order_status
-                )
-                cache_order_status(external_order_id, "C", synced=synced)
         else:
             record = find_api_sale(sale_id)
             if record is None:
@@ -23849,9 +23975,6 @@ def api_sale_cancel(sale_id):
     _cached_api_sales_records.cache_clear()
     updated = find_api_sale(sale["id"])
     message = (
-        "Продажа отменена. Товар возвращён на склад, приход создан, "
-        "заказ переведён в статус “Отказ”"
-        if managed is not None and external_order_id else
         "Продажа отменена. Товар возвращён на склад, приход создан"
         if managed is not None else "Продажа отменена"
     )
@@ -24220,7 +24343,7 @@ def api_repairs_collection():
     else:
         cases = list(all_cases)
     cases = [case for case in cases if repair_case_matches(case, filters)]
-    sort_by = (request.args.get("sort_by") or "attention").strip()
+    sort_by = (request.args.get("sort_by") or "created_at").strip()
     sort_dir = (request.args.get("sort_dir") or "desc").strip()
     allowed_sort = {
         "request_at",
@@ -24232,11 +24355,17 @@ def api_repairs_collection():
         "updated_at",
         "control_date",
         "attention",
+        "created_at",
     }
     if sort_by not in allowed_sort:
-        sort_by = "attention"
+        sort_by = "created_at"
     if sort_by == "attention":
         cases.sort(key=repair_attention_key)
+    elif sort_by == "created_at":
+        cases.sort(
+            key=repair_created_key,
+            reverse=sort_dir != "asc",
+        )
     else:
         cases.sort(
             key=lambda case: (

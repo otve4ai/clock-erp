@@ -519,10 +519,13 @@ class CatalogFilteringTest(unittest.TestCase):
 
         response = self.client.get("/warehouse?stock_state=out")
         html = response.get_data(as_text=True)
+        active_filters = html.split(
+            'id="warehouseActiveFilters"', 1
+        )[1].split('<div class="search-card erp-toolbar-card">', 1)[0]
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn("Наличие: Нет в наличии", html)
-        self.assertNotIn('class="erp-filter-chip"', html)
-        self.assertNotIn('class="erp-filter-count"', html)
+        self.assertNotIn("Наличие: Нет в наличии", active_filters)
+        self.assertNotIn('class="erp-filter-chip"', active_filters)
+        self.assertNotIn('class="erp-filter-count"', active_filters)
 
     def test_out_of_stock_check_filter_lives_in_drawer_and_counts_once(self):
         response = self.client.get(

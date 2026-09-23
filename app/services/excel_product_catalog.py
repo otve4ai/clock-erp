@@ -888,6 +888,7 @@ class ExcelProductCatalog:
                       sort_dir="asc", page=1, per_page=50,
                       created_from="", created_to="", brand_id=None,
                       category_id=None, model_id=None, product_id=None,
+                      product_ids=None,
                       include_cell_item_names=True, include_facets=True,
                       include_inventory_locked=False, stock_state="all",
                       check_state="all", warehouse_ids=None):
@@ -957,6 +958,17 @@ class ExcelProductCatalog:
         if product_id not in (None, ""):
             where.append("p.id = ?")
             parameters.append(int(product_id))
+        if product_ids is not None:
+            selected_ids = list(dict.fromkeys(int(value) for value in product_ids))
+            if not selected_ids:
+                where.append("0 = 1")
+            else:
+                if len(selected_ids) > 1000:
+                    raise ValueError("Можно экспортировать не более 1000 выбранных товаров.")
+                where.append("p.id IN ({})".format(
+                    ", ".join("?" for _ in selected_ids)
+                ))
+                parameters.extend(selected_ids)
         if cell:
             if cell == "Без ячейки":
                 where.append("trim(COALESCE(p.cell, '')) = ''")

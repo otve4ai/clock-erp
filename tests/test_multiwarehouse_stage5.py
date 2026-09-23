@@ -226,17 +226,22 @@ class MultiwarehouseStage5Test(unittest.TestCase):
             product_id=self.products["ORDINARY"],
             warehouse_ids=[self.udelnaya, self.hong_kong], include_facets=False,
         )["items"][0]
-        payload = ProductExcelExport(self.db).build(
-            [item], 1, warehouses=[
-                {"id": self.udelnaya, "name": "Удельная"},
-                {"id": self.hong_kong, "name": "Гонконг"},
+        exporter = ProductExcelExport(self.db)
+        payload = exporter.build(
+            exporter.enrich(
+                [item], warehouse_ids=[self.udelnaya, self.hong_kong]
+            ),
+            1,
+            fields=[
+                "stock_total", "warehouse:Удельная", "warehouse:Гонконг",
             ],
+            available_warehouses=["Удельная", "Гонконг"],
         )
         from openpyxl import load_workbook
         sheet = load_workbook(BytesIO(payload), read_only=True).active
         rows = list(sheet.iter_rows(values_only=True))
-        self.assertEqual(rows[0][8:11], ("Остаток", "Удельная", "Гонконг"))
-        self.assertEqual(rows[1][8:11], (8, 5, 3))
+        self.assertEqual(rows[0], ("Общий остаток", "Удельная", "Гонконг"))
+        self.assertEqual(rows[1], (8, 5, 3))
 
     def test_concurrent_transfers_cannot_overspend_source(self):
         def transfer(key):

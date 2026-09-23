@@ -41,8 +41,8 @@ Operational и current-stock reads переведены с `catalog_excel_produc
 
 ## 9. Full test results
 
-- Backend full suite: **1979 tests, OK, 14 skipped**, 330.538 s.
-- Targeted suites после исправления финальных read-model опечаток: component inventory 16/16, bundles 21/21, Excel export 4/4, order strap replacement 19/19.
+- Backend full suite после синхронизации с актуальным `origin/main`: **1985 tests, OK, 14 skipped**, 307.714 s.
+- Targeted suites после исправления финальных read-model опечаток и merge: component inventory 16/16, bundles 21/21, Excel export 7/7, order strap replacement 19/19, multiwarehouse Stage 5 23/23.
 - Runtime DDL gate и migration tests пройдены; `git diff --check` и Python compile выполняются повторно перед публикацией.
 
 ## 10. Browser/frontend results
@@ -50,7 +50,7 @@ Operational и current-stock reads переведены с `catalog_excel_produc
 - Typecheck, e2e typecheck, lint — passed.
 - Vitest — 39/39.
 - Product Playwright — 11/11.
-- Полный Playwright/accessibility/regression набор в последовательном режиме — **50/50 passed**, 48.7 s. Параллельный запуск ранее воспроизвёл конкуренцию тестовой SQLite (49/50), поэтому итоговый gate выполнен с `--workers=1`.
+- Полный Playwright/accessibility/regression набор после merge в последовательном режиме — **50/50 passed**, 48.3 s. Параллельный запуск ранее воспроизвёл конкуренцию тестовой SQLite (49/50), поэтому итоговый gate выполнен с `--workers=1`.
 - Real-copy browser QA: все 12 маршрутов HTTP 200; selector с одним/двумя складами, persistence, search, in/out-of-stock, pagination, создание третьего нулевого невыбранного склада только на copy, transfer round-trip, Escape и mobile overflow — passed.
 
 ## 11. Production-copy rehearsal
