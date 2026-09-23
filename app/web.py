@@ -18685,8 +18685,8 @@ NAVIGATION_DEFINITIONS = [
     },
     {
         "key": "receipts",
-        "label": "Приход",
-        "description": "Приход товаров.",
+        "label": "Поступления",
+        "description": "Поставки и приходные движения товаров.",
         "icon": "receipts",
         "href": "/app/receipts",
         "mobile_href": "/app/receipts",

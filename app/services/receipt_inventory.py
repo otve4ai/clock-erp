@@ -729,6 +729,22 @@ class ReceiptInventory:
                     now,
                     ("receipt", receipt_id),
                 )
+                if plan.get("warehouse_id"):
+                    from app.services.manual_receipts import ManualReceipts
+                    warehouse = ManualReceipts._warehouse(
+                        connection, plan["warehouse_id"], active=False
+                    )
+                    warehouse_before = ManualReceipts._warehouse_balance(
+                        connection, warehouse, item["product_id"], now
+                    )
+                    if warehouse_before + 0.000001 < item["quantity"]:
+                        raise ReceiptInventoryError(
+                            "Поставку нельзя удалить: на выбранном складе недостаточно остатка."
+                        )
+                    ManualReceipts._set_warehouse_balance(
+                        connection, warehouse["id"], item["product_id"],
+                        warehouse_before - item["quantity"], now,
+                    )
             connection.execute(
                 "DELETE FROM catalog_stock_movements WHERE receipt_id = ?",
                 (receipt_id,),
@@ -904,6 +920,7 @@ class ReceiptInventory:
             })
         return {
             "receipt_id": receipt_id, "number": receipt["number"] or receipt_id,
+            "warehouse_id": receipt["warehouse_id"] if "warehouse_id" in receipt.keys() else None,
             "name": str(receipt_metadata.get("title") or receipt_metadata.get("name") or ""),
             "comment": receipt["comment"] or "",
             "receipt_status": receipt["status"], "posted_at": posted_at, "items": items,

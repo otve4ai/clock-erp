@@ -43,24 +43,36 @@ class SupplyEngine:
             raise SupplyError('Изменять или удалять можно только черновик поставки.')
         return row
 
-    def create(self, title, comment='', actor='', items=None, key=None):
+    def create(self, title, comment='', actor='', items=None, key=None, warehouse_id=None):
         title = str(title or '').strip()
         comment = str(comment or '').strip()
         if not title or len(title) > 200 or len(comment) > 2000:
             raise SupplyError('Укажите название до 200 символов и комментарий до 2000 символов.')
         now = utc_now()
         with self.database.transaction() as connection:
+            from app.services.manual_receipts import ManualReceipts
+            if warehouse_id is None:
+                default = connection.execute(
+                    "SELECT id FROM erp_warehouses WHERE active=1 AND is_default=1"
+                ).fetchone()
+                warehouse_id = default[0] if default else ""
+            warehouse = ManualReceipts._warehouse(connection, warehouse_id)
             if key:
                 previous = connection.execute('SELECT id FROM erp_receipts WHERE tenant_id = ? AND idempotency_key = ?', ('default', 'supply:' + key)).fetchone()
                 if previous:
                     return self._get(connection, previous['id'])
             supply_id = 'supply:' + uuid.uuid4().hex
             metadata = {'source_type': 'supply', 'title': title, 'created_by': actor,
-                        'created_at': now, 'posted_by': None, 'posted_at': None}
+                        'created_at': now, 'posted_by': None, 'posted_at': None,
+                        'warehouse_id': warehouse['id']}
             ReceiptInventory._insert_draft(connection, metadata, [], supply_id,
                 'supply:' + key if key else None, actor, 'default', now)
             connection.execute('UPDATE erp_receipts SET number = ?, comment = ? WHERE id = ?',
                 ('П-' + supply_id.split(':')[1][:12].upper(), comment, supply_id))
+            connection.execute(
+                "UPDATE erp_receipts SET operation_type='supply',warehouse_id=? WHERE id=?",
+                (warehouse['id'], supply_id),
+            )
             if items is not None:
                 self._replace(connection, supply_id, items, now)
             return self._get(connection, supply_id)
@@ -148,6 +160,11 @@ class SupplyEngine:
                 ReceiptInventory._insert_items(connection, supply_id, prepared, products, now)
                 item_id = connection.execute('SELECT last_insert_rowid()').fetchone()[0]
             if row['status'] == 'posted':
+                from app.services.manual_receipts import ManualReceipts
+                warehouse = ManualReceipts._warehouse(connection, row['warehouse_id'])
+                warehouse_before = ManualReceipts._warehouse_balance(
+                    connection, warehouse, product_id, now
+                )
                 # The addition uses today's physical/legacy balance; old movements stay immutable.
                 stock_before = balance(connection, product_id)
                 if not math.isfinite(stock_before) or stock_before < 0:
@@ -155,16 +172,20 @@ class SupplyEngine:
                 remember(connection, product_id, ('receipt', supply_id))
                 stock_after = stock_before + quantity
                 write_balance(connection, product_id, stock_after, 'receipt', now)
+                ManualReceipts._set_warehouse_balance(
+                    connection, warehouse['id'], product_id,
+                    warehouse_before + quantity, now,
+                )
                 connection.execute(
                     "INSERT INTO catalog_stock_movements "
                     "(id, product_id, movement_type, quantity_delta, stock_before, stock_after, "
                     "receipt_id, receipt_item_id, idempotency_key, tenant_id, source_type, "
-                    "source_id, source_line_id, operation_kind, source_number, source, user_name, comment, created_at) "
-                    "VALUES (?, ?, 'receipt', ?, ?, ?, ?, ?, ?, ?, 'supply', ?, ?, 'add', ?, 'Поставка', ?, ?, ?)",
+                    "source_id, source_line_id, operation_kind, source_number, source, user_name, comment, created_at,warehouse_id) "
+                    "VALUES (?, ?, 'receipt', ?, ?, ?, ?, ?, ?, ?, 'supply', ?, ?, 'add', ?, 'Поставка', ?, ?, ?,?)",
                     (uuid.uuid4().hex, product_id, quantity, stock_before, stock_after,
                      supply_id, item_id, 'supply-add:' + supply_id + ':' + key, row['tenant_id'],
                      supply_id, key, row['number'], actor,
-                     'Дополнение поставки №{}: +{} шт.'.format(row['number'], quantity), now),
+                     'Дополнение поставки №{}: +{} шт.'.format(row['number'], quantity), now, warehouse['id']),
                 )
                 meta.setdefault('snapshots', {}).setdefault(str(product_id), self._product(connection, product_id))
             additions[key] = {'product_id': product_id, 'quantity': quantity, 'created_at': now, 'user_name': actor}
@@ -226,6 +247,7 @@ class SupplyEngine:
 
     def post(self, supply_id, actor='', failure_hook=None):
         with self.database.transaction() as connection:
+            from app.services.manual_receipts import ManualReceipts
             row = self._row(connection, supply_id)
             if row['status'] == 'posted':
                 return self._get(connection, supply_id)
@@ -242,13 +264,27 @@ class SupplyEngine:
                 if not math.isfinite(stock) or stock < 0:
                     raise SupplyError('Остаток товара некорректен. Проведение остановлено.')
             now = utc_now()
+            warehouse = ManualReceipts._warehouse(connection, row['warehouse_id'])
+            warehouse_before = {
+                item['product_id']: ManualReceipts._warehouse_balance(
+                    connection, warehouse, item['product_id'], now
+                ) for item in items
+            }
             ReceiptInventory._post_draft(connection, supply_id, actor, failure_hook, now)
+            for item in items:
+                ManualReceipts._set_warehouse_balance(
+                    connection, warehouse['id'], item['product_id'],
+                    warehouse_before[item['product_id']] + item['quantity'], now,
+                )
             meta = self._metadata(row)
             meta.update(posted_at=now, posted_by=actor)
             # Preserve historical card labels as well as actual before/after values.
             meta['snapshots'] = {str(i['product_id']): self._product(connection, i['product_id']) for i in items}
-            connection.execute('UPDATE erp_receipts SET metadata_json = ? WHERE id = ?', (json.dumps(meta, ensure_ascii=False), supply_id))
-            connection.execute("UPDATE catalog_stock_movements SET source_type = 'supply', source = 'Поставка', comment = ? WHERE receipt_id = ? AND operation_kind = 'post'", (row['comment'], supply_id))
+            connection.execute(
+                "UPDATE erp_receipts SET metadata_json=?,operation_type='supply',posted_at=?,posted_by=? WHERE id=?",
+                (json.dumps(meta, ensure_ascii=False), now, actor or None, supply_id),
+            )
+            connection.execute("UPDATE catalog_stock_movements SET source_type='supply',source='Поставка',comment=?,warehouse_id=? WHERE receipt_id=? AND operation_kind='post'", (row['comment'], warehouse['id'], supply_id))
             return self._get(connection, supply_id)
 
     @staticmethod
@@ -278,6 +314,11 @@ class SupplyEngine:
             result['items'].append(dict(product, **dict(item), stock_before=before, stock_after=after))
         result['position_count'] = len(result['items'])
         result['total_quantity'] = sum(i['quantity'] for i in result['items'])
+        if result.get('warehouse_id'):
+            warehouse = connection.execute(
+                'SELECT name FROM erp_warehouses WHERE id=?', (result['warehouse_id'],)
+            ).fetchone()
+            result['warehouse_name'] = warehouse['name'] if warehouse else ''
         return result
 
     def get(self, supply_id):
@@ -332,9 +373,13 @@ class SupplyEngine:
             self._positions(items)
             now = utc_now()
             supply_id = 'supply:' + uuid.uuid4().hex
-            meta = {'source_type': 'supply', 'title': filename[:200], 'created_by': actor, 'created_at': now, 'posted_by': None, 'posted_at': None, 'import_filename': filename}
+            warehouse = connection.execute("SELECT id FROM erp_warehouses WHERE active=1 AND is_default=1").fetchone()
+            if warehouse is None:
+                raise SupplyError('Основной склад не настроен.')
+            meta = {'source_type': 'supply', 'title': filename[:200], 'created_by': actor, 'created_at': now, 'posted_by': None, 'posted_at': None, 'import_filename': filename, 'warehouse_id': warehouse['id']}
             ReceiptInventory._insert_draft(connection, meta, [], supply_id, None, actor, 'default', now)
             connection.execute('UPDATE erp_receipts SET number = ? WHERE id = ?', ('П-' + supply_id.split(':')[1][:12].upper(), supply_id))
+            connection.execute("UPDATE erp_receipts SET operation_type='supply',warehouse_id=? WHERE id=?", (warehouse['id'], supply_id))
             self._replace(connection, supply_id, items, now)
             return self._get(connection, supply_id)
 

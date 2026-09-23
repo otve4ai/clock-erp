@@ -49,12 +49,38 @@ def write_balance(connection, product_id, value, source, timestamp, document=Non
     value = float(value)
     if not math.isfinite(value) or value < 0:
         raise ValueError("Физический остаток не может быть отрицательным.")
+    balance(connection, product_id, document, require_initialized=False)
     if physical(connection, product_id, document):
-        balance(connection, product_id, document)
-        return connection.execute("UPDATE erp_component_inventory SET physical_stock=?,updated_at=? WHERE product_id=?",
-                                  (value, timestamp, int(product_id)))
-    return connection.execute("UPDATE catalog_excel_products SET stock=?,stock_source=?,updated_at=? WHERE id=?",
-                              (value, source, timestamp, int(product_id)))
+        cursor = connection.execute("UPDATE erp_component_inventory SET physical_stock=?,updated_at=? WHERE product_id=?",
+                                    (value, timestamp, int(product_id)))
+    else:
+        cursor = connection.execute("UPDATE catalog_excel_products SET stock=?,stock_source=?,updated_at=? WHERE id=?",
+                                    (value, source, timestamp, int(product_id)))
+    # Operations that do not expose a warehouse selector belong to the configured
+    # default warehouse. Scoped incoming documents update their warehouse row in
+    # the same transaction and are deliberately excluded here.
+    if source not in {"manual_receipt", "manual_receipt_cancel", "receipt", "receipt_delete"}:
+        warehouse = connection.execute(
+            "SELECT id FROM erp_warehouses WHERE active=1 AND is_default=1"
+        ).fetchone()
+        if warehouse is not None:
+            other_total = connection.execute(
+                "SELECT COALESCE(SUM(quantity),0) FROM erp_warehouse_stocks "
+                "WHERE warehouse_id<>? AND product_id=?",
+                (warehouse[0], int(product_id)),
+            ).fetchone()[0]
+            # Reconcile the default warehouse against the authoritative total.
+            # This also tolerates legacy callers and tests that still update the
+            # aggregate catalog stock directly between inventory operations.
+            after = value - float(other_total or 0)
+            if after < -0.000001:
+                raise ValueError("Остаток основного склада не может быть отрицательным.")
+            connection.execute(
+                "INSERT OR REPLACE INTO erp_warehouse_stocks "
+                "(warehouse_id,product_id,quantity,updated_at) VALUES(?,?,?,?)",
+                (warehouse[0], int(product_id), max(0.0, after), timestamp),
+            )
+    return cursor
 
 
 def overlay(connection, row, product_id=None, document=None, require_initialized=True):

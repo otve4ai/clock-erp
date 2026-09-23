@@ -19,6 +19,7 @@ from app.schema_migrations import (  # noqa: E402
     apply_order_comments_migration,
     apply_inventory_control_migration,
 )
+from app.incoming_receipts_migration import apply_incoming_receipts_migration  # noqa: E402
 
 
 def main():
@@ -35,6 +36,9 @@ def main():
             apply_inventory_control_migration(connection)
             connection.commit()
             manifest = _json_structure(connection)
+            apply_incoming_receipts_migration(connection)
+            connection.commit()
+            incoming_full = _json_structure(connection)
         finally:
             connection.close()
     target.write_text(
@@ -44,6 +48,23 @@ def main():
             separators=(",", ":"),
             sort_keys=True,
         ) + "\n",
+        encoding="utf-8",
+    )
+    incoming_tables = {
+        name: incoming_full["tables"][name]
+        for name in (
+            "erp_receipts", "catalog_stock_movements", "erp_warehouses",
+            "erp_warehouse_stocks", "erp_document_sequences",
+        )
+    }
+    incoming = {
+        "tables": incoming_tables,
+        "indexes": [row for row in incoming_full["indexes"] if row[0] in incoming_tables],
+        "triggers": [],
+        "views": [],
+    }
+    (ROOT / "app" / "catalog_incoming_receipts_schema_manifest.json").write_text(
+        json.dumps(incoming, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     print(target)

@@ -9,6 +9,11 @@ async function addProduct(page: Page, article: string, quantity = '1') {
   await page.locator('#add-quantity').fill(quantity);
   await page.locator('#confirm-add-item').click();
   await expect(page.locator('#add-item-dialog')).not.toBeVisible();
+  await expect(page.locator('#add-item')).toBeEnabled();
+}
+async function openNewSupply(page: Page) {
+  await page.locator('.add-menu summary').click();
+  await page.locator('#new-supply').click();
 }
 
 test('supply posts two local movements and remains read-only', async ({ page }) => {
@@ -18,7 +23,7 @@ test('supply posts two local movements and remains read-only', async ({ page }) 
   await expect(page.locator('[data-tab="all"]')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('#records')).toContainText('21096');
   await page.locator('[data-tab="supplies"]').click();
-  await page.locator('#new-supply').click();
+  await openNewSupply(page);
   await page.locator('#title').fill('Casio — сентябрь 2026');
   await page.locator('#save-supply').click();
   await expect(page.locator('#dialog-message')).toContainText('Черновик сохранён');
@@ -39,7 +44,7 @@ test('supply posts two local movements and remains read-only', async ({ page }) 
   await page.locator('[data-tab="all"]').click();
   await page.locator('#query').fill('Casio — сентябрь');
   await page.locator('#filters').getByRole('button', { name: 'Найти', exact: true }).click();
-  await expect(page.locator('#records tbody tr')).toHaveCount(2);
+  await expect(page.locator('#records tbody tr')).toHaveCount(1);
   await page.locator('#records [data-open]').first().click();
   await expect(page.locator('#title')).toBeEnabled();
   await page.locator('#close-supply').click();
@@ -72,7 +77,7 @@ test('draft validation, duplicate prevention, search and pagination', async ({ p
   await expect(page.locator('#records tbody tr')).toHaveCount(25);
   await page.locator('#next').click();
   await expect(page.locator('#records tbody tr')).toHaveCount(3);
-  await page.locator('#new-supply').click();
+  await openNewSupply(page);
   await page.locator('#title').fill('Duplicate protection');
   await page.locator('#save-supply').click();
   await expect(page.locator('#dialog-message')).toContainText('Черновик сохранён');
@@ -103,20 +108,20 @@ test('draft validation, duplicate prevention, search and pagination', async ({ p
 });
 
 test('period filter uses the displayed local calendar day', async ({ page }) => {
-  await page.route('**/api/v1/receipts/movements', (route) =>
+  await page.route('**/api/v1/receipts/documents', (route) =>
     route.fulfill({
       json: {
         ok: true,
         data: [
           {
             id: 'midnight',
-            source_type: 'legacy',
+            source_type: 'supply',
             title: 'After midnight',
-            name: 'Watch',
+            number: 'QA-1',
             created_at: '2026-09-07T22:30:00+00:00',
-            quantity: 1,
-            stock_before: 0,
-            stock_after: 1,
+            total_quantity: 1,
+            position_count: 1,
+            status: 'posted',
           },
         ],
       },
@@ -135,9 +140,10 @@ test('receipt tabs share one table grid on desktop and mobile', async ({
   request,
 }, testInfo) => {
   const tabs = [
-    { key: 'all', headers: ['Дата', 'Комментарий', 'Автор', 'Время', 'Тип прихода'] },
-    { key: 'supplies', headers: ['Дата', 'Комментарий', 'Автор', 'Номер', 'Название'] },
-    { key: 'cancellations', headers: ['Дата', 'Комментарий', 'Автор', 'Время', 'Тип прихода'] },
+    { key: 'all', headers: ['Дата', 'Тип', 'Номер', 'Название / описание', 'Склад'] },
+    { key: 'supplies', headers: ['Дата', 'Тип', 'Номер', 'Название / описание', 'Склад'] },
+    { key: 'receipts', headers: ['Дата', 'Тип', 'Номер', 'Название / описание', 'Склад'] },
+    { key: 'cancellations', headers: ['Дата', 'Тип', 'Номер', 'Название / описание', 'Склад'] },
   ];
 
   await request.post('/api/v1/receipts/supplies', {
@@ -154,9 +160,7 @@ test('receipt tabs share one table grid on desktop and mobile', async ({
 
   for (const currentTab of tabs) {
     await page.locator(`[data-tab="${currentTab.key}"]`).click();
-    await expect(page.locator('#records thead th')).toHaveCount(
-      currentTab.key === 'supplies' ? 9 : 15,
-    );
+    await expect(page.locator('#records thead th')).toHaveCount(10);
     await expect(page.locator('#records thead th')).toContainText(currentTab.headers);
     const frame = await tableFrame.boundingBox();
     expect(frame?.x).toBe(initialFrame?.x);
@@ -164,6 +168,9 @@ test('receipt tabs share one table grid on desktop and mobile', async ({
     const aligned = await page.locator('#records').evaluate((table) => {
       const headers = Array.from(table.querySelectorAll('thead th'));
       const cells = Array.from(table.querySelectorAll('tbody tr:first-child td'));
+      if (cells.length === 1 && cells[0].hasAttribute('colspan')) {
+        return Number(cells[0].getAttribute('colspan')) === headers.length;
+      }
       return headers.every((header, index) => {
         const headerBox = header.getBoundingClientRect();
         const cellBox = cells[index]?.getBoundingClientRect();
@@ -183,16 +190,16 @@ test('receipt tabs share one table grid on desktop and mobile', async ({
 
   await page.locator('[data-tab="supplies"]').click();
   await expect(page.locator('#records')).toContainText('Table alignment fixture');
-  const authorNumberGap = await page.locator('#records').evaluate((table) => {
-    const author = table.querySelector('tbody tr:first-child td[data-column="author"]');
+  const typeNumberGap = await page.locator('#records').evaluate((table) => {
+    const type = table.querySelector('tbody tr:first-child td[data-column="type"]');
     const numberCell = table.querySelector('tbody tr:first-child td[data-column="number"]');
-    if (!author || !numberCell) return null;
-    const authorBox = author.getBoundingClientRect();
+    if (!type || !numberCell) return null;
+    const typeBox = type.getBoundingClientRect();
     const numberBox = numberCell.getBoundingClientRect();
-    return numberBox.x - (authorBox.x + authorBox.width);
+    return numberBox.x - (typeBox.x + typeBox.width);
   });
-  expect(authorNumberGap).not.toBeNull();
-  expect(authorNumberGap as number).toBeGreaterThanOrEqual(0);
+  expect(typeNumberGap).not.toBeNull();
+  expect(typeNumberGap as number).toBeGreaterThanOrEqual(0);
 
   const authorHeader = page.locator('#records th[data-column="author"]');
   const authorWidth = await authorHeader.evaluate(
@@ -233,10 +240,11 @@ test('receipt tabs share one table grid on desktop and mobile', async ({
     )
     .toEqual([
       'date',
-      'comment',
+      'type',
       'number',
       'author',
       'title',
+      'warehouse',
       'positions',
       'quantity',
       'status',
@@ -244,10 +252,10 @@ test('receipt tabs share one table grid on desktop and mobile', async ({
     ]);
 
   await page.locator('#filters details summary').click();
-  await page.locator('#columns input[data-col="comment"]').uncheck();
-  await expect(page.locator('#records th[data-column="comment"]')).toBeHidden();
+  await page.locator('#columns input[data-col="warehouse"]').uncheck();
+  await expect(page.locator('#records th[data-column="warehouse"]')).toBeHidden();
   await page.reload();
-  await expect(page.locator('#records th[data-column="comment"]')).toBeHidden();
+  await expect(page.locator('#records th[data-column="warehouse"]')).toBeHidden();
 
   await page.setViewportSize({ width: 390, height: 844 });
   for (const currentTab of tabs) {
