@@ -1340,13 +1340,22 @@ def refresh_orders_cache():
             if normalized_order:
                 orders.append(normalized_order)
 
+        snapshot_store = OrdersSnapshotStore()
+        deleted_ids = snapshot_store.deleted_external_ids("tictactoy")
+        orders = [
+            order for order in orders
+            if str(
+                order.get("external_id") or order.get("id")
+                or order.get("ID") or ""
+            ) not in deleted_ids
+        ]
+
         with ORDERS_CACHE_LOCK:
             ORDERS_CACHE["items"] = orders
             ORDERS_CACHE["loaded_at"] = now
             ORDERS_CACHE["error"] = ""
         save_orders_cache(orders, now)
         try:
-            snapshot_store = OrdersSnapshotStore()
             previous_ids = snapshot_store.source_ids("tictactoy")
             snapshot_store.upsert_bitrix(orders, now)
             _publish_saved_order_batch("tictactoy", previous_ids, orders)
@@ -1356,7 +1365,9 @@ def refresh_orders_cache():
 
         return orders
 
-    except (BitrixReadOnlyError, requests.RequestException, ValueError) as error:
+    except (
+        BitrixReadOnlyError, requests.RequestException, ValueError, sqlite3.Error
+    ) as error:
         with ORDERS_CACHE_LOCK:
             ORDERS_CACHE["error"] = type(error).__name__
         app.logger.warning(
@@ -1626,6 +1637,7 @@ def orders_list_api():
         order_source_counts=list_state.get("source_counts", {}),
         order_status_counts=list_state.get("status_counts", {}),
         order_status_label=status_label,
+        can_delete_orders=can_delete_orders(),
         sync_error=ORDERS_CACHE.get("error", ""),
         exact_search=exact_search,
         orders_clear_url=url_for(
@@ -2443,6 +2455,7 @@ def render_orders_page(
         order_source_counts=list_state.get("source_counts", {}),
         order_status_counts=list_state.get("status_counts", {}),
         order_status_label=status_label,
+        can_delete_orders=can_delete_orders(),
         sync_error=detail_error or ORDERS_CACHE.get("error", ""),
         exact_search=exact_search,
         orders_clear_url=url_for(
@@ -2475,6 +2488,152 @@ def can_view_orders(user=None):
         return True
     user = current_auth_user() if user is None else user
     return bool(user and str(user.get("role") or "") in ORDER_VIEW_ROLES)
+
+
+def can_delete_orders(user=None):
+    if not auth_is_enabled():
+        return True
+    user = current_auth_user() if user is None else user
+    return bool(user and str(user.get("role") or "") == "admin")
+
+
+def _forget_tictactoy_order_cache(external_order_id):
+    external_order_id = str(external_order_id or "").strip()
+
+    def retained(items):
+        return [
+            order for order in items
+            if str(
+                order.get("external_id") or order.get("id")
+                or order.get("ID") or ""
+            ) != external_order_id
+        ]
+
+    with ORDERS_CACHE_LOCK:
+        ORDERS_CACHE["items"] = retained(ORDERS_CACHE.get("items") or [])
+        cached_items = copy.deepcopy(ORDERS_CACHE["items"])
+        loaded_at = ORDERS_CACHE.get("loaded_at") or 0
+    disk_items, disk_loaded_at = load_orders_cache()
+    if disk_items:
+        cached_items = retained(disk_items)
+        loaded_at = disk_loaded_at
+    save_orders_cache(cached_items, loaded_at)
+
+
+@app.delete("/api/orders/<source>/<external_order_id>")
+def order_delete_api(source, external_order_id):
+    if not can_delete_orders():
+        abort(403)
+    require_csrf_when_authenticated()
+    source = str(source or "").strip().casefold()
+    external_order_id = str(external_order_id or "").strip()
+    if source not in {"tictactoy", "wildberries"} or not external_order_id:
+        return jsonify(ok=False, error={
+            "code": "ORDER_NOT_FOUND",
+            "message": "Заказ не найден в ERP.",
+        }), 404
+
+    store = OrdersSnapshotStore()
+    try:
+        order = store.get_by_identity(source, external_order_id)
+    except (sqlite3.Error, ValueError):
+        app.logger.exception(
+            "Order delete lookup failed source=%s external_order_id=%s",
+            source, external_order_id,
+        )
+        return jsonify(ok=False, error={
+            "code": "ORDER_DELETE_CHECK_FAILED",
+            "message": "Не удалось проверить заказ. Заказ не удалён.",
+        }), 503
+    if order is None:
+        return jsonify(ok=False, error={
+            "code": "ORDER_NOT_FOUND",
+            "message": "Заказ не найден в ERP.",
+        }), 404
+
+    try:
+        active_sale = SalesInventory().find_active_sale(
+            source, external_order_id
+        )
+        legacy_stock_operation = (
+            source == "tictactoy"
+            and has_legacy_order_stock_writeoff(external_order_id)
+        )
+    except Exception:
+        app.logger.exception(
+            "Order delete relation check failed source=%s external_order_id=%s",
+            source, external_order_id,
+        )
+        return jsonify(ok=False, error={
+            "code": "ORDER_DELETE_CHECK_FAILED",
+            "message": "Не удалось проверить связи заказа. Заказ не удалён.",
+        }), 503
+    if active_sale:
+        return jsonify(ok=False, error={
+            "code": "ORDER_HAS_ACTIVE_SALE",
+            "message": (
+                "Заказ нельзя удалить: сначала отмените связанную "
+                "проведённую продажу."
+            ),
+        }), 409
+    if legacy_stock_operation:
+        return jsonify(ok=False, error={
+            "code": "ORDER_HAS_STOCK_OPERATION",
+            "message": (
+                "Заказ нельзя удалить: с ним связана проведённая "
+                "складская операция."
+            ),
+        }), 409
+
+    user = current_auth_user() or {}
+    actor_name = current_sales_user_name() or "Администратор ERP"
+    try:
+        deleted = store.delete_local(
+            source,
+            external_order_id,
+            actor_id=user.get("id") or user.get("email") or "",
+            actor_name=actor_name,
+        )
+    except (sqlite3.Error, OSError, ValueError):
+        app.logger.exception(
+            "Order delete failed source=%s external_order_id=%s",
+            source, external_order_id,
+        )
+        return jsonify(ok=False, error={
+            "code": "ORDER_DELETE_FAILED",
+            "message": "Не удалось удалить заказ. Заказ остался в ERP.",
+        }), 500
+    if deleted is None:
+        return jsonify(ok=False, error={
+            "code": "ORDER_NOT_FOUND",
+            "message": "Заказ не найден в ERP.",
+        }), 404
+    if source == "tictactoy":
+        _forget_tictactoy_order_cache(external_order_id)
+    try:
+        number = str(deleted.get("number") or external_order_id)
+        AuditJournal().record(
+            "order", str(deleted.get("id") or external_order_id), "deleted",
+            "Заказ №{}".format(number),
+            "Удалён только из ERP",
+            metadata={
+                "number": number,
+                "source": source,
+                "external_order_id": external_order_id,
+            },
+            **current_audit_actor()
+        )
+    except Exception:
+        app.logger.exception(
+            "Order delete audit failed source=%s external_order_id=%s",
+            source, external_order_id,
+        )
+    return jsonify(ok=True, result={
+        "id": str(deleted.get("id") or external_order_id),
+        "source": source,
+        "external_order_id": external_order_id,
+        "deleted": True,
+    })
 
 
 @app.get("/app/orders/<int:order_id>/print")

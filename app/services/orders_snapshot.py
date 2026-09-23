@@ -27,6 +27,7 @@ EXACT_ORDER_NUMBER_QUERY = re.compile(
     re.IGNORECASE,
 )
 LOGGER = logging.getLogger(__name__)
+DELETED_ORDERS_META_KEY = "deleted_orders_v1"
 
 BITRIX_OWNED_FIELDS = (
     "id", "ID", "external_id", "external_order_id", "number",
@@ -244,6 +245,92 @@ class OrdersSnapshotStore:
             }
 
     @staticmethod
+    def _deleted_orders(connection):
+        row = connection.execute(
+            "SELECT value FROM orders_snapshot_meta WHERE key = ?",
+            (DELETED_ORDERS_META_KEY,),
+        ).fetchone()
+        if row is None:
+            return {}
+        try:
+            deleted = json.loads(row["value"])
+        except (TypeError, ValueError) as error:
+            raise sqlite3.DatabaseError(
+                "Deleted orders metadata is invalid"
+            ) from error
+        if not isinstance(deleted, dict):
+            raise sqlite3.DatabaseError("Deleted orders metadata is invalid")
+        return deleted
+
+    @staticmethod
+    def _deleted_order_key(source, external_order_id):
+        return "{}\u0000{}".format(
+            _text(source).casefold(), _text(external_order_id)
+        )
+
+    def deleted_external_ids(self, source):
+        """Return identities permanently removed from the local ERP snapshot."""
+        self.initialize()
+        normalized_source = _text(source).casefold()
+        with self.connection() as connection:
+            deleted = self._deleted_orders(connection)
+        return {
+            str(record.get("external_order_id"))
+            for record in deleted.values()
+            if isinstance(record, dict)
+            and record.get("source") == normalized_source
+            and record.get("external_order_id") not in (None, "")
+        }
+
+    def delete_local(self, source, external_order_id, actor_id="", actor_name=""):
+        """Delete one local snapshot and tombstone it against future syncs."""
+        self.initialize()
+        source = _text(source).casefold()
+        external_order_id = _text(external_order_id)
+        if source not in {"tictactoy", "wildberries"} or not external_order_id:
+            raise ValueError("Unsupported order identity")
+        with self.connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT order_id, payload_json FROM orders_snapshot "
+                "WHERE source = ? AND external_order_id = ?",
+                (source, external_order_id),
+            ).fetchone()
+            if row is None:
+                return None
+            payload = json.loads(row["payload_json"])
+            deleted = self._deleted_orders(connection)
+            key = self._deleted_order_key(source, external_order_id)
+            deleted[key] = {
+                "source": source,
+                "external_order_id": external_order_id,
+                "order_id": str(row["order_id"]),
+                "number": _text(payload.get("number") or external_order_id),
+                "deleted_at": datetime.now().astimezone().isoformat(),
+                "deleted_by_id": _text(actor_id),
+                "deleted_by_name": _text(actor_name),
+            }
+            connection.execute(
+                "INSERT OR REPLACE INTO orders_snapshot_meta (key, value) "
+                "VALUES (?, ?)",
+                (
+                    DELETED_ORDERS_META_KEY,
+                    json.dumps(
+                        deleted, ensure_ascii=False, separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                ),
+            )
+            connection.execute(
+                "DELETE FROM orders_snapshot WHERE order_id = ?",
+                (str(row["order_id"]),),
+            )
+        payload.setdefault("id", str(row["order_id"]))
+        payload.setdefault("source", source)
+        payload.setdefault("external_order_id", external_order_id)
+        return payload
+
+    @staticmethod
     def _merge_bitrix_payload(
         previous, incoming, preserve_existing_local=False
     ):
@@ -275,12 +362,16 @@ class OrdersSnapshotStore:
         published_orders=None,
     ):
         result = {"added": 0, "updated": 0, "skipped": 0}
+        deleted = self._deleted_orders(connection)
         for position, incoming in enumerate(orders):
             order_id = _text(
                 incoming.get("external_id") or incoming.get("id")
                 or incoming.get("ID")
             )
             if not order_id:
+                result["skipped"] += 1
+                continue
+            if self._deleted_order_key("tictactoy", order_id) in deleted:
                 result["skipped"] += 1
                 continue
             existing = connection.execute(
@@ -438,9 +529,12 @@ class OrdersSnapshotStore:
         added = 0
         updated = 0
         if connection is not None:
+            deleted = self._deleted_orders(connection)
             for order in orders:
                 wb_order_id = _text(order.get("wb_order_id"))
                 if not wb_order_id:
+                    continue
+                if self._deleted_order_key("wildberries", wb_order_id) in deleted:
                     continue
                 order_id = "wb:" + wb_order_id
                 existing = connection.execute(

@@ -295,6 +295,15 @@
                     </div>
                 </div>
             {% else %}<div class="empty orders-selection-empty"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="m24 4 18 10v20L24 44 6 34V14Zm0 20L6 14m18 10 18-10M24 24v20M15 9l18 10v9"/></svg><strong>Выберите заказ в списке</strong><p>Полная карточка загрузится отдельным безопасным запросом.</p></div>{% endif %}
+            {% if can_delete_orders %}
+            <div class="order-sale-modal order-delete-modal" id="orderDeleteModal" role="dialog" aria-modal="true" aria-labelledby="orderDeleteTitle" aria-describedby="orderDeleteDescription" aria-hidden="true" data-csrf="{{ csrf_token() }}">
+                <div class="sale-dialog order-delete-dialog">
+                    <div class="sale-dialog-head"><h2 id="orderDeleteTitle">Удалить заказ?</h2><button class="order-delete-close" type="button" data-close-order-delete aria-label="Закрыть">×</button></div>
+                    <div class="sale-dialog-body"><p id="orderDeleteDescription">Заказ исчезнет из списка. Это действие нельзя отменить.</p><p class="notice notice-error order-delete-error" role="alert" data-order-delete-error hidden></p></div>
+                    <div class="sale-dialog-actions"><div class="sale-dialog-buttons"><button class="button button-secondary" type="button" data-close-order-delete data-order-delete-cancel>Отмена</button><button class="button button-danger" type="button" data-confirm-order-delete>Удалить заказ</button></div></div>
+                </div>
+            </div>
+            {% endif %}
             </section>
 {% if not order_detail_only %}
         </div>
@@ -460,6 +469,35 @@
     formatRoot.querySelectorAll('.date-value').forEach(node=>node.classList.contains('date-stacked')?formatStackedDate(node):node.textContent=formatDate(node.dataset.date));
     formatRoot.querySelectorAll('.comment-date-value').forEach(formatCommentDate);
     document.querySelectorAll('[data-sync-time]').forEach(node=>{const raw=Number(node.dataset.syncTime);const date=new Date(raw?raw*1000:node.dataset.syncTime);node.textContent=Number.isNaN(date.getTime())?'—':new Intl.DateTimeFormat('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(date);node.dateTime=date.toISOString?.()||'';});
+
+    const deleteModal=document.getElementById('orderDeleteModal');
+    if(deleteModal){
+        const deleteTitle=deleteModal.querySelector('#orderDeleteTitle');
+        const deleteError=deleteModal.querySelector('[data-order-delete-error]');
+        const deleteConfirm=deleteModal.querySelector('[data-confirm-order-delete]');
+        const deleteCancel=deleteModal.querySelector('[data-order-delete-cancel]');
+        const deleteDismissButtons=[...deleteModal.querySelectorAll('[data-close-order-delete]')];
+        let deleteTarget=null;let deleteReturnFocus=null;
+        const closeDelete=()=>{if(deleteConfirm.disabled)return;deleteModal.classList.remove('is-open');deleteModal.setAttribute('aria-hidden','true');document.body.classList.remove('has-open-delete-dialog');deleteError.hidden=true;deleteError.textContent='';deleteTarget=null;deleteReturnFocus?.focus();};
+        const openDelete=trigger=>{deleteTarget={source:trigger.dataset.orderSource,externalId:trigger.dataset.orderExternalId,number:trigger.dataset.orderNumber};deleteReturnFocus=trigger;deleteTitle.textContent=`Удалить заказ №${deleteTarget.number}?`;deleteError.hidden=true;deleteError.textContent='';deleteModal.classList.add('is-open');deleteModal.setAttribute('aria-hidden','false');document.body.classList.add('has-open-delete-dialog');deleteCancel.focus();};
+        onDocument('click',event=>{const trigger=event.target.closest('[data-open-order-delete]');if(!trigger)return;event.preventDefault();openDelete(trigger);});
+        deleteDismissButtons.forEach(button=>button.addEventListener('click',closeDelete));
+        deleteModal.addEventListener('click',event=>{if(event.target===deleteModal)closeDelete();});
+        onDocument('keydown',event=>{if(!deleteModal.classList.contains('is-open')||event.key!=='Escape')return;event.preventDefault();closeDelete();});
+        deleteConfirm.addEventListener('click',async()=>{
+            if(!deleteTarget||deleteConfirm.disabled)return;
+            deleteConfirm.disabled=true;deleteDismissButtons.forEach(button=>button.disabled=true);deleteModal.setAttribute('aria-busy','true');deleteError.hidden=true;deleteError.textContent='';
+            try{
+                const endpoint=`/api/orders/${encodeURIComponent(deleteTarget.source)}/${encodeURIComponent(deleteTarget.externalId)}`;
+                const response=await fetch(endpoint,{method:'DELETE',credentials:'same-origin',headers:{Accept:'application/json','X-CSRF-Token':deleteModal.dataset.csrf}});
+                const payload=await response.json().catch(()=>null);
+                if(!response.ok||payload?.ok!==true)throw new Error(payload?.error?.message||`Не удалось удалить заказ (HTTP ${response.status})`);
+                deleteModal.classList.remove('is-open');deleteModal.setAttribute('aria-hidden','true');document.body.classList.remove('has-open-delete-dialog');
+                const target=new URL('/app/orders',window.location.href);const current=new URL(window.location.href);['q','status','period','source','page','page_size'].forEach(key=>{if(current.searchParams.has(key))target.searchParams.set(key,current.searchParams.get(key));});window.location.assign(target.pathname+target.search);
+            }catch(error){deleteError.textContent=error.message||'Не удалось удалить заказ. Заказ остался в ERP.';deleteError.hidden=false;window.VechasuNotify?.error(deleteError.textContent);}
+            finally{deleteConfirm.disabled=false;deleteDismissButtons.forEach(button=>button.disabled=false);deleteModal.removeAttribute('aria-busy');}
+        });
+    }
 
     const historyPanel=document.getElementById('orderLifecyclePanel');
     if(historyPanel){
