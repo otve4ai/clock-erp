@@ -11,6 +11,64 @@ async function addProduct(page: Page, article: string, quantity = '1') {
   await expect(page.locator('#add-item-dialog')).not.toBeVisible();
 }
 
+test('draft quantities stay locked until the post-add refresh finishes', async ({
+  page,
+  request,
+}) => {
+  const product = (await (await request.post('/api/v1/receipts/bitrix/90101')).json()).data;
+  const supply = (
+    await (
+      await request.post('/api/v1/receipts/supplies', {
+        data: {
+          title: 'Delayed addition refresh',
+          items: [{ product_id: product.id, quantity: 1 }],
+        },
+      })
+    ).json()
+  ).data;
+  await page.goto('/app/receipts?tab=supplies');
+  await page
+    .locator('#records tr')
+    .filter({ hasText: supply.title })
+    .getByRole('button', { name: 'Открыть' })
+    .click();
+  await page.locator('#add-item').click();
+  await selectProduct(page, 'SUP-90102');
+
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  let refreshPending = false;
+  await page.route(
+    '**/api/v1/receipts/supplies',
+    async (route) => {
+      refreshPending = true;
+      await refreshGate;
+      await route.continue();
+    },
+    { times: 1 },
+  );
+  try {
+    await page.locator('#confirm-add-item').click();
+    await expect.poll(() => refreshPending).toBe(true);
+    await expect(page.locator('#add-item-dialog')).not.toBeVisible();
+    await expect(page.locator('[data-quantity="0"]')).toBeDisabled();
+    await expect(page.locator('[data-quantity="1"]')).toBeDisabled();
+    await expect(page.locator('#add-item')).toBeDisabled();
+  } finally {
+    releaseRefresh();
+  }
+  await page.locator('[data-quantity="0"]').fill('5');
+  await page.locator('[data-quantity="1"]').fill('6');
+  await expect(page.locator('[data-after="0"]')).toHaveText('8');
+  await expect(page.locator('[data-after="1"]')).toHaveText('6');
+  await page.locator('#save-supply').click();
+  await expect(page.locator('#dialog-message')).toContainText('Черновик сохранён');
+  const saved = (await (await request.get(`/api/v1/receipts/supplies/${supply.id}`)).json()).data;
+  expect(saved.items.map((item: { quantity: number }) => item.quantity)).toEqual([5, 6]);
+});
+
 test('supply posts two local movements and remains read-only', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
