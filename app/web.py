@@ -13193,12 +13193,22 @@ def build_sales_category_compatibility(sales, category_groups=None):
     return {"groups": groups, "group_key": group_key}
 
 
-def build_sales_filter_catalog(sales, category_groups=None):
+def build_sales_filter_catalog(
+        sales,
+        category_groups=None,
+        brand_compatibility=None,
+        category_compatibility=None):
     catalog = []
     seen = set()
-    brand_compatibility = build_sales_brand_compatibility(sales)
-    compatibility = build_sales_category_compatibility(
-        sales, category_groups=category_groups
+    brand_compatibility = (
+        brand_compatibility
+        or build_sales_brand_compatibility(sales)
+    )
+    compatibility = (
+        category_compatibility
+        or build_sales_category_compatibility(
+            sales, category_groups=category_groups
+        )
     )
 
     for sale in sales:
@@ -13247,11 +13257,22 @@ def build_sales_filter_catalog(sales, category_groups=None):
     )
 
 
-def build_sales_filter_options(sales, filters, category_groups=None):
-    catalog = build_sales_filter_catalog(
-        sales, category_groups=category_groups
+def build_sales_filter_options(
+        sales,
+        filters,
+        category_groups=None,
+        catalog=None,
+        brand_compatibility=None):
+    if catalog is None:
+        catalog = build_sales_filter_catalog(
+            sales,
+            category_groups=category_groups,
+            brand_compatibility=brand_compatibility,
+        )
+    brand_compatibility = (
+        brand_compatibility
+        or build_sales_brand_compatibility(sales)
     )
-    brand_compatibility = build_sales_brand_compatibility(sales)
     selected_brand_key = brand_compatibility["selected_group_key"](
         filters.get("brand_id")
     )
@@ -14065,10 +14086,10 @@ def sales_page():
             app.logger.exception("Wildberries assembly queue unavailable")
             wb_assembly_error = "Не удалось загрузить FBS-заказы Wildberries."
     category_groups = SharedCatalog().category_compatibility_groups()
-    all_warehouse_items = get_warehouse_items()
-    all_sales = build_sales_report_records(
-        warehouse_items=all_warehouse_items
-    )
+    # Reuse the signature-keyed normalized read model already used by the
+    # sales API. Rebuilding it here made every HTML page visit reread the
+    # source files and normalize the complete sales history again.
+    all_sales = list(api_sales_records())
     requested_tab = request.args.get("tab")
     active_source = get_active_sales_source(
         requested_tab if requested_tab is not None
@@ -14089,10 +14110,25 @@ def sales_page():
         all_sales,
         filters["source"] if active_source != "all" else "all",
     )
+    option_brand_compatibility = build_sales_brand_compatibility(
+        option_source_sales
+    )
+    option_category_compatibility = build_sales_category_compatibility(
+        option_source_sales,
+        category_groups=category_groups,
+    )
+    sales_filter_catalog = build_sales_filter_catalog(
+        option_source_sales,
+        category_groups=category_groups,
+        brand_compatibility=option_brand_compatibility,
+        category_compatibility=option_category_compatibility,
+    )
     filter_options = build_sales_filter_options(
         option_source_sales,
         filters,
         category_groups=category_groups,
+        catalog=sales_filter_catalog,
+        brand_compatibility=option_brand_compatibility,
     )
 
     sales_kpis = calculate_sales_kpis(sales)
@@ -14117,9 +14153,10 @@ def sales_page():
         "delivery_cost_display": "delivery_cost",
     }
     for sale in sales:
-        sale["_canonical_timestamp"] = erp_timestamp(
-            sale.get("created_at")
-        )
+        if "_canonical_timestamp" not in sale:
+            sale["_canonical_timestamp"] = erp_timestamp(
+                sale.get("created_at")
+            )
     sales = sort_erp_records(
         sales,
         sort_value_fields.get(sort_field, sort_field),
@@ -14130,6 +14167,9 @@ def sales_page():
         },
     )
     sales, page = paginate_erp_records(sales, page, per_page)
+    # Page-only decorations must not mutate dictionaries retained in the
+    # shared read-model cache.
+    sales = [dict(sale) for sale in sales]
     sale_product_ids = {
         str(sale.get("product_id") or "").strip()
         for sale in sales
@@ -14272,10 +14312,7 @@ def sales_page():
         sales_sort_direction=sort_direction,
         sales_filters=filters,
         sales_filter_options=filter_options,
-        sales_filter_catalog=build_sales_filter_catalog(
-            option_source_sales,
-            category_groups=category_groups,
-        ),
+        sales_filter_catalog=sales_filter_catalog,
         sales_product_images=sales_product_images,
         sale_stock_notification=automatic_sale_stock_notification_from_request(),
         notice=(request.args.get("notice") or "").strip(),

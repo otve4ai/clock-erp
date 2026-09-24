@@ -377,17 +377,29 @@ class SalesServerFiltersTest(unittest.TestCase):
         with web.app.test_request_context(
             "/app/sales?tab=all&source=wildberries&brand_id=b1&category_id=0&product_id=p2&status=cancelled&q=без&date_from=2026-08-01&date_to=2026-08-06&sort=product_name&sort_dir=asc"
         ), mock.patch.object(
-            web, "get_warehouse_items", return_value=[]
-        ), mock.patch.object(
             web,
-            "build_sales_report_records",
+            "api_sales_records",
             return_value=self.sales,
         ) as builder, mock.patch.object(
+            web,
+            "build_sales_report_records",
+            side_effect=AssertionError("page rebuilt cached sales records"),
+        ), mock.patch.object(
+            web,
+            "get_warehouse_items",
+            side_effect=AssertionError("page loaded the full product catalog"),
+        ), mock.patch.object(
+            web,
+            "build_sales_filter_catalog",
+            wraps=web.build_sales_filter_catalog,
+        ) as catalog_builder, mock.patch.object(
             web, "render_template", side_effect=lambda name, **ctx: ctx
         ):
             context = web.sales_page()
 
-        builder.assert_called_once_with(warehouse_items=[])
+        builder.assert_called_once_with()
+        catalog_builder.assert_called_once()
+        self.assertNotIn("search_text", self.sales[1])
         self.assertEqual([item["id"] for item in context["sales"]], ["2"])
         self.assertEqual(context["total_sales"], 1)
         self.assertEqual(context["total_cancelled"], 1)
