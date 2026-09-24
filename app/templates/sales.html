@@ -2441,6 +2441,12 @@
                                                             class="sales-product-meta"
                                                             title="{{ product_meta or '—' }}"
                                                         >{{ product_meta or "—" }}</span>
+                                                        {% for component in sale.strap_components %}
+                                                            <span
+                                                                class="sales-product-component"
+                                                                title="Ремешок: {{ component.name }}{% if component.article %} · {{ component.article }}{% endif %}"
+                                                            >Ремешок: {{ component.name }}{% if component.article %} · {{ component.article }}{% endif %}</span>
+                                                        {% endfor %}
                                                     </span>
                                                 </span>
                                             {% elif column.key == "order_status_label" %}
@@ -2641,6 +2647,11 @@
                         >
                             Артикул: {{ sale.article or "—" }}
                         </div>
+                        {% for component in sale.strap_components %}
+                            <div class="sales-mobile-component">
+                                Ремешок: <strong>{{ component.name }}</strong>{% if component.article %} · {{ component.article }}{% endif %}
+                            </div>
+                        {% endfor %}
 
                         <span
                             class="sale-status-badge {{ sale.order_status_class }}"
@@ -3028,6 +3039,15 @@
                                 </span>
                             </div>
                         </div>
+                    </div>
+
+                    <div
+                        id="saleComposition"
+                        class="field field-wide sale-composition"
+                        hidden
+                    >
+                        <span class="sale-composition-title">Состав списания</span>
+                        <div id="saleCompositionItems" class="sale-composition-items"></div>
                     </div>
 
                     <h3 class="erp-form-section-title field-wide sale-section-title">Продажа</h3>
@@ -6045,6 +6065,10 @@
     const productMeta = document.getElementById(
         "productMeta"
     );
+    const saleComposition = document.getElementById("saleComposition");
+    const saleCompositionItems = document.getElementById(
+        "saleCompositionItems"
+    );
     const saleProductPhotoImages = document.getElementById(
         "saleProductPhotoImages"
     );
@@ -6205,7 +6229,36 @@
         productNameInput.value = "";
         productMeta.textContent =
             "Баркод, артикул и остаток появятся после выбора товара.";
+        saleComposition.hidden = true;
+        saleCompositionItems.replaceChildren();
         renderSaleProductPhoto(null);
+    }
+
+    function renderSaleComposition(components = []) {
+        saleCompositionItems.replaceChildren();
+        components.forEach((component) => {
+            const row = document.createElement("div");
+            row.className = "sale-composition-row";
+
+            const role = document.createElement("span");
+            role.className = "sale-composition-role";
+            role.textContent = component.is_strap
+                ? "Ремешок"
+                : component.is_primary ? "Корпус" : "Компонент";
+
+            const product = document.createElement("span");
+            product.className = "sale-composition-product";
+            product.textContent = [component.name, component.article]
+                .filter(Boolean).join(" · ") || "—";
+
+            const quantity = document.createElement("strong");
+            quantity.className = "sale-composition-quantity";
+            quantity.textContent = Number(component.quantity || 0) + " шт.";
+
+            row.append(role, product, quantity);
+            saleCompositionItems.append(row);
+        });
+        saleComposition.hidden = components.length === 0;
     }
 
     function resetSaleChoiceFields() {
@@ -6538,6 +6591,7 @@
                 : "Товар сейчас недоступен для нового выбора",
             "Товарные данные защищены после проведения",
         ].join(" · ");
+        renderSaleComposition(sale.components || []);
         setProtectedSaleFieldsLocked(true);
 
         manualSaleModal.classList.add("is-open");

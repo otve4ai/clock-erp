@@ -1993,6 +1993,122 @@ tr:last-child td {
 #editDrawer .product-inline-form.is-editing [data-edit-start] { display: none; }
 #editDrawer .product-inline-form.is-editing [data-edit-actions] { display: inline-flex; }
 
+#editDrawer .product-additional-settings {
+    display: none;
+    margin: 0 0 14px;
+    overflow: hidden;
+    border: 1px solid #e5eaf2;
+    border-radius: 15px;
+    background: #ffffff;
+    box-shadow:
+        0 5px 16px rgba(15, 23, 42, 0.035),
+        0 1px 2px rgba(15, 23, 42, 0.025);
+}
+
+#editDrawer .product-inline-form.is-editing .product-additional-settings {
+    display: block;
+}
+
+#editDrawer .product-additional-settings summary {
+    display: flex;
+    min-height: 46px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 14px;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+
+#editDrawer .product-additional-settings summary::-webkit-details-marker {
+    display: none;
+}
+
+#editDrawer .product-additional-settings summary::after {
+    content: "›";
+    color: #64748b;
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 1;
+    transform: rotate(90deg);
+    transition: transform 0.16s ease;
+}
+
+#editDrawer .product-additional-settings[open] summary::after {
+    transform: rotate(-90deg);
+}
+
+#editDrawer .product-additional-settings-body {
+    padding: 0 14px 12px;
+    border-top: 1px solid #eef2f7;
+}
+
+#editDrawer .product-setting-row {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-top: 12px;
+}
+
+#editDrawer .product-setting-copy {
+    min-width: 0;
+}
+
+#editDrawer .product-setting-title {
+    color: #172033;
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.35;
+}
+
+#editDrawer .product-setting-hint,
+#editDrawer .product-setting-status {
+    color: #7b879b;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+#editDrawer .product-setting-hint {
+    margin-top: 2px;
+}
+
+#editDrawer .product-setting-status {
+    margin: 8px 0 0;
+}
+
+#editDrawer .product-setting-status:empty {
+    display: none;
+}
+
+#editDrawer .product-setting-status.is-error {
+    color: #b42318;
+}
+
+#editDrawer .product-setting-toggle {
+    cursor: pointer;
+}
+
+#editDrawer .product-setting-toggle:has(input:disabled) {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+#editDrawer .product-setting-toggle input:focus-visible + .toggle-slider {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+}
+
+#editDrawer .product-setting-toggle input:checked + .toggle-slider {
+    background: #2563eb;
+}
+
 #editDrawer .product-gallery {
     display: block;
 }
@@ -3939,6 +4055,18 @@ body.edit-drawer-open:has(.app.sidebar-collapsed) #drawerBackdrop {
 
     #editDrawer .product-detail-grid {
         grid-template-columns: minmax(0, 1fr);
+    }
+
+    #editDrawer .product-additional-settings summary {
+        padding: 0 12px;
+    }
+
+    #editDrawer .product-additional-settings-body {
+        padding: 0 12px 12px;
+    }
+
+    #editDrawer .product-setting-row {
+        gap: 12px;
     }
 
     #editDrawer .product-detail-card,

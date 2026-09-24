@@ -43,7 +43,7 @@
     <div class="strap-picker-catalog" data-picker-panel="catalog" hidden>
         <div class="strap-picker-reference"><label for="{{ key }}BrandTrigger">Бренд *</label>{{ render_catalog_combobox(key ~ 'Brand',key ~ '_brand',[],item_label='бренд',shared_catalog_kind='brand',id_input_name=key ~ '_brand_id',component_class='filter-combobox',clear_selection_on_search_clear=true,required=true) }}</div>
         <div class="strap-picker-reference"><label for="{{ key }}CategoryTrigger">Категория *</label>{{ render_catalog_combobox(key ~ 'Category',key ~ '_category',[],item_label='категорию',shared_catalog_kind='category',id_input_name=key ~ '_category_id',component_class='filter-combobox',clear_selection_on_search_clear=true,disabled=true,required=true) }}</div>
-        <select class="field" data-picker-product aria-label="Товар" disabled><option value="">Товар</option></select>
+        <div class="strap-picker-reference"><label for="{{ key }}Product">Товар{% if required %} *{% endif %}</label><select id="{{ key }}Product" class="field" data-picker-product disabled><option value="">Товар</option></select></div>
     </div>
     <div class="strap-picker-selected" data-picker-selected hidden></div>
 </div>
@@ -328,7 +328,7 @@
                     </div>
                     {% for item in order_sale_dialog_summary.lines %}
                     {% if item.requires_strap %}
-                    <div class="sale-dialog-section" data-required-strap-line>
+                    <div class="sale-dialog-section required-strap-line" data-required-strap-line>
                         <strong>{{ item.name }} · {{ item.quantity_display }} шт.</strong>
                         <p>К списанию: корпус и выбранный ремешок — по {{ item.quantity_display }} шт. Цена заказа не меняется.</p>
                         {{ strap_product_picker('required_strap_' ~ loop.index0, 'Ремешок', 'strap', true, true) }}

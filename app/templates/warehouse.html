@@ -1474,10 +1474,6 @@
             <input id="editProductId" type="hidden" name="product_id">
             <input id="editReturnQuery" type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
             <input type="hidden" name="stock_reason" value="Редактирование карточки товара">
-            <div data-required-strap-settings>
-                <label><input type="checkbox" data-requires-strap disabled> Требуется ремешок</label>
-                <p data-required-strap-status role="status">Загрузка настройки…</p>
-            </div>
             <div class="product-detail-grid">
             <div class="product-detail-card">
                 <div class="product-detail-label">Название</div>
@@ -1552,6 +1548,33 @@
                 <input id="editCell" class="product-detail-input" type="text" name="cell" aria-label="Складская ячейка товара">
             </div>
             </div>
+
+            <details class="product-additional-settings" data-product-additional-settings>
+                <summary>Дополнительные настройки</summary>
+                <div class="product-additional-settings-body">
+                    <div class="product-setting-row" data-required-strap-settings>
+                        <div class="product-setting-copy">
+                            <div class="product-setting-title">Ремешок обязателен при продаже</div>
+                            <div class="product-setting-hint">Для продажи из заказа</div>
+                        </div>
+                        <label class="toggle-switch product-setting-toggle">
+                            <input
+                                type="checkbox"
+                                data-requires-strap
+                                aria-label="Ремешок обязателен при продаже"
+                                disabled
+                            >
+                            <span class="toggle-slider" aria-hidden="true"></span>
+                        </label>
+                    </div>
+                    <p
+                        class="product-setting-status"
+                        data-required-strap-status
+                        role="status"
+                        aria-live="polite"
+                    ></p>
+                </div>
+            </details>
 
             <div class="product-inline-actions">
                 <button type="button" data-edit-start onclick="startInlineProductEdit()">Редактировать</button>
@@ -2274,9 +2297,17 @@
             placeholder.hidden = true;
         }
 
+        function collapseProductAdditionalSettings(form) {
+            const additionalSettings = form.querySelector(
+                "[data-product-additional-settings]"
+            );
+            if (additionalSettings) additionalSettings.open = false;
+        }
+
         function startInlineProductEdit() {
             const form = document.getElementById("inlineProductForm");
             form.classList.add("is-editing");
+            collapseProductAdditionalSettings(form);
             const editor = document.getElementById("detailPhotoEditor");
             editor.hidden = form.dataset.photoEditable !== "true";
             if (!editor.hidden) syncDetailPhotoActions();
@@ -2318,6 +2349,7 @@
             });
             resetDetailPhotoChanges(true);
             document.getElementById("detailPhotoEditor").hidden = true;
+            collapseProductAdditionalSettings(form);
             form.classList.remove("is-editing");
         }
 
@@ -2523,6 +2555,7 @@
             inlineProductForm.dataset.photoFileId = "";
             inlineProductForm.dataset.photoEditable = "false";
             inlineProductForm.dataset.photoSource = "";
+            collapseProductAdditionalSettings(inlineProductForm);
             window.restoreSharedCatalogCascade(
                 inlineProductForm,
                 {
@@ -2783,6 +2816,7 @@
                 renderStockHistory(productId);
                 resetDetailPhotoChanges(false);
                 document.getElementById("detailPhotoEditor").hidden = true;
+                collapseProductAdditionalSettings(form);
                 form.classList.remove("is-editing");
                 setDetailPhotoStatus(payload.meta?.image_message || "Карточка обновлена.");
             } catch (error) {

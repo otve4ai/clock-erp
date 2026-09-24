@@ -1,3 +1,4 @@
+from pathlib import Path
 import unittest
 from unittest import mock
 
@@ -8,6 +9,65 @@ from app.services.required_straps import RequiredStraps
 from app.services.sales_inventory import SalesInventoryError, InsufficientStockError
 from app.services.shared_catalog import SharedCatalog
 from app.services.component_inventory import ComponentInventory, balance
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+class RequiredStrapUiContractTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.template = (PROJECT_ROOT / "app/templates/warehouse.html").read_text(
+            encoding="utf-8"
+        )
+        cls.styles = (PROJECT_ROOT / "app/static/css/warehouse.css").read_text(
+            encoding="utf-8"
+        )
+        cls.script = (PROJECT_ROOT / "app/static/js/required-strap.js").read_text(
+            encoding="utf-8"
+        )
+
+    def test_setting_is_collapsed_and_only_visible_while_editing(self):
+        self.assertIn(
+            'class="product-additional-settings" data-product-additional-settings',
+            self.template,
+        )
+        self.assertNotIn(
+            'data-product-additional-settings open', self.template
+        )
+        self.assertIn("Дополнительные настройки", self.template)
+        self.assertIn("Ремешок обязателен при продаже", self.template)
+        self.assertIn("Для продажи из заказа", self.template)
+        self.assertIn(
+            ".product-inline-form.is-editing .product-additional-settings",
+            self.styles,
+        )
+        self.assertIn(
+            "#editDrawer .product-setting-row", self.styles
+        )
+        self.assertIn("@media (max-width: 430px)", self.styles)
+
+    def test_toggle_keeps_immediate_persistence(self):
+        self.assertIn("checkbox.addEventListener('change'", self.script)
+        self.assertIn("method: 'PUT'", self.script)
+        self.assertIn("Сохранено сразу.", self.script)
+        self.assertIn("checkbox.disabled = !canManage", self.script)
+        self.assertIn("if (!status) return", self.script)
+
+    def test_sales_show_strap_and_full_inventory_composition(self):
+        sales_template = (
+            PROJECT_ROOT / "app/templates/sales.html"
+        ).read_text(encoding="utf-8")
+        sales_styles = (
+            PROJECT_ROOT / "app/static/css/erp-components.css"
+        ).read_text(encoding="utf-8")
+        self.assertIn("sale.strap_components", sales_template)
+        self.assertIn("Ремешок:", sales_template)
+        self.assertIn('id="saleComposition"', sales_template)
+        self.assertIn("Состав списания", sales_template)
+        self.assertIn("renderSaleComposition(sale.components || [])", sales_template)
+        self.assertIn(".sale-composition-row", sales_styles)
+        self.assertIn("@media (max-width: 520px)", sales_styles)
 
 
 class RequiredStrapInventoryTest(unittest.TestCase):
@@ -54,6 +114,15 @@ class RequiredStrapInventoryTest(unittest.TestCase):
         with self.database.connect() as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*), SUM(quantity*unit_price) FROM erp_sale_items").fetchone()[:], (1, 200))
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM erp_sale_component_snapshots").fetchone()[0], 2)
+        stored_sale = self.inventory.list_sales()[0]
+        self.assertEqual(
+            [(item["name"], item["quantity"]) for item in stored_sale["components"]],
+            [("Корпус", 2.0), ("Ремешок", 2.0)],
+        )
+        self.assertEqual(
+            [item["article"] for item in stored_sale["strap_components"]],
+            ["STRAP"],
+        )
         RequiredStraps(self.database).configure(body["id"], False)
         self.inventory.cancel_sale(sale["id"])
         self.inventory.cancel_sale(sale["id"])

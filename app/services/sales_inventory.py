@@ -24,6 +24,7 @@ from app.services.sale_pricing import calculate_sale_pricing
 from app.services.shared_catalog import (
     PRODUCT_KIND_STRAP_COMPONENT,
     PRODUCT_KIND_WATCH,
+    catalog_category_is_strap,
     get_or_create_brand,
     get_or_create_category,
     product_matches_kind,
@@ -2138,7 +2139,12 @@ class SalesInventory:
         if row is None:
             return None
         plan = cls._movement_plan_from_connection(connection, sale_id)
-        return cls._sale_payload(row, plan)
+        components = cls._component_snapshots_from_connection(
+            connection, [row["item_id"]]
+        )
+        return cls._sale_payload(
+            row, plan, components.get(int(row["item_id"]), [])
+        )
 
     def list_sales(self, sale_id=None):
         if not self.exists():
@@ -2163,10 +2169,49 @@ class SalesInventory:
                 connection,
                 [row["id"] for row in rows],
             )
+            components = self._component_snapshots_from_connection(
+                connection,
+                [row["item_id"] for row in rows],
+            )
         return [
-            self._sale_payload(row, plans.get(row["id"]))
+            self._sale_payload(
+                row,
+                plans.get(row["id"]),
+                components.get(int(row["item_id"]), []),
+            )
             for row in rows
         ]
+
+    @staticmethod
+    def _component_snapshots_from_connection(connection, sale_item_ids):
+        sale_item_ids = list(dict.fromkeys(
+            int(value) for value in sale_item_ids if value is not None
+        ))
+        if not sale_item_ids:
+            return {}
+        placeholders = ",".join("?" for _value in sale_item_ids)
+        rows = connection.execute(
+            "SELECT s.sale_item_id,s.component_id,s.quantity_per_unit,"
+            "s.name,s.article,COALESCE(c.name,p.excel_category,'') AS category "
+            "FROM erp_sale_component_snapshots s "
+            "LEFT JOIN catalog_excel_products p ON p.id=s.component_id "
+            "LEFT JOIN erp_categories c ON c.id=p.category_id "
+            "WHERE s.sale_item_id IN ({}) ORDER BY s.sale_item_id,s.rowid"
+            .format(placeholders),
+            sale_item_ids,
+        ).fetchall()
+        grouped = {item_id: [] for item_id in sale_item_ids}
+        for row in rows:
+            category = str(row["category"] or "")
+            grouped.setdefault(int(row["sale_item_id"]), []).append({
+                "product_id": str(row["component_id"]),
+                "name": str(row["name"] or ""),
+                "article": str(row["article"] or ""),
+                "category": category,
+                "quantity_per_unit": float(row["quantity_per_unit"]),
+                "is_strap": catalog_category_is_strap(category),
+            })
+        return grouped
 
     @classmethod
     def _movement_plans_from_connection(cls, connection, sale_ids):
@@ -2311,7 +2356,7 @@ class SalesInventory:
         return str(payload.get("order_number") or sale["id"])
 
     @staticmethod
-    def _sale_payload(row, movement_plan=None):
+    def _sale_payload(row, movement_plan=None, components=None):
         sale_level_payload = SalesInventory._metadata(row)
         item_snapshot = next((
             item for item in sale_level_payload.get("items", [])
@@ -2343,6 +2388,16 @@ class SalesInventory:
         movement_plan = movement_plan or {
             "safe": True, "quantity": 0, "movement_count": 0,
         }
+        components = [
+            {
+                **component,
+                "quantity": float(component["quantity_per_unit"]) * quantity,
+                "is_primary": (
+                    str(component["product_id"]) == str(row["product_id"])
+                ),
+            }
+            for component in (components or [])
+        ]
         payload.update({
             "id": row["id"],
             "source": row["source"],
@@ -2412,5 +2467,10 @@ class SalesInventory:
             "cancellation_has_movements": bool(movement_plan["movement_count"]),
             "inventory_managed": True,
             "automatic_stock_applied": True,
+            "components": components,
+            "strap_components": [
+                component for component in components
+                if component.get("is_strap")
+            ],
         })
         return payload
