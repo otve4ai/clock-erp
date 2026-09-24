@@ -12471,16 +12471,6 @@ def build_sales_report_records(
                 )
                 if value is not None and str(value).strip() != ""
             ), None),
-            "components": [
-                dict(component)
-                for component in stored_sale.get("components", [])
-                if isinstance(component, dict)
-            ],
-            "strap_components": [
-                dict(component)
-                for component in stored_sale.get("strap_components", [])
-                if isinstance(component, dict)
-            ],
             "quantity_value": quantity_number,
             "quantity_display": format_stock_number(
                 quantity_number
@@ -12773,6 +12763,16 @@ def build_sales_report_records(
                 )
                 if value is not None and str(value).strip() != ""
             ), None),
+            "components": [
+                dict(component)
+                for component in stored_sale.get("components", [])
+                if isinstance(component, dict)
+            ],
+            "strap_components": [
+                dict(component)
+                for component in stored_sale.get("strap_components", [])
+                if isinstance(component, dict)
+            ],
             "quantity_value": quantity_number,
             "quantity_display": format_stock_number(
                 quantity_number
