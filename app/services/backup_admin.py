@@ -120,7 +120,6 @@ class BackupAdminService:
         self.audit_path = self.backup_root / "audit" / "backup-admin.jsonl"
         self._size_cache = {}
         self._size_cache_lock = threading.Lock()
-        self._git_remote_cache = None
 
     def _run(self, arguments, cwd=None, timeout=None, env=None):
         environment = dict(os.environ)
@@ -404,27 +403,13 @@ class BackupAdminService:
         remote_state = "unavailable"
         remote_head = None
         if branch and self.remote_check:
-            cached_remote = self._git_remote_cache
-            if cached_remote and cached_remote[0] == branch and time.monotonic() - cached_remote[1] < 60:
-                remote_state, remote_head = cached_remote[2], cached_remote[3]
-            else:
-                try:
-                    remote = self._run(
-                        ["git", "ls-remote", "--heads", "origin", "refs/heads/" + branch],
-                        timeout=5,
-                    )
-                    if remote.returncode == 0:
-                        line = remote.stdout.strip().splitlines()
-                        remote_head = line[0].split()[0] if line else None
-                        remote_state = (
-                            "current" if remote_head == head else
-                            "different" if remote_head else "branch_missing"
-                        )
-                except (OSError, subprocess.TimeoutExpired):
-                    remote_state = "unavailable"
-                self._git_remote_cache = (
-                    branch, time.monotonic(), remote_state, remote_head
-                )
+            # Page rendering must not depend on GitHub availability. The deploy
+            # process refreshes this tracking ref before switching the release.
+            remote_head = self._git_output([
+                "rev-parse", "--verify", "refs/remotes/origin/" + branch,
+            ])
+            if remote_head:
+                remote_state = "current" if remote_head == head else "different"
         history_text = self._git_output([
             "log", "-{}".format(int(history_limit)),
             "--pretty=format:%H%x1f%h%x1f%ci%x1f%s%x1e",
