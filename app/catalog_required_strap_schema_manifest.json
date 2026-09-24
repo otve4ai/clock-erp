@@ -1,0 +1,36 @@
+{
+  "indexes": [],
+  "tables": {
+    "erp_required_straps": {
+      "checks": [],
+      "columns": [
+        [
+          "product_id",
+          "INTEGER",
+          0,
+          null,
+          1
+        ],
+        [
+          "updated_at",
+          "TEXT",
+          1,
+          null,
+          0
+        ]
+      ],
+      "foreign_keys": [
+        [
+          "catalog_excel_products",
+          "product_id",
+          "id",
+          "NO ACTION",
+          "CASCADE",
+          "NONE"
+        ]
+      ]
+    }
+  },
+  "triggers": [],
+  "views": []
+}

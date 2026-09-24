@@ -105,3 +105,5 @@ WB через общий сервис продаж; код `app/services/wildber
 - 2026-09-15: в `product/README.md` уточнён текущий контракт проведения заказа:
   расчёты Bitrix не блокируют продажу; проверено по `app/web.py` и целевым
   тестам `test_order_tictactoy_sale.py`, `test_orders_rework.py`.
+
+- 2026-09-24: [Обязательный ремешок](required-straps.md) — current: признак товара, выбор в заказе, атомарное списание и исторический возврат; tests/test_required_straps.py. Статус не подтверждает production deploy.

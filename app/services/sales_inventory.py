@@ -8,7 +8,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 from app.catalog_db import CatalogDatabase
-from app.services.product_bundles import BundleError, compositions, physical_lines
+from app.services.required_straps import sale_components, requires_strap
+from app.services.product_bundles import compositions, physical_lines
 from app.services.audit_journal import AuditJournal
 from app.services.brand_values import is_numeric_brand, normalize_brand
 from app.services.excel_product_catalog import (
@@ -430,6 +431,9 @@ class SalesInventory:
             if existing is not None:
                 return self._sale_from_connection(connection, existing["id"])
 
+            if any(requires_strap(connection, item["product_id"]) for item in prepared) or requires_strap(connection, base_id):
+                raise SalesInventoryError("Для корпуса выберите обязательный ремешок в позиции заказа.")
+
             if removed_mode == "created":
                 duplicates = self._potential_removed_strap_duplicates(
                     connection, new_removed.get("brand"), new_removed.get("name"),
@@ -676,12 +680,13 @@ class SalesInventory:
         return self.get_sale(sale_id)
 
     def _write_sale_stock(self, connection, product_id, quantity, sale_id,
-                          item_id, key, source, user_name, timestamp, sale_number=None):
+                          item_id, key, source, user_name, timestamp, sale_number=None, strap_product_id=None):
         try:
-            lines = physical_lines(connection, product_id, quantity)
-        except BundleError as error:
+            selected_components = sale_components(connection, product_id, quantity, strap_product_id)
+            lines = selected_components or physical_lines(connection, product_id, quantity)
+        except ValueError as error:
             raise SalesInventoryError(str(error))
-        is_bundle = product_id in compositions(connection, [product_id])
+        is_bundle = selected_components is not None or product_id in compositions(connection, [product_id])
         document = ("sale", sale_id)
         assert_products_unlocked(connection, [line[0] for line in lines], SalesInventoryError)
         for index, (physical_id, required) in enumerate(lines):
@@ -1044,6 +1049,7 @@ class SalesInventory:
                     connection, item["product_id"], item["quantity"], sale_id,
                     item_id, movement_key, source, user_name, inserted_at,
                     stored_payload.get("order_number"),
+                    strap_product_id=item.get("strap_product_id"),
                 )
                 item_snapshots.append({
                     **item,

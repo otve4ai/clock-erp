@@ -22,6 +22,7 @@ from app.remove_product_collections_migration import (
     REMOVE_COLLECTIONS_SQL, apply_remove_collections_migration,
 )
 
+from app.required_strap_migration import REQUIRED_STRAP_SQL, apply_required_strap_migration
 from app.component_inventory_migration import COMPONENT_SQL, apply_component_inventory_migration
 from app.writeoff_migration import WRITEOFF_SQL, apply_writeoff_migration
 from app.bundle_migration import BUNDLE_SQL, apply_bundle_migration
@@ -249,6 +250,8 @@ COMPONENT_MIGRATION_ID = "2026-09-07-component-physical-inventory-v1"
 WRITEOFF_MIGRATION_ID = "2026-09-08-stock-writeoffs-v1"
 INCOMING_RECEIPTS_MIGRATION_ID = "2026-09-23-incoming-receipts-v1"
 
+REQUIRED_STRAP_MIGRATION_ID = "2026-09-24-required-straps-v1"
+
 MIGRATIONS = (
     {
         "id": BASELINE_ID,
@@ -341,6 +344,9 @@ MIGRATIONS = (
      "checksum": hashlib.sha256("\n".join(INCOMING_RECEIPTS_DEFINITION).encode("utf-8")).hexdigest(),
      "transactional": True,
      "recovery": "restore verified catalog database backup while service is stopped"},
+    {"id": REQUIRED_STRAP_MIGRATION_ID, "name": "Optional mandatory strap for watch bodies",
+     "checksum": hashlib.sha256("\n".join(REQUIRED_STRAP_SQL).encode("utf-8")).hexdigest(),
+     "transactional": True, "recovery": "restore verified catalog database backup while service is stopped"},
 )
 
 REQUIRED_TABLES = {
@@ -766,6 +772,9 @@ def verify_complete_catalog_contract(connection, include_bundles=True, include_i
         replaced = set(extra["tables"])
         expected["indexes"] = [row for row in expected["indexes"] if row[0] not in replaced]
         expected["indexes"] = sorted(expected["indexes"] + extra["indexes"])
+    if include_incoming:
+        extra = json.loads(Path(__file__).resolve().with_name("catalog_required_strap_schema_manifest.json").read_text(encoding="utf-8"))
+        expected["tables"].update(extra["tables"])
     actual = _json_structure(connection)
     if actual == expected:
         return True
@@ -1333,12 +1342,12 @@ def apply_migrations(database_path, app_commit="", ddl_observer=None):
                         raise
                     finally:
                         connection.close()
-                elif migration["id"] in (BUNDLE_MIGRATION_ID, COMPONENT_MIGRATION_ID, WRITEOFF_MIGRATION_ID, "2026-09-09-remove-product-collections-v1", INCOMING_RECEIPTS_MIGRATION_ID):
+                elif migration["id"] in (BUNDLE_MIGRATION_ID, COMPONENT_MIGRATION_ID, WRITEOFF_MIGRATION_ID, "2026-09-09-remove-product-collections-v1", INCOMING_RECEIPTS_MIGRATION_ID, REQUIRED_STRAP_MIGRATION_ID):
                     connection = sqlite3.connect(str(path))
                     try:
                         connection.execute("PRAGMA foreign_keys = ON")
                         connection.execute("BEGIN IMMEDIATE")
-                        ({"2026-09-09-remove-product-collections-v1": apply_remove_collections_migration, BUNDLE_MIGRATION_ID: apply_bundle_migration, COMPONENT_MIGRATION_ID: apply_component_inventory_migration, WRITEOFF_MIGRATION_ID: apply_writeoff_migration, INCOMING_RECEIPTS_MIGRATION_ID: apply_incoming_receipts_migration}[migration["id"]])(connection, ddl_observer)
+                        ({"2026-09-09-remove-product-collections-v1": apply_remove_collections_migration, BUNDLE_MIGRATION_ID: apply_bundle_migration, COMPONENT_MIGRATION_ID: apply_component_inventory_migration, WRITEOFF_MIGRATION_ID: apply_writeoff_migration, INCOMING_RECEIPTS_MIGRATION_ID: apply_incoming_receipts_migration, REQUIRED_STRAP_MIGRATION_ID: apply_required_strap_migration}[migration["id"]])(connection, ddl_observer)
                         connection.commit()
                     except Exception:
                         connection.rollback()
@@ -1597,6 +1606,9 @@ def validate_known_sql_compatibility(source_root):
     incoming_receipts_migration = source_root / "app" / "incoming_receipts_migration.py"
     if incoming_receipts_migration.exists():
         paths.append(incoming_receipts_migration)
+    required_strap_migration = source_root / "app" / "required_strap_migration.py"
+    if required_strap_migration.exists():
+        paths.append(required_strap_migration)
     domain_migrations = source_root / "app" / "domain_schema_migrations.py"
     if domain_migrations.exists():
         paths.append(domain_migrations)
