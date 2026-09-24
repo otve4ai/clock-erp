@@ -937,16 +937,6 @@ class ExcelProductCatalog:
                 "SELECT * FROM catalog_excel_batches WHERE status = 'active' "
                 "ORDER BY applied_at DESC LIMIT 1"
             ).fetchone()
-            total = connection.execute(
-                "SELECT COUNT(*) FROM catalog_excel_products p "
-                "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
-                "LEFT JOIN catalog_products cp "
-                "ON cp.id = p.bitrix_catalog_product_id" + where_sql,
-                parameters,
-            ).fetchone()[0]
-            pages = (total + per_page - 1) // per_page
-            if pages and page > pages:
-                page = pages
             stats = dict(connection.execute(
                 "SELECT COUNT(*) AS positions, COALESCE(SUM(p.stock), 0) AS total_stock, "
                 "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
@@ -961,6 +951,10 @@ class ExcelProductCatalog:
                 "ON cp.id = p.bitrix_catalog_product_id" + where_sql,
                 parameters,
             ).fetchone())
+            total = int(stats["positions"] or 0)
+            pages = (total + per_page - 1) // per_page
+            if pages and page > pages:
+                page = pages
             missing_price_sql = (
                 "CASE WHEN NULLIF(p.bitrix_price_amount, '') IS NULL THEN 1 ELSE 0 END, "
                 if sort_by == "price" else ""

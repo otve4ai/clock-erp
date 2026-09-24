@@ -1,10 +1,13 @@
 """Configurable, read-only XLSX export for the canonical product catalogue."""
 
 import json
+import sqlite3
 from collections import OrderedDict
 from datetime import timezone
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 from io import BytesIO
+from pathlib import Path
 
 from app.catalog_db import CatalogDatabase
 from app.time_ranking import parse_erp_datetime
@@ -108,6 +111,47 @@ def warehouse_values(payload):
     return result
 
 
+def _file_signature(path):
+    try:
+        stat = path.stat()
+    except OSError:
+        return (0, 0, 0, 0)
+    return (stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size)
+
+
+def _database_content_signature(path):
+    """Track both the SQLite database and its production WAL sidecar."""
+    path = Path(path)
+    return (
+        _file_signature(path),
+        _file_signature(Path(str(path) + "-wal")),
+    )
+
+
+def _read_available_warehouses(connection):
+    names = set()
+    rows = connection.execute(
+        "SELECT cp.normalized_payload_json FROM catalog_excel_products p "
+        "JOIN catalog_excel_batches b ON b.id=p.current_batch_id "
+        "JOIN catalog_products cp ON cp.id=p.bitrix_catalog_product_id "
+        "WHERE p.active=1 AND (p.source_key LIKE 'bitrix:%' "
+        "OR (b.status='active' AND p.current_batch_id=b.id))"
+    ).fetchall()
+    for row in rows:
+        names.update(warehouse_values(row[0]))
+    return tuple(sorted(names, key=str.casefold))
+
+
+@lru_cache(maxsize=16)
+def _cached_available_warehouses(database_path, content_signature):
+    del content_signature
+    connection = sqlite3.connect(database_path)
+    try:
+        return _read_available_warehouses(connection)
+    finally:
+        connection.close()
+
+
 class ProductExcelExport:
     def __init__(self, database=None):
         self.database = database or CatalogDatabase(cache_initialization=True)
@@ -123,18 +167,21 @@ class ProductExcelExport:
         ]
 
     def available_warehouses(self):
-        names = set()
-        with self.database.connect() as connection:
-            rows = connection.execute(
-                "SELECT cp.normalized_payload_json FROM catalog_excel_products p "
-                "JOIN catalog_excel_batches b ON b.id=p.current_batch_id "
-                "JOIN catalog_products cp ON cp.id=p.bitrix_catalog_product_id "
-                "WHERE p.active=1 AND (p.source_key LIKE 'bitrix:%' "
-                "OR (b.status='active' AND p.current_batch_id=b.id))"
-            ).fetchall()
-        for row in rows:
-            names.update(warehouse_values(row["normalized_payload_json"]))
-        return sorted(names, key=str.casefold)
+        self.database.initialize()
+        database_path_value = getattr(self.database, "path", None)
+        if not isinstance(database_path_value, (str, Path)):
+            raise AttributeError("A real catalog database path is required.")
+        if str(database_path_value) == ":memory:":
+            connection = self.database.connect()
+            try:
+                return list(_read_available_warehouses(connection))
+            finally:
+                connection.close()
+        database_path = str(Path(database_path_value).resolve())
+        return list(_cached_available_warehouses(
+            database_path,
+            _database_content_signature(database_path),
+        ))
 
     def validate_fields(self, requested_fields, available_warehouses):
         requested = list(dict.fromkeys(str(value) for value in requested_fields or []))

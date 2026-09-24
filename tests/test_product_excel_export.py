@@ -11,6 +11,7 @@ from app import web
 from app.catalog_db import CatalogDatabase
 from app.services.bitrix_catalog_importer import BitrixCatalogImporter
 from app.services.excel_product_catalog import ExcelProductCatalog
+from app.services import product_excel_export
 from app.services.product_excel_export import ProductExcelExport
 
 
@@ -70,8 +71,34 @@ class ProductExcelExportTest(unittest.TestCase):
         self.client = web.app.test_client()
 
     def tearDown(self):
+        product_excel_export._cached_available_warehouses.cache_clear()
         self.environment.stop()
         self.temp.cleanup()
+
+    def test_available_warehouses_are_cached_until_catalog_changes(self):
+        exporter = ProductExcelExport(CatalogDatabase(self.database_path))
+        product_excel_export._cached_available_warehouses.cache_clear()
+        with mock.patch.object(
+            product_excel_export,
+            "_read_available_warehouses",
+            wraps=product_excel_export._read_available_warehouses,
+        ) as reader:
+            self.assertEqual(exporter.available_warehouses(), ["Москва", "Удельная"])
+            self.assertEqual(exporter.available_warehouses(), ["Москва", "Удельная"])
+            self.assertEqual(reader.call_count, 1)
+
+            with exporter.database.transaction() as connection:
+                connection.execute(
+                    "UPDATE catalog_products SET normalized_payload_json = ? "
+                    "WHERE external_product_id = ?",
+                    (
+                        '{"warehouse_stocks":[{"name":"Новый склад","quantity":1}]}',
+                        "warehouse-product",
+                    ),
+                )
+
+            self.assertEqual(exporter.available_warehouses(), ["Новый склад"])
+            self.assertEqual(reader.call_count, 2)
 
     def workbook(self, url, data=None):
         response = (
