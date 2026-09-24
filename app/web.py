@@ -5681,7 +5681,7 @@ def warehouse_page():
             format_stock_number=format_stock_number,
         )
     if warehouse_view == "categories":
-        shared_catalog = SharedCatalog()
+        shared_catalog = SharedCatalog(product_catalog.database)
         category_id = (request.args.get("category_id") or "").strip()
         query = (request.args.get("q") or "").strip()
         sort_by = (request.args.get("sort_by") or "name").strip()
@@ -5733,7 +5733,7 @@ def warehouse_page():
             product_metrics=product_metrics,
         )
     if warehouse_view == "brands":
-        shared_catalog = SharedCatalog()
+        shared_catalog = SharedCatalog(product_catalog.database)
         brand_id = (request.args.get("brand_id") or "").strip()
         brand = shared_catalog.get_brand_overview(brand_id) if brand_id else None
         if brand_id and brand is None:
@@ -5768,7 +5768,7 @@ def warehouse_page():
     selected_model_id = request.args.get("model_id", "").strip()
     selected_brand_id = request.args.get("brand_id", "").strip()
     selected_category_id = request.args.get("category_id", "").strip()
-    shared_catalog = SharedCatalog()
+    shared_catalog = SharedCatalog(product_catalog.database)
     shared_brands = shared_catalog.list_brands(limit=200)
     if not selected_brand_id and selected_brand:
         selected_brand_match = next((
@@ -5961,30 +5961,13 @@ def warehouse_page():
         "out_of_stock": int(catalog_stats.get("zero_positions") or 0),
         "units": format_stock_number(catalog_stats.get("total_stock") or 0),
     }
-    catalog_items = build_excel_warehouse_items(catalog["items"])
-    items = get_excel_warehouse_items(catalog=catalog)
+    items = build_excel_warehouse_items(catalog["items"])
     if out_of_stock:
         cycles = OutOfStockChecks().current_for_products(
             [item["id"] for item in items]
         )
         for item in items:
             item["out_of_stock_cycle"] = cycles.get(item["id"], {})
-    if items != catalog_items and (created_date_from or created_date_to):
-        filtered_items = []
-        for item in items:
-            try:
-                created_date = time.strftime(
-                    "%Y-%m-%d",
-                    time.localtime(float(item.get("created_at") or 0)),
-                )
-            except (TypeError, ValueError, OverflowError, OSError):
-                created_date = ""
-            if created_date_from and created_date < created_date_from:
-                continue
-            if created_date_to and created_date > created_date_to:
-                continue
-            filtered_items.append(item)
-        items = filtered_items
     taxonomy = load_catalog_taxonomy()
     shared_brand_groups = shared_brands
     inventory_brand_id = selected_brand_id
@@ -5999,7 +5982,9 @@ def warehouse_page():
         )
         if inventory_brand_match:
             inventory_brand_id = inventory_brand_match.get("id")
-    active_brand_inventory = BrandInventory().active_for_brand(
+    active_brand_inventory = BrandInventory(
+        product_catalog.database
+    ).active_for_brand(
         inventory_brand_id
     )
     filter_brand_groups = merge_catalog_groups(shared_brand_groups, [])

@@ -81,8 +81,12 @@ class CatalogDatabase:
             raise RuntimeError(
                 "catalog schema changes are deploy-time only; run catalog migrations"
             )
+        if self.cache_initialization and self._initialized:
+            return None
         from app.schema_migrations import validate_catalog_runtime
         with self._initialize_lock:
+            if self.cache_initialization and self._initialized:
+                return None
             cache_path = str(self.path.resolve())
             with self._schema_cache_lock:
                 identity = self._schema_cache_identity()

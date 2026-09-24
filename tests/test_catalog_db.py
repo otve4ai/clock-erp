@@ -123,7 +123,11 @@ class CatalogDatabaseTest(unittest.TestCase):
             self.database_path,
             cache_initialization=True,
         )
-        with mock.patch(
+        with mock.patch.object(
+            database,
+            "_schema_cache_identity",
+            wraps=database._schema_cache_identity,
+        ) as identity, mock.patch(
             "app.schema_migrations.validate_catalog_runtime",
             wraps=validate_catalog_runtime,
         ) as validator:
@@ -131,6 +135,7 @@ class CatalogDatabaseTest(unittest.TestCase):
             database.initialize()
 
         validator.assert_called_once_with(self.database_path)
+        self.assertEqual(identity.call_count, 2)
 
     def test_cached_initialization_is_reused_by_service_instances(self):
         CatalogDatabase._schema_cache.clear()
