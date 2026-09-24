@@ -35,7 +35,8 @@ class CatalogReferenceError(ValueError):
 
 PRODUCT_KIND_WATCH = "watch"
 PRODUCT_KIND_STRAP_COMPONENT = "strap_component"
-PRODUCT_KINDS = {PRODUCT_KIND_WATCH, PRODUCT_KIND_STRAP_COMPONENT}
+PRODUCT_KIND_STRAP = "strap"
+PRODUCT_KINDS = {PRODUCT_KIND_WATCH, PRODUCT_KIND_STRAP_COMPONENT, PRODUCT_KIND_STRAP}
 
 
 def catalog_category_is_strap(name, path_json=""):
@@ -75,6 +76,8 @@ def product_matches_kind(product, kind):
     kind = normalize_product_kind(kind)
     if not kind:
         return True
+    if kind == PRODUCT_KIND_STRAP:
+        return catalog_category_is_strap(dict(product or {}).get("category"))
     category = catalog_search_key(dict(product or {}).get("category"))
     if kind == PRODUCT_KIND_WATCH:
         return category in {"часы", "наручные часы", "watches"}
@@ -92,6 +95,9 @@ def product_kind_sql(category_alias="c", kind=""):
     category = "COALESCE({}.normalized_name, '')".format(category_alias)
     if kind == PRODUCT_KIND_WATCH:
         return "{} IN ('часы','наручные часы','watches')".format(category)
+    if kind == PRODUCT_KIND_STRAP:
+        return ("({0} LIKE '%ремеш%' OR {0}='ремни' OR {0} LIKE '%браслет%' "
+                "OR {0} LIKE '%strap%' OR {0} LIKE '%watch band%')").format(category)
     if kind == PRODUCT_KIND_STRAP_COMPONENT:
         return (
             "({0} LIKE '%ремеш%' OR {0} = 'ремни' OR "

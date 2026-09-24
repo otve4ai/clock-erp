@@ -1474,6 +1474,10 @@
             <input id="editProductId" type="hidden" name="product_id">
             <input id="editReturnQuery" type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
             <input type="hidden" name="stock_reason" value="Редактирование карточки товара">
+            <div data-required-strap-settings>
+                <label><input type="checkbox" data-requires-strap disabled> Требуется ремешок</label>
+                <p data-required-strap-status role="status">Загрузка настройки…</p>
+            </div>
             <div class="product-detail-grid">
             <div class="product-detail-card">
                 <div class="product-detail-label">Название</div>
@@ -2490,6 +2494,7 @@
             }
 
             document.getElementById("editProductId").value = button.dataset.id || "";
+            window.loadRequiredStrapSetting?.(button.dataset.id);
             const editableValues = {
                 editName: button.dataset.name || "",
                 editModel: button.dataset.model || "",
@@ -6717,6 +6722,7 @@
     </script>
     {% endif %}
 {% include "_manual_product.html" %}
+<script src="{{ static_asset_url('js/required-strap.js') }}"></script>
 </body>
 {% if pagination_e2e %}<script src="{{ url_for('static', filename='js/pagination-e2e.js') }}"></script>{% endif %}
 </html>
