@@ -26,6 +26,10 @@ systemd/nginx/cron/TLS/SSH, venv, Git-код и внешняя БД Bitrix. Ко
 причиной, размером, commit/branch и schema state. Старые архивы без metadata не
 считаются точками `код + данные`.
 
+Проверка Git при открытии вкладки использует локальный tracking ref
+`origin/<branch>`, который обновляется штатным deploy-процессом. HTTP-запрос не
+выполняет сетевые Git-команды и не зависит от доступности GitHub.
+
 ## Recovery V2
 
 Recovery выполняет только установленный root-owned helper

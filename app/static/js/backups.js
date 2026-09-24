@@ -201,7 +201,8 @@
         let details = current.querySelector(".version-details");
         if (!details) { details = document.createElement("div"); details.className = "version-details"; current.appendChild(details); }
         const treeState = git.dirty === true ? "Есть незакоммиченные изменения" : git.dirty === false ? "Рабочее дерево чистое" : "Не удалось проверить рабочее дерево";
-        details.textContent = git.available ? `${git.date || "Дата не определена"} · ${git.message || "Без сообщения"} · ${treeState} · Remote: ${git.remote_state === "current" ? "актуален" : git.remote_state === "different" ? "отличается" : git.remote_state === "branch_missing" ? "ветка отсутствует" : "не удалось проверить"}` : "";
+        const trackingState = git.remote_state === "current" ? "локальный origin совпадает" : git.remote_state === "different" ? "локальный origin отличается" : "локальный origin недоступен";
+        details.textContent = git.available ? `${git.date || "Дата не определена"} · ${git.message || "Без сообщения"} · ${treeState} · ${trackingState}` : "";
         const warning = q("[data-git-warning]");
         warning.hidden = git.dirty === false;
         warning.textContent = git.dirty === true ? "Есть незакоммиченные изменения. Откат кода заблокирован." : git.dirty == null ? "Не удалось подтвердить чистоту production. Откат кода заблокирован." : "";

@@ -292,6 +292,37 @@ class BackupAdminServiceTest(unittest.TestCase):
         )
         self.assertEqual(self.service.schedule_status()["label"], "Ежедневно в 03:17")
 
+    def test_git_status_uses_local_tracking_ref_without_network(self):
+        head = "a" * 40
+        calls = []
+
+        def run(arguments, **_kwargs):
+            arguments = list(arguments)
+            calls.append(arguments)
+            outputs = {
+                ("git", "rev-parse", "HEAD"): head + "\n",
+                ("git", "symbolic-ref", "--quiet", "--short", "HEAD"): "main\n",
+                ("git", "rev-parse", "--short", "HEAD"): "aaaaaaa\n",
+                ("git", "show", "-s", "--format=%s", "HEAD"): "Current release\n",
+                ("git", "show", "-s", "--format=%cI", "HEAD"): "2026-09-24T08:00:00+03:00\n",
+                ("git", "config", "--get", "remote.origin.url"): "https://github.com/example/erp.git\n",
+                ("git", "rev-parse", "--verify", "refs/remotes/origin/main"): head + "\n",
+                ("git", "log", "-15", "--pretty=format:%H%x1f%h%x1f%ci%x1f%s%x1e"): "",
+            }
+            if arguments == ["git", "status", "--porcelain", "--untracked-files=normal"]:
+                return subprocess.CompletedProcess(arguments, 0, "", "")
+            output = outputs.get(tuple(arguments))
+            return subprocess.CompletedProcess(
+                arguments, 0 if output is not None else 1, output or "", ""
+            )
+
+        with mock.patch.object(self.service, "_run", side_effect=run):
+            result = self.service.git_status()
+
+        self.assertEqual(result["remote_state"], "current")
+        self.assertEqual(result["remote_commit"], head)
+        self.assertFalse(any(call[:2] == ["git", "ls-remote"] for call in calls))
+
     def test_ui_hides_idle_operation_and_scrolls_primary_history(self):
         project_root = Path(__file__).resolve().parents[1]
         css = (project_root / "app/static/css/backups.css").read_text(encoding="utf-8")
@@ -301,6 +332,7 @@ class BackupAdminServiceTest(unittest.TestCase):
         self.assertIn("panel.hidden = !operation.active && !persistentFailure", js)
         self.assertIn('not_checked: "Не проверен"', js)
         self.assertIn("if (watchedOperationId) scheduleRefresh(2500)", js)
+        self.assertIn("локальный origin совпадает", js)
 
 
 class shutil_usage:
