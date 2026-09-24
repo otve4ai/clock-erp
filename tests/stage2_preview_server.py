@@ -500,6 +500,9 @@ web.api_receipt_records = lambda: tuple(
 web.build_sales_report_records = lambda warehouse_items=None: [
     dict(sale) for sale in preview_sales
 ]
+web.api_sales_records = lambda: tuple(
+    dict(sale) for sale in preview_sales
+)
 web.app.config.update(TESTING=True, AUTH_TESTING=False)
 
 # Stable local-only task fixtures make responsive and accessibility checks
