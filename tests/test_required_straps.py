@@ -54,6 +54,21 @@ class RequiredStrapUiContractTest(unittest.TestCase):
         self.assertIn("checkbox.disabled = !canManage", self.script)
         self.assertIn("if (!status) return", self.script)
 
+    def test_sales_show_strap_and_full_inventory_composition(self):
+        sales_template = (
+            PROJECT_ROOT / "app/templates/sales.html"
+        ).read_text(encoding="utf-8")
+        sales_styles = (
+            PROJECT_ROOT / "app/static/css/erp-components.css"
+        ).read_text(encoding="utf-8")
+        self.assertIn("sale.strap_components", sales_template)
+        self.assertIn("Ремешок:", sales_template)
+        self.assertIn('id="saleComposition"', sales_template)
+        self.assertIn("Состав списания", sales_template)
+        self.assertIn("renderSaleComposition(sale.components || [])", sales_template)
+        self.assertIn(".sale-composition-row", sales_styles)
+        self.assertIn("@media (max-width: 520px)", sales_styles)
+
 
 class RequiredStrapInventoryTest(unittest.TestCase):
     setUp = sales_tests.SalesInventoryTest.setUp
@@ -99,6 +114,15 @@ class RequiredStrapInventoryTest(unittest.TestCase):
         with self.database.connect() as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*), SUM(quantity*unit_price) FROM erp_sale_items").fetchone()[:], (1, 200))
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM erp_sale_component_snapshots").fetchone()[0], 2)
+        stored_sale = self.inventory.list_sales()[0]
+        self.assertEqual(
+            [(item["name"], item["quantity"]) for item in stored_sale["components"]],
+            [("Корпус", 2.0), ("Ремешок", 2.0)],
+        )
+        self.assertEqual(
+            [item["article"] for item in stored_sale["strap_components"]],
+            ["STRAP"],
+        )
         RequiredStraps(self.database).configure(body["id"], False)
         self.inventory.cancel_sale(sale["id"])
         self.inventory.cancel_sale(sale["id"])

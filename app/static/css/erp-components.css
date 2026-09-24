@@ -2011,6 +2011,70 @@ body.modal-open {
     white-space: nowrap;
 }
 
+.sales-list-page .sales-product-component {
+    width: 100%;
+    overflow: hidden;
+    color: var(--erp-success-text, #087443);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sales-list-page .sales-mobile-component {
+    color: var(--erp-success-text, #087443);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.sales-list-page .sale-composition {
+    padding: 12px 14px;
+    border: 1px solid var(--erp-border);
+    border-radius: var(--erp-radius);
+    background: var(--erp-surface-muted, #f7f9fc);
+}
+
+.sales-list-page .sale-composition-title {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--erp-text);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.sales-list-page .sale-composition-items {
+    display: grid;
+    gap: 6px;
+}
+
+.sales-list-page .sale-composition-row {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 12px;
+}
+
+.sales-list-page .sale-composition-role {
+    color: var(--erp-muted);
+}
+
+.sales-list-page .sale-composition-product {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+    .sales-list-page .sale-composition-row {
+        grid-template-columns: 64px minmax(0, 1fr);
+    }
+
+    .sales-list-page .sale-composition-quantity {
+        grid-column: 2;
+    }
+}
+
 .sales-list-page .sales-table tbody tr {
     height: 70px;
 }
