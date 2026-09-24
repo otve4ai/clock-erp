@@ -54,7 +54,10 @@ class WarehouseDeleteFeedbackTest(unittest.TestCase):
         source = (PROJECT_ROOT / "app/templates/warehouse.html").read_text(
             encoding="utf-8"
         )
-        self.assertIn('.notice-error,\n        .notice-danger {', source)
+        stylesheet = (
+            PROJECT_ROOT / "app/static/css/warehouse.css"
+        ).read_text(encoding="utf-8")
+        self.assertIn('.notice-error,\n.notice-danger {', stylesheet)
         self.assertIn('notice.className = "notice notice-" + variant', source)
         self.assertIn('data.message || "Товар удалён"', source)
         self.assertIn('"danger"', source)
