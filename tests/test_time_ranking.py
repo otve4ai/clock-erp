@@ -166,8 +166,7 @@ class ProductTimeRankingTest(unittest.TestCase):
 class SalesTimeRankingTest(unittest.TestCase):
     def sales_context(self, records, query=""):
         with web.app.test_request_context("/sales" + query), \
-                mock.patch.object(web, "get_warehouse_items", return_value=[]), \
-                mock.patch.object(web, "build_sales_report_records", return_value=records), \
+                mock.patch.object(web, "api_sales_records", return_value=records), \
                 mock.patch.object(web, "render_template", side_effect=lambda name, **ctx: ctx):
             return web.sales_page()
 

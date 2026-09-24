@@ -872,8 +872,8 @@ class OrderTictactoySaleTest(unittest.TestCase):
         self.assertEqual(serialized["created_at"], performed_at)
 
         with mock.patch.object(
-            web, "build_sales_report_records", return_value=report
-        ), mock.patch.object(web, "get_warehouse_items", return_value=[]):
+            web, "api_sales_records", return_value=report
+        ):
             page = self.client.get("/sales?source=tictactoy")
         html = page.get_data(as_text=True)
         self.assertEqual(page.status_code, 200)

@@ -84,8 +84,7 @@ class UnifiedServerPaginationTest(unittest.TestCase):
         for source in ("all", "tictactoy", "wildberries", "amazon"):
             with self.subTest(source=source), web.app.test_request_context(
                 "/app/sales?source={}&page=2&per_page=25&sort=article&sort_dir=asc".format(source)
-            ), mock.patch.object(web, "get_warehouse_items", return_value=[]), \
-                    mock.patch.object(web, "build_sales_report_records", return_value=records), \
+            ), mock.patch.object(web, "api_sales_records", return_value=records), \
                     mock.patch.object(web, "render_template", side_effect=lambda name, **ctx: ctx):
                 context = web.sales_page()
             expected_total = 180 if source == "all" else 60
@@ -98,8 +97,7 @@ class UnifiedServerPaginationTest(unittest.TestCase):
     def test_sales_empty_and_oversized_pages_are_safe(self):
         for records, expected_page in (([], 1), ([sale(i) for i in range(3)], 1)):
             with web.app.test_request_context("/app/sales?page=999"), \
-                    mock.patch.object(web, "get_warehouse_items", return_value=[]), \
-                    mock.patch.object(web, "build_sales_report_records", return_value=records), \
+                    mock.patch.object(web, "api_sales_records", return_value=records), \
                     mock.patch.object(web, "render_template", side_effect=lambda name, **ctx: ctx):
                 context = web.sales_page()
             self.assertEqual(context["pagination"]["page"], expected_page)
