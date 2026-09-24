@@ -1,3 +1,4 @@
+from pathlib import Path
 import unittest
 from unittest import mock
 
@@ -8,6 +9,49 @@ from app.services.required_straps import RequiredStraps
 from app.services.sales_inventory import SalesInventoryError, InsufficientStockError
 from app.services.shared_catalog import SharedCatalog
 from app.services.component_inventory import ComponentInventory, balance
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+class RequiredStrapUiContractTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.template = (PROJECT_ROOT / "app/templates/warehouse.html").read_text(
+            encoding="utf-8"
+        )
+        cls.styles = (PROJECT_ROOT / "app/static/css/warehouse.css").read_text(
+            encoding="utf-8"
+        )
+        cls.script = (PROJECT_ROOT / "app/static/js/required-strap.js").read_text(
+            encoding="utf-8"
+        )
+
+    def test_setting_is_collapsed_and_only_visible_while_editing(self):
+        self.assertIn(
+            'class="product-additional-settings" data-product-additional-settings',
+            self.template,
+        )
+        self.assertNotIn(
+            'data-product-additional-settings open', self.template
+        )
+        self.assertIn("Дополнительные настройки", self.template)
+        self.assertIn("Ремешок обязателен при продаже", self.template)
+        self.assertIn("Для продажи из заказа", self.template)
+        self.assertIn(
+            ".product-inline-form.is-editing .product-additional-settings",
+            self.styles,
+        )
+        self.assertIn(
+            "#editDrawer .product-setting-row", self.styles
+        )
+        self.assertIn("@media (max-width: 430px)", self.styles)
+
+    def test_toggle_keeps_immediate_persistence(self):
+        self.assertIn("checkbox.addEventListener('change'", self.script)
+        self.assertIn("method: 'PUT'", self.script)
+        self.assertIn("Сохранено сразу.", self.script)
+        self.assertIn("checkbox.disabled = !canManage", self.script)
 
 
 class RequiredStrapInventoryTest(unittest.TestCase):
