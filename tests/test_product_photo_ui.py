@@ -9,6 +9,9 @@ class ProductPhotoUiTest(unittest.TestCase):
         cls.warehouse = (templates / "warehouse.html").read_text(
             encoding="utf-8"
         )
+        cls.warehouse_css = Path(
+            "app/static/css/warehouse.css"
+        ).read_text(encoding="utf-8")
         cls.receipts = (templates / "receipts.html").read_text(
             encoding="utf-8"
         )
@@ -27,10 +30,10 @@ class ProductPhotoUiTest(unittest.TestCase):
         self.assertNotIn("image.disabled = editing", self.warehouse)
 
     def test_products_photo_preview_is_compact_and_non_stretching(self):
-        self.assertIn("width: 72px;", self.warehouse)
-        self.assertIn("height: 72px;", self.warehouse)
-        self.assertIn("object-fit: cover;", self.warehouse)
-        self.assertIn("min-width: 0;", self.warehouse)
+        self.assertIn("width: 72px;", self.warehouse_css)
+        self.assertIn("height: 72px;", self.warehouse_css)
+        self.assertIn("object-fit: cover;", self.warehouse_css)
+        self.assertIn("min-width: 0;", self.warehouse_css)
 
     def test_receipt_existing_product_photo_is_read_only(self):
         editor = self.receipts.split('id="receiptEditModal"', 1)[1]

@@ -40,14 +40,16 @@ class ProductsFilterPresentationTest(unittest.TestCase):
         self.assertIn('? "Сначала выберите категорию"', script)
 
     def test_filter_dropdown_has_a_bounded_internal_scroll_area(self):
-        template = (ROOT / "app/templates/warehouse.html").read_text(
+        stylesheet = (ROOT / "app/static/css/warehouse.css").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("#filterDrawer .brand-combobox-options", template)
-        self.assertIn("max-height: min(320px, calc(100vh - 220px));", template)
-        self.assertIn("overflow-y: auto;", template)
-        self.assertIn("overscroll-behavior: contain;", template)
+        self.assertIn("#filterDrawer .brand-combobox-options", stylesheet)
+        self.assertIn(
+            "max-height: min(320px, calc(100vh - 220px));", stylesheet
+        )
+        self.assertIn("overflow-y: auto;", stylesheet)
+        self.assertIn("overscroll-behavior: contain;", stylesheet)
 
 
 if __name__ == "__main__":

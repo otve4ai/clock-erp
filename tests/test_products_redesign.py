@@ -50,13 +50,20 @@ class ProductsRedesignStructureTest(unittest.TestCase):
 
     def test_image_layout_is_contained_and_responsive(self):
         products = self.source("warehouse.html")
+        products_css = (
+            ROOT / "app/static/css/warehouse.css"
+        ).read_text(encoding="utf-8")
         brands = self.source("warehouse_brands.html")
-        self.assertIn("width: 48px", products)
-        self.assertIn("height: 48px", products)
-        self.assertIn("object-fit: contain", products)
+        self.assertIn(
+            "static_asset_url('css/warehouse.css')", products
+        )
+        self.assertNotIn("<style>", products)
+        self.assertIn("width: 48px", products_css)
+        self.assertIn("height: 48px", products_css)
+        self.assertIn("object-fit: contain", products_css)
         self.assertIn("width:40px", brands)
         self.assertIn("height:40px", brands)
-        self.assertIn("overflow-x: auto", products)
+        self.assertIn("overflow-x: auto", products_css)
 
     def test_product_detail_inputs_have_accessible_names(self):
         products = self.source("warehouse.html")

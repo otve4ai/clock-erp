@@ -11,6 +11,9 @@ class WarehouseProductPhotosTest(unittest.TestCase):
         cls.template = Path("app/templates/warehouse.html").read_text(
             encoding="utf-8"
         )
+        cls.stylesheet = Path("app/static/css/warehouse.css").read_text(
+            encoding="utf-8"
+        )
 
     def test_gallery_keeps_real_multiple_images_without_duplicates(self):
         product = {
@@ -137,8 +140,8 @@ class WarehouseProductPhotosTest(unittest.TestCase):
         )
 
     def test_position_card_layout_photo_contract(self):
-        self.assertIn('grid-template-areas: "info media"', self.template)
-        self.assertIn('"media"\n                    "info"', self.template)
+        self.assertIn('grid-template-areas: "info media"', self.stylesheet)
+        self.assertIn('"media"\n            "info"', self.stylesheet)
         self.assertIn('id="detailGallerySection" class="product-card-media"', self.template)
         self.assertNotIn(
             'id="detailGallerySection" class="product-card-media" hidden',
@@ -146,7 +149,7 @@ class WarehouseProductPhotosTest(unittest.TestCase):
         )
         self.assertIn("product-gallery-empty", self.template)
         self.assertIn("product-gallery-counter", self.template)
-        self.assertIn("object-fit: contain", self.template)
+        self.assertIn("object-fit: contain", self.stylesheet)
         self.assertIn('data-thumbnail-url="{{ item.thumbnail_url|e }}"', self.template)
         self.assertIn("syncDetailRowThumbnail(firstUrl)", self.template)
         self.assertIn('image.removeAttribute("src")', self.template)
