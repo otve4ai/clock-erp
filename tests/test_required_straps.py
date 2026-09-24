@@ -52,6 +52,7 @@ class RequiredStrapUiContractTest(unittest.TestCase):
         self.assertIn("method: 'PUT'", self.script)
         self.assertIn("Сохранено сразу.", self.script)
         self.assertIn("checkbox.disabled = !canManage", self.script)
+        self.assertIn("if (!status) return", self.script)
 
 
 class RequiredStrapInventoryTest(unittest.TestCase):

@@ -7,6 +7,7 @@
     let generation = 0;
     let canManage = false;
     const setStatus = (message, isError = false) => {
+        if (!status) return;
         status.textContent = message;
         status.classList.toggle('is-error', isError);
     };
