@@ -487,6 +487,12 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
 .orders-page .strap-picker-reference .brand-combobox { width:100%; }
 .orders-page .strap-picker-reference .brand-combobox-trigger,.orders-page .strap-picker-reference > .field { width:100%; min-height:42px; height:42px; }
 .orders-page .strap-picker-reference > select.field { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.orders-page .strap-picker-fixed { display:grid; grid-template-columns:minmax(150px,.7fr) minmax(0,2fr); align-items:end; gap:8px; }
+.orders-page .strap-picker-brand { display:grid; gap:4px; min-width:0; }
+.orders-page .strap-picker-brand > span { font-size:12px; color:var(--theme-text-muted,#64748b); }
+.orders-page .strap-picker-brand > strong { display:flex; align-items:center; min-height:42px; padding:0 12px; overflow:hidden; border:1px solid var(--theme-border,var(--line)); border-radius:var(--erp-control-radius); background:var(--theme-surface-muted,#f8fafc); text-overflow:ellipsis; white-space:nowrap; }
+.orders-page .strap-picker-hint { margin:2px 0 0; color:var(--theme-text-muted,#64748b); font-size:12px; }
+.orders-page .strap-picker-hint.is-error { color:var(--theme-danger,#b91c1c); }
 .orders-page .strap-picker-results { display:grid; max-height:170px; margin-top:4px; overflow:auto; border:1px solid var(--theme-border,var(--line)); border-radius:var(--erp-control-radius); background:var(--theme-surface,#fff); }
 .orders-page .strap-picker-results:empty { display:none; }
 .orders-page .strap-picker-status { padding:10px; color:var(--theme-text-muted,#64748b); font-size:12px; }
@@ -514,6 +520,7 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
     .orders-page .sale-dialog { max-height:calc(100dvh - 16px); }
     .orders-page .sale-dialog-head,.orders-page .sale-dialog-body,.orders-page .sale-dialog-actions { padding-inline:12px; }
     .orders-page .sale-location-grid { grid-template-columns:1fr; gap:10px; }
+    .orders-page .strap-picker-fixed { grid-template-columns:1fr; }
     .orders-page .sale-order-lines-wrap { overflow:visible; border:0; }
     .orders-page .sale-order-lines,.orders-page .sale-order-lines tbody { display:block; }
     .orders-page .sale-order-lines thead { display:none; }
