@@ -30,7 +30,8 @@ class ProductSiteStatusIndicatorTest(unittest.TestCase):
         self.assertNotIn("unknown_statuses +", script)
 
     def test_panel_is_overlay_and_has_required_close_handlers(self):
-        css = self.source("app/static/css/products-workspace.css")
+        css = self.source("app/static/css/sync-popover.css")
+        self.assertIn('@import url("./sync-popover.css")', self.source("app/static/css/products-workspace.css"))
         script = self.source("app/static/js/product-site-status-sync.js")
         self.assertIn(".product-site-sync-panel {", css)
         self.assertIn("position: absolute", css)

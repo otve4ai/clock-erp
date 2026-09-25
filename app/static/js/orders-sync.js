@@ -7,6 +7,22 @@
     const timestamps = new Map();
     const rows = Object.fromEntries([...root.querySelectorAll('[data-sync-row]')].map(row => [row.dataset.syncRow, row]));
     const labels = {success: 'Актуально', running: 'Обновляется…', error: 'Ошибка', attention: 'Требует внимания'};
+    const toggle = root.querySelector('[data-orders-sync-toggle]');
+    const panel = root.querySelector('[data-orders-sync-panel]');
+    function setPanelOpen(open, focus = false) {
+        panel.hidden = !open;
+        toggle.setAttribute('aria-expanded', String(open));
+        root.classList.toggle('is-open', open);
+        if (focus) toggle.focus();
+    }
+    toggle.addEventListener('click', () => setPanelOpen(panel.hidden));
+    function renderAggregate() {
+        const states = Object.values(rows).map(row => row.dataset.noData === 'true' && row.dataset.state === 'attention' ? 'unknown' : row.dataset.state);
+        // Aggregate existing source states; absence of data alone is neutral.
+        const state = ['error', 'running', 'attention', 'unknown'].find(value => states.includes(value)) || 'success';
+        root.dataset.syncState = state;
+        root.querySelector('[data-orders-sync-label]').textContent = 'Синхронизация · ' + (labels[state] || 'Нет данных');
+    }
     const format = date => new Intl.DateTimeFormat('ru-RU', {dateStyle: 'short', timeStyle: 'short'}).format(date);
     function render(source, data) {
         const row = rows[source];
@@ -17,7 +33,9 @@
         const state = pending.has(source) || data.outcome === 'running' ? 'running'
             : failures.has(source) || data.outcome === 'error' ? 'error'
             : stale || data.attention || data.pending?.length || data.outcome === 'partial' || ['partial', 'error'].includes(data.full_outcome) ? 'attention' : 'success';
+        row.dataset.noData = String(!valid && !data.attention && !data.pending?.length && data.outcome !== 'partial' && !['partial', 'error'].includes(data.full_outcome));
         row.dataset.state = state;
+        renderAggregate();
         row.querySelector('[data-sync-state]').textContent = labels[state];
         row.querySelector('[data-orders-sync-time]').textContent = valid ? (date.toDateString() === new Date().toDateString() ? 'Сегодня, ' + date.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'}) : format(date)) : 'Нет данных';
         root.querySelector('[data-sync-latest]').textContent = timestamps.size ? format(new Date(Math.max(...timestamps.values()))) : 'Нет данных';
@@ -45,6 +63,7 @@
         if (pending.has(source)) return;
         pending.add(source); failures.delete(source); updateButtons();
         rows[source].dataset.state = 'running';
+        renderAggregate();
         rows[source].querySelector('[data-sync-state]').textContent = labels.running;
         let result;
         try {
@@ -73,44 +92,36 @@
         root.querySelectorAll('[data-sync-details]').forEach(trigger => trigger.setAttribute('aria-expanded', String(!panel.hidden)));
         if (!panel.hidden && button.closest('[data-sync-row="wildberries"]')) panel.querySelector('[data-wb-recovery]').open = true;
     }));
-    document.addEventListener('keydown', event => { if (event.key === 'Escape') {root.querySelector('[data-sync-diagnostics]').hidden = true; document.querySelector('[data-status-more]').open = false;} });
+    document.addEventListener('click', event => {
+        if (!root.contains(event.target)) setPanelOpen(false);
+        const statuses = document.querySelector('[data-status-more]');
+        if (statuses && !statuses.contains(event.target)) statuses.open = false;
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        if (!panel.hidden) {
+            root.querySelector('[data-sync-diagnostics]').hidden = true;
+            root.querySelectorAll('[data-sync-details]').forEach(button => button.setAttribute('aria-expanded', 'false'));
+            setPanelOpen(false, true);
+        }
+        const statuses = document.querySelector('[data-status-more]');
+        if (statuses?.open) {
+            statuses.open = false;
+            statuses.querySelector('summary').focus();
+        }
+    });
     loadTtt();
     window.setInterval(() => {if (!document.hidden) loadTtt();}, 60000);
 
-    let observer;
-    function initializeStatuses() {
-        observer?.disconnect();
-        const bar = document.querySelector('.status-filter-tabs');
-        const primary = bar.querySelector('[data-primary-statuses]');
-        const overflow = bar.querySelector('[data-overflow-statuses]');
-        const more = bar.querySelector('[data-status-more]');
-        const statuses = [...bar.querySelectorAll('[data-status-filter]')].filter(button => button.dataset.statusFilter !== 'all');
-        let fittedWidth = -1;
-        function fitStatuses() {
-            const width = bar.clientWidth;
-            // ResizeObserver also delivers an initial notification and height
-            // changes. Neither needs another series of forced table layouts.
-            if (width === fittedWidth) return;
-            fittedWidth = width;
-            statuses.forEach(button => overflow.append(button));
-            more.hidden = !statuses.length;
-            let count = 0;
-            for (const button of statuses.slice(0, 4)) {
-                primary.append(button);
-                if (bar.scrollWidth > bar.clientWidth) {overflow.prepend(button); break;}
-                count++;
-            }
-            bar.querySelector('[data-more-count]').textContent = statuses.length - count;
-            more.hidden = count === statuses.length;
-            more.classList.toggle('has-active', !!overflow.querySelector('.active'));
-        }
-        observer = new ResizeObserver(fitStatuses);
-        observer.observe(bar);
-        bar.addEventListener('click', () => more.classList.toggle('has-active', !!overflow.querySelector('.active')));
-        // Let the list controller finish formatting its new rows before any
-        // geometry read forces layout. The toolbar is fitted before paint.
-        requestAnimationFrame(fitStatuses);
+    function updateStatusLabel() {
+        const statuses = document.querySelector('[data-status-more]');
+        if (!statuses) return;
+        const selected = statuses.querySelector('[aria-pressed="true"]');
+        if (!selected) return; // Keep the server label for a status with no matches.
+        const count = selected.querySelector('[data-order-status-count]');
+        const name = selected.firstChild.textContent.trim();
+        statuses.querySelector('[data-status-label]').textContent = 'Статус: ' + name + (count ? ' · ' + count.textContent : '');
     }
-    initializeStatuses();
-    document.addEventListener('orders:filters-updated', initializeStatuses);
+    document.addEventListener('orders:status-selected', updateStatusLabel);
+    document.addEventListener('orders:filters-updated', updateStatusLabel);
 })();

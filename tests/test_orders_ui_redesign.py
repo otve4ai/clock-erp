@@ -207,7 +207,8 @@ class OrdersUiRedesignTest(unittest.TestCase):
             'class="orders-command-bar orders-reference-header"', 1
         )[1].split('<div class="workspace"', 1)[0]
         self.assertIn('class="field field-search erp-search-input"', filters)
-        self.assertIn('class="status-filter-tabs"', filters)
+        self.assertIn('data-status-more', filters)
+        self.assertNotIn('class="status-filter-tabs"', filters)
         self.assertEqual(filters.count("data-auto-submit-filter"), 1)
         self.assertEqual(filters.count('<select class="field"'), 1)
         self.assertIn('name="source"', filters)
