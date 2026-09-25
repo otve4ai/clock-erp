@@ -111,4 +111,4 @@ WB через общий сервис продаж; код `app/services/wildber
   расчёты Bitrix не блокируют продажу; проверено по `app/web.py` и целевым
   тестам `test_order_tictactoy_sale.py`, `test_orders_rework.py`.
 
-- 2026-09-24: [Обязательный ремешок](required-straps.md) — current: признак товара, выбор в заказе, атомарное списание, отображение состава в продажах и исторический возврат; tests/test_required_straps.py. Статус не подтверждает production deploy.
+- 2026-09-25: [Обязательный ремешок](required-straps.md) — current: признак товара, ручной выбор ремешка только бренда часов, атомарное списание, отображение состава в продажах и исторический возврат; tests/test_required_straps.py. Статус не подтверждает production deploy.

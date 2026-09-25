@@ -105,6 +105,16 @@ class RequiredStrapInventoryTest(unittest.TestCase):
         self.assertEqual(self.inventory.list_sales(), [])
         self.assertEqual(self.stock(body["id"]), 5)
 
+    def test_required_strap_must_match_body_brand(self):
+        body, strap = self.setup_body()
+        wrong_brand = self.catalog.create_product(
+            name="Ремешок другого бренда", article="OTHER-STRAP",
+            brand="Other", category="Ремешки", stock=2,
+        )
+        with self.assertRaisesRegex(SalesInventoryError, "бренда «Brand»"):
+            self.sell(body, wrong_brand)
+        self.sell(body, strap)
+
     def test_quantity_single_price_repeat_and_historical_cancel(self):
         body, strap = self.setup_body()
         sale = self.sell(body, strap, 2, idempotency_key="required")
@@ -201,8 +211,23 @@ class RequiredStrapOrderTest(unittest.TestCase):
 
     def test_order_requires_strap_and_preserves_commercial_rows(self):
         RequiredStraps(self.database).configure(self.watch["id"], True)
+        patches = self.patches(mappings={})
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            unmapped_html = self.client.get("/order/18593").get_data(as_text=True)
+        self.assertNotIn('name="required_strap_0_product_id"', unmapped_html)
+
         html = self.render_order().get_data(as_text=True)
         self.assertIn('name="required_strap_0_product_id"', html)
+        self.assertIn('data-brand-locked="true"', html)
+        self.assertIn('data-fixed-brand-id="{}"'.format(self.watch["brand_id"]), html)
+        self.assertIn("Бренд часов", html)
+        self.assertIn("Bradley", html)
+        picker_start = html.index('data-strap-picker="required_strap_0"')
+        picker_end = html.index("data-picker-selected", picker_start)
+        required_picker = html[picker_start:picker_end]
+        self.assertNotIn("data-picker-search", required_picker)
+        self.assertNotIn("data-picker-mode", required_picker)
+        self.assertNotIn("_category_id", required_picker)
         self.assertNotIn('name="required_strap_1_product_id"', html)
         self.assertNotIn('data-open-strap-replacement>', html)
         self.conduct()
