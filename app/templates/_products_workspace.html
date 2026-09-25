@@ -1,10 +1,13 @@
-{% macro products_workspace_header(active_view, product_metrics, add_button=false, export_filtered_url='') %}
+{% macro products_workspace_header(active_view, product_metrics, add_button=false, export_filtered_url='', site_status_sync=none, can_sync_site_status=false, site_status_sync_csrf='') %}
 <header class="erp-workspace-header products-workspace-header">
     <div class="erp-workspace-heading">
         <h1>Товары</h1>
         <p>Каталог и складские остатки</p>
     </div>
     <div class="erp-workspace-actions products-workspace-actions">
+        {% if active_view == 'products' and site_status_sync is not none %}
+            {% include "_product_site_status_indicator.html" %}
+        {% endif %}
         {% if active_view == 'products' %}
             <div class="products-add-menu products-actions-menu">
                 <button id="productsActionsToggle" class="products-workspace-button" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleProductsActionsMenu(event)">Действия ▾</button>
