@@ -113,3 +113,5 @@ WB через общий сервис продаж; код `app/services/wildber
 
 - 2026-09-25: [Обязательный ремешок](required-straps.md) — current: признак товара, ручной выбор ремешка только бренда часов, атомарное списание, отображение состава в продажах и исторический возврат; tests/test_required_straps.py. Статус не подтверждает production deploy.
 `docs/sales-navigation.md` — `current`, 2026-09-25: переход после проведения Tictactoy, подсветка без фильтра и явный просмотр одной продажи; production deploy не подтверждён.
+
+2026-09-25: в `docs/orders-progressive-disclosure.md` описаны dropdown статусов и компактный индикатор синхронизации; backend-контракт не менялся.

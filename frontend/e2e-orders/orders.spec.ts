@@ -7,6 +7,7 @@ test('sources, counts and scoped searches', async ({ page }) => {
   await expect(page.locator('[data-source-filter="wildberries"]')).toHaveText('Wildberries 125');
   await page.locator('[data-source-filter="wildberries"]').click();
   await expect(page.locator('[data-status-filter="N"]')).toHaveCount(0);
+  await page.locator('[data-status-more] > summary').click();
   await page.locator('[data-status-filter="WB_SOLD"]').click();
   await expect(page).toHaveURL(/status=WB_SOLD/);
   await expect(page.locator('.orders-split-table tbody tr').first()).toContainText('Получен покупателем');
@@ -56,6 +57,7 @@ test('diagnostics retain errors, import and sync', async ({ page }) => {
   await page.goto('/app/orders?source=wildberries');
   await expect(page.locator('[data-wb-health]')).toContainText('Требует внимания');
   await expect(page.locator('[data-wb-preview-form]')).toBeHidden();
+  await page.locator('[data-orders-sync-toggle]').click();
   await page.locator('[data-sync-row="wildberries"] [data-sync-details]').click();
   await expect(page.getByRole('heading', { name: 'Диагностика Wildberries' })).toBeVisible();
   await expect(page.locator('[data-wb-missing]')).toContainText('Тестовая ошибка API');
@@ -206,6 +208,7 @@ test('unified synchronization prevents duplicates and retains partial failure', 
     await route.fulfill({status:503,json:{ok:false,error:{message:'Тестовый сбой WB'}}});
   });
   await page.goto('/app/orders?source=wildberries&page=2&page_size=20');
+  await page.locator('[data-orders-sync-toggle]').click();
   await page.locator('[data-sync-source="all"]').click();
   await expect(page.locator('[data-sync-row="wildberries"]')).toHaveAttribute('data-state','running');
   await expect(page.locator('[data-sync-source="all"]')).toBeDisabled();
@@ -225,16 +228,21 @@ test('unified synchronization prevents duplicates and retains partial failure', 
 });
 
 test('reference header fits target viewports and overflow statuses remain usable', async ({ page }) => {
-  for (const [width,height] of [[1920,1080],[1440,900],[1366,768]]) {
+  for (const [width,height] of [[1920,1080],[1440,900],[1366,768],[1024,768],[390,844],[320,568]]) {
     await page.setViewportSize({width,height});
     await page.goto('/app/orders');
     await expect(page.locator('[data-orders-sync]')).toBeVisible();
     await expect(page.locator('[data-wb-sync]')).toHaveCount(0);
     await expect(page.getByText('Обновить Tictactoy',{exact:true})).toHaveCount(0);
     const header = await page.locator('.orders-reference-header').boundingBox();
-    expect(header!.height).toBeLessThan(245);
+    expect(header!.height).toBeLessThan(width >= 1366 ? 170 : 300);
+    await expect(page.locator('[data-orders-sync-panel]')).toBeHidden();
+    await page.locator('[data-orders-sync-toggle]').click();
+    await expect(page.locator('[data-orders-sync-panel]')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-orders-sync-toggle]')).toBeFocused();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    const overflow = page.locator('[data-overflow-statuses] [data-status-filter]').first();
+    const overflow = page.locator('[data-status-more] [data-status-filter]:not([data-status-filter="all"])').first();
     if (await overflow.count()) {
       await page.locator('[data-status-more] > summary').click();
       const status = await overflow.getAttribute('data-status-filter');
@@ -253,6 +261,7 @@ test('page size, modes and synchronization work after lazy card selection', asyn
   await expect(page.locator('.list-footer')).toContainText('Показано 1–20 из 125');
   await page.locator('.orders-split-table .order-number').first().click();
   await expect(page.locator('.card-title h2')).toBeVisible();
+  await page.locator('[data-orders-sync-toggle]').click();
   const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/orders');
   await page.locator('[data-sync-source="tictactoy"]').click();
   await refreshed;

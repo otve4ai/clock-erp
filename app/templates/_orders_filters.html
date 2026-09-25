@@ -4,25 +4,19 @@
                 <button type="button" class="status-filter{% if request.args.get('source','all') == key %} active{% endif %}" data-source-filter="{{ key }}" aria-pressed="{{ 'true' if request.args.get('source','all') == key else 'false' }}">{{ label }} <strong>{{ order_source_counts.get(key, 0) }}</strong></button>
                 {% endfor %}
                 <input type="hidden" name="source" value="{{ request.args.get('source','all') }}">
-            </nav>
-            <div class="status-filter-tabs" role="group" aria-label="Фильтр по статусу">
-                <span class="status-caption">Статус:</span>
+
                 {% set active_status = request.args.get('status','all')|upper %}
-                <button class="status-filter{% if active_status == 'ALL' %} active{% endif %}" type="button" data-status-filter="all" aria-pressed="{{ 'true' if active_status == 'ALL' else 'false' }}">Все</button>
-                <span data-primary-statuses>
-                {% set preferred = ['A','C','D','N'] %}
-                {% for key in preferred if key in order_status_counts %}
-                <button class="status-filter{% if active_status == key %} active{% endif %}" type="button" data-status-filter="{{ key }}" aria-pressed="{{ 'true' if active_status == key else 'false' }}">{{ order_status_label(key) }} <strong data-order-status-count="{{ key }}">{{ order_status_counts[key] }}</strong></button>
-                {% endfor %}
-                </span>
                 <details class="orders-status-more" data-status-more>
-                    <summary class="status-filter">Ещё <span data-more-count></span> ▾</summary>
-                    <div class="orders-status-menu" data-overflow-statuses>
-                    {% for key,count in order_status_counts.items() if key not in preferred %}
-                    <button class="status-filter{% if active_status == key %} active{% endif %}" type="button" data-status-filter="{{ key }}" aria-pressed="{{ 'true' if active_status == key else 'false' }}">{{ order_status_label(key) }} <strong data-order-status-count="{{ key }}">{{ count }}</strong></button>
+                    <summary class="status-filter" aria-controls="ordersStatusMenu"><span data-status-label>Статус: {% if active_status == 'ALL' %}Все{% else %}{{ order_status_label(active_status) }} · {{ order_status_counts.get(active_status, 0) }}{% endif %}</span> <span aria-hidden="true">⌄</span></summary>
+                    <div class="orders-status-menu" id="ordersStatusMenu" role="group" aria-label="Фильтр по статусу">
+                    <button class="status-filter{% if active_status == 'ALL' %} active{% endif %}" type="button" data-status-filter="all" aria-pressed="{{ 'true' if active_status == 'ALL' else 'false' }}">Все</button>
+                    {% set preferred = ['A','C','D','N'] %}
+                    {% set statuses = preferred|select('in', order_status_counts)|list + order_status_counts.keys()|reject('in', preferred)|list %}
+                    {% for key in statuses %}
+                    <button class="status-filter{% if active_status == key %} active{% endif %}" type="button" data-status-filter="{{ key }}" aria-pressed="{{ 'true' if active_status == key else 'false' }}">{{ order_status_label(key) }} <strong data-order-status-count="{{ key }}">{{ order_status_counts[key] }}</strong></button>
                     {% endfor %}
                     </div>
                 </details>
                 <input type="hidden" name="status" value="{{ request.args.get('status','all') }}" data-status-input>
-            </div>
+            </nav>
             </div>

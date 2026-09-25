@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="{{ static_asset_url('css/erp-components.css') }}">
     <link rel="stylesheet" href="{{ static_asset_url('css/catalog-combobox.css') }}">
     <script defer src="{{ static_asset_url('js/catalog-combobox.js') }}"></script>
+    <link rel="stylesheet" href="{{ static_asset_url('css/sync-popover.css') }}">
     <link rel="stylesheet" href="{{ static_asset_url('css/orders.css') }}">
     <link rel="stylesheet" href="{{ static_asset_url('css/sale-stock-notification.css') }}">
     <script defer src="{{ static_asset_url('js/sale-stock-notification.js') }}"></script>
@@ -583,7 +584,9 @@
         if(!button)return;
         statusInput.value=button.dataset.statusFilter;
         document.querySelector('[data-status-more]').open=false;
+        document.querySelector('[data-status-more] > summary').focus();
         document.querySelectorAll('[data-status-filter]').forEach(item=>{const active=item===button;item.classList.toggle('active',active);item.setAttribute('aria-pressed',String(active));});
+        document.dispatchEvent(new Event('orders:status-selected'));
         loadOrdersResults(ordersFilterUrl(),{push:true});
     });
     document.querySelectorAll('[data-auto-submit-filter]').forEach(filter=>filter.addEventListener('change',()=>loadOrdersResults(ordersFilterUrl())));
@@ -647,6 +650,7 @@
             statusInput.value=url.searchParams.get('status')||'all';
             const period=filtersForm.elements.period;if(period)period.value=url.searchParams.get('period')||'all';
             document.querySelectorAll('[data-status-filter]').forEach(item=>{const active=item.dataset.statusFilter===statusInput.value;item.classList.toggle('active',active);item.setAttribute('aria-pressed',String(active));});
+            document.dispatchEvent(new Event('orders:status-selected'));
             if(!await loadOrdersResults(url,{updateHistory:false,autoSelect:false})||window.location.href!==target)return;
         }
         const match=url.pathname.match(/^\/order\/(wildberries\/)?([^/]+)$/);
