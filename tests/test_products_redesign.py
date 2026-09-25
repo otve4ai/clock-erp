@@ -73,6 +73,44 @@ class ProductsRedesignStructureTest(unittest.TestCase):
         ):
             self.assertIn('aria-label="{}"'.format(label), products)
 
+    def test_product_card_preserves_field_and_action_hierarchy(self):
+        products = self.source("warehouse.html")
+        css = (ROOT / "app/static/css/warehouse.css").read_text(
+            encoding="utf-8"
+        )
+        detail = products.split('id="inlineProductForm"', 1)[1].split(
+            "</form>", 1
+        )[0]
+
+        self.assertIn("product-detail-card product-detail-name", detail)
+        self.assertLess(detail.index("detailName"), detail.index("detailArticle"))
+        self.assertLess(detail.index("detailArticle"), detail.index("detailPrice"))
+        self.assertLess(detail.index("detailPrice"), detail.index("detailBrand"))
+        self.assertLess(detail.index("detailBrand"), detail.index("detailCategory"))
+        self.assertLess(detail.index("detailCategory"), detail.index("detailStock"))
+        self.assertLess(detail.index("detailStock"), detail.index("detailCell"))
+
+        additional = detail.split(
+            'data-product-additional-settings', 1
+        )[1]
+        self.assertIn('id="detailModel"', additional)
+        self.assertIn('data-required-strap-settings', additional)
+
+        primary_actions = detail.index('class="product-inline-actions"')
+        external_actions = detail.index(
+            'class="product-inline-actions product-external-actions"'
+        )
+        self.assertLess(primary_actions, external_actions)
+        self.assertIn('data-edit-start', detail[primary_actions:external_actions])
+        self.assertIn('id="detailBitrixLink"', detail[external_actions:])
+        self.assertIn('id="detailPublicProductLink"', detail[external_actions:])
+        self.assertIn(
+            ".product-external-actions .moysklad-link::after", css
+        )
+        self.assertIn('content: "↗"', css)
+        self.assertIn('publicProductLink.hidden = !publicProductUrl', products)
+        self.assertIn('bitrixLink.setAttribute("aria-disabled", "true")', products)
+
     def test_table_has_synchronized_top_scrollbar_and_mobile_overflow(self):
         products = self.source("warehouse.html")
         css = (ROOT / "app/static/css/products-workspace.css").read_text(
