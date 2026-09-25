@@ -48,6 +48,21 @@ class ProductSiteStatusIndicatorTest(unittest.TestCase):
         ):
             self.assertIn(text, panel)
 
+    def test_systemd_units_are_compatible_with_production_systemd_219(self):
+        service = self.source(
+            "deploy/systemd/vechasu-bitrix-site-status-sync.service"
+        )
+        timer = self.source(
+            "deploy/systemd/vechasu-bitrix-site-status-sync.timer"
+        )
+        self.assertIn(
+            "ExecStartPre=/usr/bin/test ! -e /run/clock-erp-maintenance.json",
+            service,
+        )
+        self.assertNotIn("ExecCondition=", service)
+        self.assertIn("OnCalendar=*-*-* 03:00:00", timer)
+        self.assertNotIn("Europe/Moscow", timer)
+
 
 if __name__ == "__main__":
     unittest.main()

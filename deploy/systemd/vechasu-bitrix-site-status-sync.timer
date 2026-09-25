@@ -2,7 +2,7 @@
 Description=Vechasu Bitrix product site-status synchronization at 03:00 Moscow time
 
 [Timer]
-OnCalendar=*-*-* 03:00:00 Europe/Moscow
+OnCalendar=*-*-* 03:00:00
 AccuracySec=1min
 Persistent=true
 Unit=vechasu-bitrix-site-status-sync.service
