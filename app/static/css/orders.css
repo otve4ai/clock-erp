@@ -185,6 +185,7 @@ details.more summary::-webkit-details-marker { display:none; }
 .sale-lines li { padding:8px 0; border-bottom:1px solid #edf0f4; }
 .order-list-comment { margin-top:6px; overflow:hidden; color:var(--theme-text,#334155); font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
 .status-save-state { min-width:78px; color:var(--muted); font-size:11px; }
+.status-save-state:empty { display:none; }
 .status-save-state.is-saved { color:#15803d; }
 .status-save-state.is-error { color:var(--danger); }
 .order-detail-panel { container-type:inline-size; }
@@ -954,7 +955,9 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
 .orders-page .order-status-control .field {
     flex: 1 1 auto;
     min-width: 0;
-    width: auto;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .orders-page .order-control-actions {
@@ -963,6 +966,18 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
     align-items: center;
     gap: 6px;
     margin-left: auto;
+}
+
+.orders-page .order-control-actions > form {
+    flex: 0 0 148px;
+    width: 148px;
+    min-width: 148px;
+}
+
+.orders-page .order-control-actions > form .button {
+    width: 100%;
+    min-width: 148px;
+    white-space: nowrap;
 }
 
 .orders-page .order-control-panel .action-feedback {
@@ -1050,31 +1065,56 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
 }
 
 @container (max-width: 800px) {
+    .orders-page .order-card-head {
+        padding-inline: 8px;
+    }
+
     .orders-page .order-control-panel {
+        display: grid;
+        grid-template-columns: 160px minmax(0, 1fr) 148px max-content max-content;
         align-items: flex-end;
-        flex-wrap: nowrap;
+        padding-inline: 6px;
     }
 
     .orders-page .order-status-control {
-        flex: 0 1 120px;
-        min-width: 84px;
-        max-width: 150px;
+        flex: 0 0 160px;
+        min-width: 160px;
+        max-width: 160px;
+    }
+
+    .orders-page .status-save-state {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
     }
 
     .orders-page .order-control-actions {
-        flex: 1 1 auto;
+        display: contents;
+        margin-left: 0;
     }
 
     .orders-page .order-control-actions > form {
-        flex: 1 1 92px;
-        min-width: 0;
+        grid-column: 3;
     }
 
     .orders-page .order-control-actions > form .button {
-        width: 100%;
-        min-width: 0;
         padding-inline: 10px;
-        white-space: normal;
+    }
+
+    .orders-page .order-primary-action {
+        grid-column: 4;
+    }
+
+    .orders-page .order-actions-menu {
+        grid-column: 5;
+    }
+
+    .orders-page .order-control-panel .action-feedback {
+        grid-column: 1 / -1;
     }
 }
 
@@ -1102,6 +1142,36 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
         font-size: 17px;
     }
 
+}
+
+@container (max-width: 600px) {
+    .orders-page .order-control-panel {
+        grid-template-columns: minmax(0, 1fr) 148px max-content max-content;
+    }
+
+    .orders-page .order-status-control {
+        grid-column: 1 / -1;
+        width: 160px;
+    }
+
+    .orders-page .order-control-actions > form {
+        grid-column: 2;
+    }
+
+    .orders-page .order-primary-action {
+        grid-column: 3;
+    }
+
+    .orders-page .order-actions-menu {
+        grid-column: 4;
+    }
+}
+
+@container (max-width: 460px) {
+    .orders-page .order-control-panel {
+        display: flex;
+    }
+
     .orders-page .order-status-control {
         flex: 1 1 100%;
         width: 100%;
@@ -1110,20 +1180,26 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
 
     .orders-page .order-control-actions {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-columns: minmax(148px, 1fr) max-content;
         width: 100%;
         margin-left: 0;
     }
 
-    .orders-page .order-control-actions > .button:not(.order-primary-action),
-    .orders-page .order-actions-menu,
-    .orders-page .order-actions-trigger,
-    .orders-page .order-primary-action {
-        width: 100%;
+    .orders-page .order-control-actions > form {
+        grid-column: 1 / -1;
     }
 
     .orders-page .order-primary-action {
-        grid-column: 1 / -1;
+        grid-column: 1;
+        width: 100%;
+    }
+
+    .orders-page .order-actions-menu {
+        grid-column: 2;
+    }
+
+    .orders-page .order-actions-trigger {
+        width: 100%;
     }
 }
 
