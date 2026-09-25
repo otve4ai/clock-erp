@@ -3196,6 +3196,22 @@ def build_order_sale_state(
     else:
         block_reason = ""
 
+    warning_message = block_reason
+    if not sale_completed:
+        redundant_issues = set()
+        if block_reason and status not in {"A", "D"}:
+            redundant_issues.add("Заказ не подтверждён")
+        if legacy_writeoff:
+            redundant_issues.add("Продажа уже проведена")
+        additional_issues = [
+            issue for issue in readiness["issues"]
+            if issue not in redundant_issues
+        ]
+        if warning_message and additional_issues:
+            warning_message += " Дополнительно: " + " · ".join(additional_issues) + "."
+        elif not warning_message and additional_issues:
+            warning_message = "Проведение недоступно: " + " · ".join(additional_issues) + "."
+
     return {
         "can_create_sale": (
             not sale_completed
@@ -3203,6 +3219,7 @@ def build_order_sale_state(
             and (is_wildberries or status in {"A", "D"})
         ),
         "sale_block_reason": block_reason,
+        "warning_message": warning_message,
         "sale_id": sale_id,
         "sale_completed": sale_completed,
         "sale_missing": status == "D" and not sale_completed,

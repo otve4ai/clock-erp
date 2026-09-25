@@ -268,13 +268,12 @@
                                     <div class="summary-row"><span>Доставка{% if detail_delivery_source == 'derived_reconciled_remainder' %} <small>(по согласованному остатку)</small>{% endif %}</span><strong>{% if detail_delivery is not none %}<span class="money-value" data-amount="{{ detail_delivery }}"></span> ₽{% else %}Не передана Bitrix{% endif %}</strong></div>
                                     <div class="summary-row total"><span>Итого</span><strong>{% if detail_total is not none %}<span class="money-value" data-amount="{{ detail_total }}"></span> ₽{% else %}—{% endif %}</strong></div>
                                 </div>
-                                <div data-order-readiness-host>
+                                <div class="order-calculation-alerts" data-order-readiness-host>
                                     {% if sale_state.sale_missing %}<div class="warning"><strong>Продажа не найдена.</strong> Проверьте состав заказа, сопоставление товаров и остатки перед проведением.</div>{% endif %}
-                                    {% if sale_state.sale_block_reason and not sale_state.sale_completed %}<div class="warning" id="saleBlockReason" tabindex="-1">{{ sale_state.sale_block_reason }}</div>{% endif %}
-                                    {% if not sale_state.sale_completed and not sale_state.readiness.ready %}<div class="warning readiness-warning" data-order-readiness-warning>Проведение недоступно: {{ sale_state.readiness.issues|join(' · ') }}.</div>{% endif %}
+                                    {% if sale_state.warning_message and not sale_state.sale_completed %}<div class="warning readiness-warning" id="saleBlockReason" tabindex="-1" data-order-readiness-warning>{{ sale_state.warning_message }}</div>{% endif %}
+                                    {% if not legacy_calc_ok and not selected_order.get('calculation_complete') %}<div class="warning">Bitrix передал неполный расчёт. Продажу можно провести по позициям и суммам ERP.</div>{% elif not legacy_calc_ok and not selected_order.get('calculation_consistent') %}<div class="warning">Расчёт Bitrix не сходится: товары − скидка + доставка ≠ итог. Продажу можно провести по позициям и суммам ERP.</div>{% endif %}
                                 </div>
                             </div>
-                            {% if not legacy_calc_ok and not selected_order.get('calculation_complete') %}<div class="warning">Bitrix передал неполный расчёт. Продажу можно провести по позициям и суммам ERP.</div>{% elif not legacy_calc_ok and not selected_order.get('calculation_consistent') %}<div class="warning">Расчёт Bitrix не сходится: товары − скидка + доставка ≠ итог. Продажу можно провести по позициям и суммам ERP.</div>{% endif %}
                         </section>{% endif %}
                         </div>
                         {% if is_wb %}<details class="order-comments-disclosure"><summary>Комментарии сотрудников · {{ order_comments|length }} записей</summary>{% endif %}

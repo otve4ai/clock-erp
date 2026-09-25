@@ -434,6 +434,7 @@ class OrderTictactoySaleTest(unittest.TestCase):
         self.assertIn(
             "Чтобы провести продажу, сначала подтвердите заказ.", html
         )
+        self.assertEqual(html.count('class="warning readiness-warning"'), 1)
         self.assertIn('name="status"', html)
         self.assertNotIn(">Сохранить статус</button>", html)
         self.assertIn("data-status-autosave", html)

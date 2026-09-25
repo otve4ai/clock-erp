@@ -79,6 +79,29 @@ test('responsive layout and explicit units', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('order calculation follows its narrow card width at the reported viewport', async ({ page }) => {
+  await page.setViewportSize({width:1656,height:696});
+  await page.goto('/app/orders?source=tictactoy');
+  await page.locator('.orders-split-table .order-number').first().click();
+  const calculation = page.locator('.order-calculation');
+  const summary = calculation.locator('.summary');
+  const alerts = calculation.locator('.order-calculation-alerts');
+  await expect(calculation).toBeVisible();
+  await expect(alerts.locator('.warning')).toHaveCount(1);
+  await expect(alerts.locator('.warning')).toContainText('сначала подтвердите заказ');
+  await calculation.evaluate(element => { element.style.width = '560px'; });
+  const [sectionBox, summaryBox, alertsBox] = await Promise.all([
+    calculation.boundingBox(),
+    summary.boundingBox(),
+    alerts.boundingBox(),
+  ]);
+  expect(sectionBox!.width).toBeLessThan(620);
+  expect(alertsBox!.y).toBeGreaterThanOrEqual(summaryBox!.y + summaryBox!.height);
+  expect(alertsBox!.x).toBeGreaterThanOrEqual(sectionBox!.x);
+  expect(alertsBox!.x + alertsBox!.width).toBeLessThanOrEqual(sectionBox!.x + sectionBox!.width);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
 test('sale submit uses existing endpoint and prevents repeated submit', async ({ page }) => {
   let submits = 0;
   await page.route('**/order/wildberries/9003/conduct-sale', async route => {
