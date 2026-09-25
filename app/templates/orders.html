@@ -766,7 +766,16 @@
     {% if selected_order and sale_state.sale_completed %}
     try{window.sessionStorage.removeItem(completedStrapStorageKey);}catch(error){}
     {% endif %}
-    const modal=document.getElementById('orderSaleModal'); if(!modal)return;
+    const saleAction=document.querySelector('[data-order-sale-action]');
+    const modal=document.getElementById('orderSaleModal');
+    const showSaleBlock=()=>{
+        const reason=document.getElementById('saleBlockReason')||document.querySelector('[data-order-readiness-warning]');
+        const message=reason?.textContent?.trim()||'Проведение продажи недоступно.';
+        window.VechasuNotify?.warning(message);
+        reason?.scrollIntoView({behavior:'smooth',block:'center'});
+        reason?.focus();
+    };
+    if(!modal){saleAction?.addEventListener('click',showSaleBlock);return;}
     modal.querySelectorAll('.money-value').forEach(node=>node.textContent=formatMoney(node.dataset.amount));
     const tracking=modal.querySelector('[data-order-sale-tracking]'); const trackingStorageKey='order-sale-tracking:{{ detail_id if selected_order else "" }}';
     if(tracking){try{const saved=window.sessionStorage.getItem(trackingStorageKey);if(saved!==null)tracking.value=saved;tracking.addEventListener('input',()=>window.sessionStorage.setItem(trackingStorageKey,tracking.value));}catch(error){}}
@@ -785,11 +794,11 @@
         regionBox?.addEventListener('catalog-combobox:change',()=>updateCities(''));
     }
     if(document.readyState==='loading')onDocument('DOMContentLoaded',initializeOrderSaleLocations,{once:true});else initializeOrderSaleLocations();
-    const saleAction=document.querySelector('[data-order-sale-action]'); let saleDialogReturnFocus=null;
+    let saleDialogReturnFocus=null;
     const focusableElements=()=>Array.from(modal.querySelectorAll('button:not([disabled]),input:not([type="hidden"]):not([disabled]),[href],[tabindex]:not([tabindex="-1"])')).filter(element=>!element.hidden&&element.getAttribute('aria-hidden')!=='true');
     const open=()=>{saleDialogReturnFocus=document.activeElement;modal.classList.add('is-open');document.body.classList.add('has-open-sale-dialog');modal.setAttribute('aria-hidden','false');modal.querySelector('[data-close-sale-dialog]')?.focus();};
     const close=()=>{modal.classList.remove('is-open');document.body.classList.remove('has-open-sale-dialog');modal.setAttribute('aria-hidden','true');saleDialogReturnFocus?.focus();};
-    saleAction?.addEventListener('click',event=>{if(event.currentTarget.hasAttribute('data-open-sale-dialog')){open();return;}const reason=document.getElementById('saleBlockReason')||document.querySelector('[data-order-readiness-warning]');reason?.scrollIntoView({behavior:'smooth',block:'center'});reason?.focus();});
+    saleAction?.addEventListener('click',event=>event.currentTarget.hasAttribute('data-open-sale-dialog')?open():showSaleBlock());
     modal.querySelectorAll('[data-close-sale-dialog]').forEach(button=>button.addEventListener('click',close));
     modal.addEventListener('click',event=>{if(event.target===modal)close();});
     onDocument('keydown',event=>{if(!modal.classList.contains('is-open'))return;if(event.key==='Escape'){event.preventDefault();close();return;}if(event.key==='Tab'){const focusable=focusableElements();if(!focusable.length){event.preventDefault();return;}const first=focusable[0];const last=focusable[focusable.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}});
