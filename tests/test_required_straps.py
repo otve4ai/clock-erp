@@ -27,7 +27,7 @@ class RequiredStrapUiContractTest(unittest.TestCase):
             encoding="utf-8"
         )
 
-    def test_setting_is_collapsed_and_only_visible_while_editing(self):
+    def test_setting_is_visible_when_additional_settings_are_open(self):
         self.assertIn(
             'class="product-additional-settings" data-product-additional-settings',
             self.template,
@@ -42,6 +42,16 @@ class RequiredStrapUiContractTest(unittest.TestCase):
             ".product-inline-form.is-editing .product-additional-settings",
             self.styles,
         )
+        self.assertNotIn(
+            ".product-inline-form:not(.is-editing) [data-required-strap-settings]",
+            self.styles,
+        )
+        start_edit = self.template.split(
+            "function startInlineProductEdit()", 1
+        )[1].split(
+            'document.getElementById("inlineProductForm").addEventListener', 1
+        )[0]
+        self.assertNotIn("collapseProductAdditionalSettings", start_edit)
         self.assertIn(
             "#editDrawer .product-setting-row", self.styles
         )
@@ -104,6 +114,16 @@ class RequiredStrapInventoryTest(unittest.TestCase):
             self.sell(body, strap)
         self.assertEqual(self.inventory.list_sales(), [])
         self.assertEqual(self.stock(body["id"]), 5)
+
+    def test_required_strap_must_match_body_brand(self):
+        body, strap = self.setup_body()
+        wrong_brand = self.catalog.create_product(
+            name="Ремешок другого бренда", article="OTHER-STRAP",
+            brand="Other", category="Ремешки", stock=2,
+        )
+        with self.assertRaisesRegex(SalesInventoryError, "бренда «Brand»"):
+            self.sell(body, wrong_brand)
+        self.sell(body, strap)
 
     def test_quantity_single_price_repeat_and_historical_cancel(self):
         body, strap = self.setup_body()
@@ -201,8 +221,23 @@ class RequiredStrapOrderTest(unittest.TestCase):
 
     def test_order_requires_strap_and_preserves_commercial_rows(self):
         RequiredStraps(self.database).configure(self.watch["id"], True)
+        patches = self.patches(mappings={})
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            unmapped_html = self.client.get("/order/18593").get_data(as_text=True)
+        self.assertNotIn('name="required_strap_0_product_id"', unmapped_html)
+
         html = self.render_order().get_data(as_text=True)
         self.assertIn('name="required_strap_0_product_id"', html)
+        self.assertIn('data-brand-locked="true"', html)
+        self.assertIn('data-fixed-brand-id="{}"'.format(self.watch["brand_id"]), html)
+        self.assertIn("Бренд часов", html)
+        self.assertIn("Bradley", html)
+        picker_start = html.index('data-strap-picker="required_strap_0"')
+        picker_end = html.index("data-picker-selected", picker_start)
+        required_picker = html[picker_start:picker_end]
+        self.assertNotIn("data-picker-search", required_picker)
+        self.assertNotIn("data-picker-mode", required_picker)
+        self.assertNotIn("_category_id", required_picker)
         self.assertNotIn('name="required_strap_1_product_id"', html)
         self.assertNotIn('data-open-strap-replacement>', html)
         self.conduct()

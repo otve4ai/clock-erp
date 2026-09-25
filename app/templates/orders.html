@@ -28,10 +28,17 @@
 {% macro product_count_label(count) -%}
     {{ count }} {% if count % 10 == 1 and count % 100 != 11 %}товар{% elif count % 10 in [2,3,4] and count % 100 not in [12,13,14] %}товара{% else %}товаров{% endif %}
 {%- endmacro %}
-{% macro strap_product_picker(key, label, product_kind, required=true, in_stock=true) -%}
-<div class="strap-picker" data-strap-picker="{{ key }}" data-product-kind="{{ product_kind }}" data-in-stock="{{ 1 if in_stock else 0 }}" data-shared-catalog-scope data-catalog-scope="{{ 'straps' if product_kind in ['strap_component', 'strap'] else '' }}" data-catalog-in-stock="{{ 'true' if in_stock else 'false' }}" data-auto-select-single-category="true">
+{% macro strap_product_picker(key, label, product_kind, required=true, in_stock=true, brand_locked=false, brand_id='', brand_name='') -%}
+<div class="strap-picker" data-strap-picker="{{ key }}" data-product-kind="{{ product_kind }}" data-in-stock="{{ 1 if in_stock else 0 }}" data-shared-catalog-scope data-catalog-scope="{{ 'straps' if product_kind in ['strap_component', 'strap'] else '' }}" data-catalog-in-stock="{{ 'true' if in_stock else 'false' }}" data-auto-select-single-category="true"{% if brand_locked %} data-brand-locked="true" data-fixed-brand-id="{{ brand_id or '' }}"{% endif %}>
     <label>{{ label }}{% if required %} <span aria-hidden="true">*</span>{% endif %}</label>
     <input type="hidden" name="{{ key }}_product_id" data-picker-value{% if required %} required{% endif %}>
+    {% if brand_locked %}
+    <div class="strap-picker-fixed">
+        <div class="strap-picker-brand"><span>Бренд часов</span><strong>{{ brand_name or 'Не указан' }}</strong></div>
+        <div class="strap-picker-reference"><label for="{{ key }}Product">Выберите ремешок{% if required %} *{% endif %}</label><select id="{{ key }}Product" class="field" data-picker-product disabled><option value="">{% if brand_id %}Загрузка ремешков…{% else %}У часов не указан бренд{% endif %}</option></select></div>
+    </div>
+    {% if not brand_id %}<p class="strap-picker-hint is-error">Укажите бренд в карточке часов, чтобы выбрать ремешок.</p>{% endif %}
+    {% else %}
     <div class="strap-picker-tabs" role="tablist" aria-label="Способ выбора {{ label|lower }}">
         <button class="button button-secondary is-active" type="button" data-picker-mode="search">Поиск</button>
         <button class="button button-secondary" type="button" data-picker-mode="catalog">По каталогу</button>
@@ -45,6 +52,7 @@
         <div class="strap-picker-reference"><label for="{{ key }}CategoryTrigger">Категория *</label>{{ render_catalog_combobox(key ~ 'Category',key ~ '_category',[],item_label='категорию',shared_catalog_kind='category',id_input_name=key ~ '_category_id',component_class='filter-combobox',clear_selection_on_search_clear=true,disabled=true,required=true) }}</div>
         <div class="strap-picker-reference"><label for="{{ key }}Product">Товар{% if required %} *{% endif %}</label><select id="{{ key }}Product" class="field" data-picker-product disabled><option value="">Товар</option></select></div>
     </div>
+    {% endif %}
     <div class="strap-picker-selected" data-picker-selected hidden></div>
 </div>
 {%- endmacro %}
@@ -331,7 +339,7 @@
                     <div class="sale-dialog-section required-strap-line" data-required-strap-line>
                         <strong>{{ item.name }} · {{ item.quantity_display }} шт.</strong>
                         <p>К списанию: корпус и выбранный ремешок — по {{ item.quantity_display }} шт. Цена заказа не меняется.</p>
-                        {{ strap_product_picker('required_strap_' ~ loop.index0, 'Ремешок', 'strap', true, true) }}
+                        {{ strap_product_picker('required_strap_' ~ loop.index0, 'Ремешок', 'strap', true, true, true, item.brand_id, item.brand) }}
                     </div>
                     {% endif %}
                     {% endfor %}
@@ -758,7 +766,16 @@
     {% if selected_order and sale_state.sale_completed %}
     try{window.sessionStorage.removeItem(completedStrapStorageKey);}catch(error){}
     {% endif %}
-    const modal=document.getElementById('orderSaleModal'); if(!modal)return;
+    const saleAction=document.querySelector('[data-order-sale-action]');
+    const modal=document.getElementById('orderSaleModal');
+    const showSaleBlock=()=>{
+        const reason=document.getElementById('saleBlockReason')||document.querySelector('[data-order-readiness-warning]');
+        const message=reason?.textContent?.trim()||'Проведение продажи недоступно.';
+        window.VechasuNotify?.warning(message);
+        reason?.scrollIntoView({behavior:'smooth',block:'center'});
+        reason?.focus();
+    };
+    if(!modal){saleAction?.addEventListener('click',showSaleBlock);return;}
     modal.querySelectorAll('.money-value').forEach(node=>node.textContent=formatMoney(node.dataset.amount));
     const tracking=modal.querySelector('[data-order-sale-tracking]'); const trackingStorageKey='order-sale-tracking:{{ detail_id if selected_order else "" }}';
     if(tracking){try{const saved=window.sessionStorage.getItem(trackingStorageKey);if(saved!==null)tracking.value=saved;tracking.addEventListener('input',()=>window.sessionStorage.setItem(trackingStorageKey,tracking.value));}catch(error){}}
@@ -777,11 +794,11 @@
         regionBox?.addEventListener('catalog-combobox:change',()=>updateCities(''));
     }
     if(document.readyState==='loading')onDocument('DOMContentLoaded',initializeOrderSaleLocations,{once:true});else initializeOrderSaleLocations();
-    const saleAction=document.querySelector('[data-order-sale-action]'); let saleDialogReturnFocus=null;
+    let saleDialogReturnFocus=null;
     const focusableElements=()=>Array.from(modal.querySelectorAll('button:not([disabled]),input:not([type="hidden"]):not([disabled]),[href],[tabindex]:not([tabindex="-1"])')).filter(element=>!element.hidden&&element.getAttribute('aria-hidden')!=='true');
     const open=()=>{saleDialogReturnFocus=document.activeElement;modal.classList.add('is-open');document.body.classList.add('has-open-sale-dialog');modal.setAttribute('aria-hidden','false');modal.querySelector('[data-close-sale-dialog]')?.focus();};
     const close=()=>{modal.classList.remove('is-open');document.body.classList.remove('has-open-sale-dialog');modal.setAttribute('aria-hidden','true');saleDialogReturnFocus?.focus();};
-    saleAction?.addEventListener('click',event=>{if(event.currentTarget.hasAttribute('data-open-sale-dialog')){open();return;}const reason=document.getElementById('saleBlockReason')||document.querySelector('[data-order-readiness-warning]');reason?.scrollIntoView({behavior:'smooth',block:'center'});reason?.focus();});
+    saleAction?.addEventListener('click',event=>event.currentTarget.hasAttribute('data-open-sale-dialog')?open():showSaleBlock());
     modal.querySelectorAll('[data-close-sale-dialog]').forEach(button=>button.addEventListener('click',close));
     modal.addEventListener('click',event=>{if(event.target===modal)close();});
     onDocument('keydown',event=>{if(!modal.classList.contains('is-open'))return;if(event.key==='Escape'){event.preventDefault();close();return;}if(event.key==='Tab'){const focusable=focusableElements();if(!focusable.length){event.preventDefault();return;}const first=focusable[0];const last=focusable[focusable.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}});
@@ -801,15 +818,16 @@
     const pickerReferenceBox=(picker,kind)=>picker.querySelector(`[data-shared-catalog-kind="${kind}"]`);
     const pickerReferenceId=(picker,kind)=>pickerReferenceBox(picker,kind)?.querySelector('.catalog-combobox-id')?.value||'';
     async function loadPickerBrands(picker){await window.loadSharedCatalogOptions(pickerReferenceBox(picker,'brand'),'');}
-    async function loadPickerProducts(picker){const product=picker.querySelector('[data-picker-product]');const brandId=pickerReferenceId(picker,'brand');const categoryId=pickerReferenceId(picker,'category');product.replaceChildren(new Option('Товар',''));product.disabled=true;if(!brandId||!categoryId)return;product.replaceChildren(new Option('Загрузка…',''));const params={type:'product',brand_id:brandId,category_id:categoryId,limit:'200',product_kind:picker.dataset.productKind};if(picker.closest('[data-required-strap-line]')){params.catalog_scope='straps';params.available_for_sale='1';}if(picker.dataset.inStock==='1')params.in_stock='1';try{const items=await apiItems(params);product.replaceChildren(new Option(items.length?'Товар':'Ничего не найдено',''));for(const item of items){const option=new Option(productLabel(item),item.id);option.dataset.item=JSON.stringify(item);option.disabled=picker.dataset.inStock==='1'&&Number(item.stock||0)<=0;product.add(option);}product.disabled=!items.length;}catch(error){product.replaceChildren(new Option('Не удалось загрузить товары',''));throw error;}}
+    async function loadPickerProducts(picker){const product=picker.querySelector('[data-picker-product]');const fixedBrandId=picker.dataset.fixedBrandId||'';const brandId=fixedBrandId||pickerReferenceId(picker,'brand');const categoryId=pickerReferenceId(picker,'category');product.replaceChildren(new Option('Товар',''));product.disabled=true;if(!brandId||(!fixedBrandId&&!categoryId))return;product.replaceChildren(new Option('Загрузка…',''));const params={type:'product',brand_id:brandId,limit:'200',product_kind:picker.dataset.productKind};if(categoryId)params.category_id=categoryId;if(picker.closest('[data-required-strap-line]')){params.catalog_scope='straps';params.available_for_sale='1';}if(picker.dataset.inStock==='1')params.in_stock='1';try{const items=await apiItems(params);product.replaceChildren(new Option(items.length?'Выберите ремешок':'У этого бренда нет ремешков в наличии',''));for(const item of items){const option=new Option(productLabel(item),item.id);option.dataset.item=JSON.stringify(item);option.disabled=picker.dataset.inStock==='1'&&Number(item.stock||0)<=0;product.add(option);}product.disabled=!items.length;}catch(error){product.replaceChildren(new Option('Не удалось загрузить товары',''));throw error;}}
     modal.querySelectorAll('[data-strap-picker]').forEach(picker=>{
         let searchTimer=null;const search=picker.querySelector('[data-picker-search]');
         picker.querySelectorAll('[data-picker-mode]').forEach(button=>button.addEventListener('click',async()=>{picker.querySelectorAll('[data-picker-mode]').forEach(item=>item.classList.toggle('is-active',item===button));picker.querySelectorAll('[data-picker-panel]').forEach(panel=>panel.hidden=panel.dataset.pickerPanel!==button.dataset.pickerMode);if(button.dataset.pickerMode==='catalog')try{await loadPickerBrands(picker);}catch(error){window.VechasuNotify?.error(error.message);}}));
-        search.addEventListener('input',()=>{window.clearTimeout(searchTimer);const query=search.value.trim();if(!query){picker.querySelector('[data-picker-results]').replaceChildren();return;}renderPickerStatus(picker,'Загрузка…','loading');searchTimer=window.setTimeout(async()=>{try{const params={type:'product',q:query,limit:'50',product_kind:picker.dataset.productKind};if(picker.closest('[data-required-strap-line]')){params.catalog_scope='straps';params.available_for_sale='1';}if(picker.dataset.inStock==='1')params.in_stock='1';renderPickerResults(picker,await apiItems(params));}catch(error){renderPickerStatus(picker,error.message||'Не удалось загрузить каталог','error');window.VechasuNotify?.error(error.message);}},180);});
+        search?.addEventListener('input',()=>{window.clearTimeout(searchTimer);const query=search.value.trim();if(!query){picker.querySelector('[data-picker-results]').replaceChildren();return;}renderPickerStatus(picker,'Загрузка…','loading');searchTimer=window.setTimeout(async()=>{try{const params={type:'product',q:query,limit:'50',product_kind:picker.dataset.productKind};if(picker.closest('[data-required-strap-line]')){params.catalog_scope='straps';params.available_for_sale='1';}if(picker.dataset.inStock==='1')params.in_stock='1';renderPickerResults(picker,await apiItems(params));}catch(error){renderPickerStatus(picker,error.message||'Не удалось загрузить каталог','error');window.VechasuNotify?.error(error.message);}},180);});
         const product=picker.querySelector('[data-picker-product]');
         picker.addEventListener('shared-catalog:selected',async event=>{try{if(event.detail.kind==='brand'){product.replaceChildren(new Option('Товар',''));product.disabled=true;await window.loadSharedCatalogOptions(pickerReferenceBox(picker,'category'),'');}else if(event.detail.kind==='category'){await loadPickerProducts(picker);}}catch(error){window.VechasuNotify?.error(error.message);}});
         picker.addEventListener('catalog-combobox:change',()=>{if(!pickerReferenceId(picker,'brand')||!pickerReferenceId(picker,'category')){product.replaceChildren(new Option('Товар',''));product.disabled=true;}});
         product.addEventListener('change',()=>{const option=product.selectedOptions[0];if(option?.dataset.item)selectPickerItem(picker,JSON.parse(option.dataset.item));});
+        if(picker.dataset.brandLocked==='true'&&picker.dataset.fixedBrandId)loadPickerProducts(picker).catch(error=>window.VechasuNotify?.error(error.message));
     });
     function updateRemovedMode(){const mode=saleForm?.querySelector('input[name="removed_strap_mode"]:checked')?.value||'none';modal.querySelector('[data-removed-existing]').hidden=mode!=='existing';modal.querySelector('[data-removed-created]').hidden=mode!=='created';updateStrapPreview();updateStrapSubmitState();}
     saleForm?.querySelectorAll('input[name="removed_strap_mode"]').forEach(input=>input.addEventListener('change',updateRemovedMode));
