@@ -3974,8 +3974,7 @@ def _conduct_order_sale(order_id):
             "source": "tictactoy",
             "notice": "success",
             "message": success_message,
-            "sale_id": str(sale.get("id") or ""),
-            "order_number": str(order_number),
+            "highlight_sale": str(sale.get("id") or ""),
         }
         stock_token = automatic_sale_stock_notification_token(
             stock_notification
@@ -13035,6 +13034,7 @@ def get_sales_report_filters():
         "product_id": query_text("product_id"),
         "status": query_text("status"),
         "product": query_text("product"),
+        "sale_id": query_text("sale_id"),
         "order_number": (
             request.args.get("order_number") or ""
         ).strip(),
@@ -13439,6 +13439,8 @@ def filter_sales_report_records(sales, filters, category_groups=None):
 
     for sale in sales:
         raw_sale_date = str(sale.get("created_at") or "")
+        if filters.get("sale_id") and str(sale.get("id") or "") != filters["sale_id"]:
+            continue
         parsed = parse_erp_datetime(raw_sale_date)
         if parsed is not None:
             parsed_sale_date = parsed[0]
@@ -14235,6 +14237,12 @@ def sales_page():
             "delivery_cost",
         },
     )
+    highlight_sale = (request.args.get("highlight_sale") or "").strip()
+    if highlight_sale and not request.args.get("page"):
+        for index, sale in enumerate(sales):
+            if str(sale.get("id") or "") == highlight_sale:
+                page = index // per_page + 1
+                break
     sales, page = paginate_erp_records(sales, page, per_page)
     # Page-only decorations must not mutate dictionaries retained in the
     # shared read-model cache.
@@ -14327,6 +14335,7 @@ def sales_page():
     if filters.get("today") != "1":
         today_query["today"] = "1"
     report_query = {
+        **{key: filters[key] for key in ("sale_id", "order_number") if filters.get(key)},
         "source": filters["source"],
         **({"tab": "all"} if active_source == "all" else {}),
         **{
@@ -14380,6 +14389,12 @@ def sales_page():
         sales_sort_field=sort_field,
         sales_sort_direction=sort_direction,
         sales_filters=filters,
+        highlight_sale=highlight_sale,
+        scoped_order_number=(
+            next((str(sale.get("order_number") or "") for sale in sales), "")
+            if filters.get("sale_id") else filters.get("order_number", "")
+        ),
+        all_sales_url=url_for("sales_page", source=active_source),
         sales_filter_options=filter_options,
         sales_filter_catalog=sales_filter_catalog,
         sales_product_images=sales_product_images,

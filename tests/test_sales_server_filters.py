@@ -1,5 +1,6 @@
 import unittest
 from unittest import mock
+from flask import render_template
 
 from app import web
 
@@ -410,6 +411,50 @@ class SalesServerFiltersTest(unittest.TestCase):
         for tab in context["source_tabs"]:
             self.assertIn("brand_id=b1", tab["url"])
             self.assertIn("sort=product_name", tab["url"])
+
+    def test_highlight_keeps_all_sales_and_single_sale_view_has_exit(self):
+        records = [sale("new"), sale("other"), sale("new", product="Ремешок")]
+        for query, expected, scoped in (
+            ("highlight_sale=new", ["new", "other", "new"], False),
+            ("sale_id=new", ["new", "new"], True),
+            ("order_number=order-new", ["new", "new"], True),
+        ):
+            with self.subTest(query=query), web.app.test_request_context(
+                "/sales?source=tictactoy&" + query
+            ), mock.patch.object(web, "api_sales_records", return_value=records), mock.patch.object(
+                web, "render_template", side_effect=lambda name, **ctx: ctx
+            ):
+                context = web.sales_page()
+                self.assertCountEqual([row["id"] for row in context["sales"]], expected)
+                self.assertEqual(context["total_sales"], 1 if scoped else 2)
+                html = render_template("sales.html", **context)
+                self.assertEqual('id="salesOrderScope"' in html, scoped)
+                if scoped:
+                    self.assertIn("Продажи заказа №order-new", html)
+                    self.assertIn("Показать все", html)
+                    self.assertEqual(context["all_sales_url"], web.url_for("sales_page", source="tictactoy"))
+                    self.assertIn(query, context["report_url"])
+                else:
+                    self.assertEqual(html.count('class="sale-row is-new-sale'), 2)
+                    self.assertEqual(html.count('sales-mobile-card is-new-sale'), 2)
+
+    def test_single_sale_filter_uses_exact_id(self):
+        records = [sale("1"), sale("10"), sale("1", product="Ремешок")]
+        filtered = web.filter_sales_report_records(records, {"source": "all", "sale_id": "1"})
+        self.assertEqual([row["id"] for row in filtered], ["1", "1"])
+
+    def test_highlight_opens_its_page_without_changing_totals(self):
+        records = [sale(str(i), created_at="2026-09-25T12:00:00") for i in range(55)]
+        records.append(sale("old", created_at="2026-08-01T12:00:00"))
+        with web.app.test_request_context(
+            "/sales?source=tictactoy&highlight_sale=old"
+        ), mock.patch.object(web, "api_sales_records", return_value=records), mock.patch.object(
+            web, "render_template", side_effect=lambda name, **ctx: ctx
+        ):
+            context = web.sales_page()
+        self.assertEqual(context["total_sales"], 56)
+        self.assertEqual(context["pagination"]["page"], 2)
+        self.assertIn("old", [row["id"] for row in context["sales"]])
 
     def test_report_and_exports_share_server_filters(self):
         with web.app.test_request_context(

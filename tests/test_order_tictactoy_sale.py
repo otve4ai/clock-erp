@@ -744,7 +744,7 @@ class OrderTictactoySaleTest(unittest.TestCase):
         self.assertEqual({row["id"] for row in sales}, {sale["id"]})
         self.assertEqual({row["order_status"] for row in sales}, {"completed"})
 
-    def test_success_is_one_local_sale_with_two_lines_and_exact_redirect(self):
+    def test_success_redirects_to_all_sales_with_created_sale_highlight(self):
         status_service = OrderStatusService(self.database)
         status_service.ingest("18593", "A")
         with mock.patch.object(web, "update_order_status") as update_status:
@@ -752,7 +752,9 @@ class OrderTictactoySaleTest(unittest.TestCase):
         self.assertEqual(urlsplit(response.location).path, "/sales")
         query = parse_qs(urlsplit(response.location).query)
         self.assertEqual(query["source"], ["tictactoy"])
-        self.assertEqual(query["order_number"], ["18593"])
+        self.assertNotIn("order_number", query)
+        self.assertNotIn("sale_id", query)
+        self.assertEqual(query["highlight_sale"], [self.inventory.list_sales()[0]["id"]])
         rows = self.inventory.list_sales()
         self.assertEqual(len(rows), 2)
         self.assertEqual(len({row["id"] for row in rows}), 1)
