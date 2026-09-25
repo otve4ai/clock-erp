@@ -439,6 +439,17 @@ class OrderTictactoySaleTest(unittest.TestCase):
         self.assertIn("data-status-autosave", html)
         self.assertNotIn('id="orderSaleModal"', html)
 
+    def test_blocked_sale_action_registers_feedback_before_missing_modal_exit(self):
+        template = Path("app/templates/orders.html").read_text(encoding="utf-8")
+        missing_modal_handler = template.index(
+            "saleAction?.addEventListener('click',showSaleBlock)"
+        )
+        missing_modal_exit = template.index("return;}", missing_modal_handler)
+        self.assertLess(missing_modal_handler, missing_modal_exit)
+        self.assertIn("window.VechasuNotify?.warning(message)", template)
+        self.assertIn("reason?.scrollIntoView", template)
+        self.assertIn("reason?.focus()", template)
+
     def test_confirmed_order_keeps_active_sale_action(self):
         html = self.render_order_for({**self.order, "status": "A"})
         self.assertIn("data-open-sale-dialog>Провести продажу</button>", html)
