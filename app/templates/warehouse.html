@@ -33,6 +33,10 @@
     <link rel="stylesheet" href="{{ static_asset_url('css/products-workspace.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/erp-focus-mode.css') }}">
     <script defer src="{{ static_asset_url('js/products-tabs.js') }}"></script>
+    <script defer src="{{ static_asset_url('js/product-site-status-sync.js') }}"></script>
+    {% if config.TESTING and request.args.get('site_status_sync_e2e') %}
+        <script defer src="{{ url_for('static', filename='js/product-site-status-sync-e2e.js') }}"></script>
+    {% endif %}
     <script defer src="{{ url_for('static', filename='js/product-export.js') }}"></script>
     <script defer src="{{ url_for('static', filename='js/erp-focus-mode.js') }}"></script>
     {% if config.TESTING and request.args.get("products_focus_mode_e2e") == "1" %}
@@ -64,7 +68,10 @@
                 'products',
                 product_metrics,
                 add_button=true,
-                export_filtered_url=export_filtered_url
+                export_filtered_url=export_filtered_url,
+                site_status_sync=site_status_sync,
+                can_sync_site_status=can_sync_site_status,
+                site_status_sync_csrf=site_status_sync_csrf
             ) }}
 
             {% if request.args.get("notice") and request.args.get("message") %}

@@ -120,6 +120,8 @@ BITRIX_ORDERS_EXPORT_UPDATED=0
 BITRIX_ORDERS_EXPORT_TARGET_EXISTED=0
 PREVIOUS_RELEASE=""
 RELEASE_SWITCHED=0
+SITE_STATUS_TIMER_WAS_ENABLED=0
+SITE_STATUS_UNITS_INSTALLED=0
 
 cleanup_workdir() {
     if [[ -n "$DEPLOY_WORKDIR" && "$DEPLOY_WORKDIR" == /run/clock-erp-deploy.* ]]; then
@@ -133,6 +135,14 @@ rollback() {
     trap - ERR
     set +e
     printf 'ROLLBACK: stage=%s exit_code=%s\n' "$FAILURE_STAGE" "$exit_code" >&2
+
+    if [[ "$SITE_STATUS_UNITS_INSTALLED" == "1" && "$SITE_STATUS_TIMER_WAS_ENABLED" == "0" ]]; then
+        systemctl disable --now vechasu-bitrix-site-status-sync.timer >/dev/null 2>&1 || true
+        rm -f -- \
+            /etc/systemd/system/vechasu-bitrix-site-status-sync.service \
+            /etc/systemd/system/vechasu-bitrix-site-status-sync.timer
+        systemctl daemon-reload
+    fi
 
     if [[ "$SERVICE_STOPPED" != "1" && ( "$CATALOG_MIGRATION_STARTED" == "1" || "$DOMAIN_MIGRATION_STARTED" == "1" || "$PURCHASES_MIGRATION_STARTED" == "1" || "$CUSTOMERS_MIGRATION_STARTED" == "1" || "$SMS_MIGRATION_STARTED" == "1" || "$SERVICES_MIGRATION_STARTED" == "1" || "$MAIL_MIGRATION_STARTED" == "1" ) ]]; then
         systemctl stop "$SERVICE_NAME"
@@ -537,6 +547,9 @@ mkdir -p "$RECOVERY_DROPIN_DIR"
 install -o root -g root -m 0644 ops/clock-erp-recovery.conf "$RECOVERY_DROPIN"
 install -o root -g root -m 0644 deploy/systemd/vechasu-wb-sync.service /etc/systemd/system/vechasu-wb-sync.service
 install -o root -g root -m 0644 deploy/systemd/vechasu-wb-full-sync.service /etc/systemd/system/vechasu-wb-full-sync.service
+if systemctl is-enabled --quiet vechasu-bitrix-site-status-sync.timer; then
+    SITE_STATUS_TIMER_WAS_ENABLED=1
+fi
 
 if [[ -f "$BITRIX_ENDPOINT_SOURCE" && -f "$BITRIX_ENDPOINT_TARGET" ]]; then
     /opt/php81/bin/php -l "$BITRIX_ENDPOINT_SOURCE" >/dev/null
@@ -882,6 +895,19 @@ if journalctl -u "$SERVICE_NAME" --since "-2 minutes" \
     false
 fi
 [[ -z "$(git status --porcelain --untracked-files=normal | awk 'substr($0, 4, 9) != "instance/" { print }')" ]]
+
+printf 'SITE STATUS TIMER: install and enable nightly read-only sync\n'
+FAILURE_STAGE="SITE STATUS TIMER"
+install -o root -g root -m 0644 \
+    deploy/systemd/vechasu-bitrix-site-status-sync.service \
+    /etc/systemd/system/vechasu-bitrix-site-status-sync.service
+install -o root -g root -m 0644 \
+    deploy/systemd/vechasu-bitrix-site-status-sync.timer \
+    /etc/systemd/system/vechasu-bitrix-site-status-sync.timer
+SITE_STATUS_UNITS_INSTALLED=1
+systemctl daemon-reload
+systemctl enable --now vechasu-bitrix-site-status-sync.timer
+systemctl is-active --quiet vechasu-bitrix-site-status-sync.timer
 
 cleanup_workdir
 trap - ERR

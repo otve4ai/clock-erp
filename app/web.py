@@ -64,6 +64,7 @@ from app.services.bitrix_erp_product_sync import (
     single_import_quantity,
 )
 from app.services.bitrix_site_status import bitrix_site_status
+from app.services.bitrix_site_status_sync import BitrixSiteStatusSync
 from app.services.audit_journal import AuditJournal
 from app.services.order_presentation import present_order, status_key, status_label, navigation_counts
 from app.services.service_vault import (
@@ -6088,6 +6089,23 @@ def warehouse_page():
         # Route-level test doubles predating configurable export do not expose
         # a real database connection. Production catalog instances always do.
         export_warehouses = []
+    site_status_sync = _product_site_status_summary(product_catalog)
+    if app.testing and request.args.get("site_status_sync_e2e") in {
+        "attention",
+        "behavior",
+        "open",
+    }:
+        site_status_sync = {
+            "outcome": "success",
+            "has_data": True,
+            "mismatch_count": 46,
+            "in_stock_inactive": 29,
+            "out_of_stock_active": 17,
+            "in_stock_unlinked": 3,
+            "unknown_statuses": 2,
+            "last_attempt_at": "2026-09-25T09:45:00+00:00",
+            "last_success_at": "2026-09-25T00:02:00+00:00",
+        }
     rendered = render_template(
             "warehouse.html",
             partial_only=partial_requested,
@@ -6161,6 +6179,9 @@ def warehouse_page():
             total_found=catalog["total"],
             pagination=pagination,
             active_brand_inventory=active_brand_inventory,
+            site_status_sync=site_status_sync,
+            can_sync_site_status=_product_site_status_sync_allowed(),
+            site_status_sync_csrf=csrf_token(),
             warehouse_table_ui_e2e=(
                 app.testing
                 and request.args.get("table_ui_e2e") == "1"
@@ -17603,6 +17624,23 @@ def _product_force_delete_allowed():
     return str(user.get("role") or "").strip() == "admin"
 
 
+def _product_site_status_sync_allowed():
+    if not auth_is_enabled():
+        return True
+    return _product_force_delete_allowed()
+
+
+def _product_site_status_summary(product_catalog):
+    database = getattr(product_catalog, "database", None)
+    if not isinstance(database, CatalogDatabase):
+        return {}
+    try:
+        return BitrixSiteStatusSync(database).summary()
+    except (OSError, sqlite3.Error):
+        app.logger.exception("Product site-status summary failed")
+        return {"outcome": "error", "has_data": False}
+
+
 def _manual_product_stock_edit_allowed():
     if not auth_is_enabled():
         return True
@@ -20619,6 +20657,38 @@ def _bitrix_single_client():
         os.getenv("BITRIX_CATALOG_URL", ""),
         os.getenv("BITRIX_CATALOG_TOKEN"),
     )
+
+
+@app.route("/api/v1/products/site-status-sync", methods=["GET", "POST"])
+def api_product_site_status_sync():
+    database = CatalogDatabase()
+    if request.method == "GET":
+        return api_success(BitrixSiteStatusSync(database).summary())
+    if not _product_site_status_sync_allowed():
+        abort(403)
+    require_csrf_when_authenticated()
+    try:
+        result = BitrixSiteStatusSync(
+            database, client=_bitrix_single_client()
+        ).run()
+    except (BitrixCatalogReadOnlyError, OSError, RuntimeError, ValueError):
+        app.logger.exception(
+            "Bitrix product site-status synchronization failed"
+        )
+        return api_error(
+            "BITRIX_SITE_STATUS_SYNC_FAILED",
+            "Не удалось получить статусы из Bitrix. "
+            "Сохранённые статусы и остатки не изменены.",
+            503,
+        )
+    if result.get("coalesced"):
+        return api_error(
+            "BITRIX_SITE_STATUS_SYNC_RUNNING",
+            "Сверка уже выполняется.",
+            409,
+        )
+    _invalidate_deleted_product_caches()
+    return api_success(result)
 
 
 def _bitrix_single_source_payload(product, database=None):
