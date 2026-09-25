@@ -2536,7 +2536,7 @@
                                                         onclick="openCancellationModal(this)"
                                                     >Отменить продажу</button>
                                                 {% endif %}
-                                                {% if sales_view != 'archive' and sale.is_cancelled %}
+                                                {% if can_delete_sales and sales_view != 'archive' and sale.is_cancelled %}
                                                     <button
                                                         class="sales-row-delete sales-menu-danger"
                                                         type="button"
@@ -2767,7 +2767,7 @@
                                         onclick="openCancellationModal(this)"
                                     >Отменить продажу</button>
                                 {% endif %}
-                                {% if sales_view != 'archive' and sale.is_cancelled %}
+                                {% if can_delete_sales and sales_view != 'archive' and sale.is_cancelled %}
                                     <button
                                         class="sales-row-delete sales-menu-danger"
                                         type="button"
