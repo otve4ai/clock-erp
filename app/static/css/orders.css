@@ -930,8 +930,8 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
 
 .orders-page .order-status-control {
     display: flex;
-    flex: 0 0 235px;
-    min-width: 220px;
+    flex: 0 1 180px;
+    min-width: 130px;
     max-width: 250px;
     align-items: stretch;
     flex-direction: column;
@@ -1056,8 +1056,25 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
     }
 
     .orders-page .order-status-control {
-        flex: 1 1 180px;
-        min-width: 160px;
+        flex: 0 1 120px;
+        min-width: 84px;
+        max-width: 150px;
+    }
+
+    .orders-page .order-control-actions {
+        flex: 1 1 auto;
+    }
+
+    .orders-page .order-control-actions > form {
+        flex: 1 1 92px;
+        min-width: 0;
+    }
+
+    .orders-page .order-control-actions > form .button {
+        width: 100%;
+        min-width: 0;
+        padding-inline: 10px;
+        white-space: normal;
     }
 }
 

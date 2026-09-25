@@ -264,7 +264,8 @@ class OrdersUiRedesignTest(unittest.TestCase):
         self.assertIn('class="order-card-total"', header)
         self.assertIn('class="order-control-panel"', header)
         self.assertIn('class="order-control-actions"', header)
-        self.assertIn('Статус заказа', header)
+        self.assertIn('aria-label="Статус заказа"', header)
+        self.assertNotIn('<label class="order-control-label"', header)
         self.assertIn('Сумма заказа', header)
         self.assertIn('class="sale-completed-badge"', header)
         self.assertNotIn('class="button button-secondary" aria-label="Продажа проведена"', header)
@@ -320,20 +321,22 @@ class OrdersUiRedesignTest(unittest.TestCase):
         self.assertIn("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)", self.source)
 
     def test_order_header_responsive_control_hierarchy(self):
-        self.assertIn("flex: 0 0 235px", self.source)
+        self.assertIn("flex: 0 1 180px", self.source)
         self.assertIn("max-width: 250px", self.source)
+        self.assertIn("flex: 0 1 120px", self.source)
+        self.assertIn("min-width: 84px", self.source)
         self.assertIn("flex: 1 1 100%", self.source)
         self.assertIn("grid-column: 1 / -1", self.source)
         header = self.source.split('class="card-head order-card-head"', 1)[1].split(
             '</header>', 1
         )[0]
         self.assertLess(
+            header.index('data-order-sale-action'),
             header.index('data-order-actions-trigger'),
-            header.index('data-open-order-history'),
         )
         self.assertLess(
+            header.index('data-order-actions-trigger'),
             header.index('data-open-order-history'),
-            header.index('data-order-sale-action'),
         )
 
     def test_order_page_has_no_task_integration(self):
