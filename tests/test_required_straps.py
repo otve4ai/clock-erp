@@ -27,7 +27,7 @@ class RequiredStrapUiContractTest(unittest.TestCase):
             encoding="utf-8"
         )
 
-    def test_setting_is_collapsed_and_only_visible_while_editing(self):
+    def test_setting_is_visible_when_additional_settings_are_open(self):
         self.assertIn(
             'class="product-additional-settings" data-product-additional-settings',
             self.template,
@@ -42,6 +42,16 @@ class RequiredStrapUiContractTest(unittest.TestCase):
             ".product-inline-form.is-editing .product-additional-settings",
             self.styles,
         )
+        self.assertNotIn(
+            ".product-inline-form:not(.is-editing) [data-required-strap-settings]",
+            self.styles,
+        )
+        start_edit = self.template.split(
+            "function startInlineProductEdit()", 1
+        )[1].split(
+            'document.getElementById("inlineProductForm").addEventListener', 1
+        )[0]
+        self.assertNotIn("collapseProductAdditionalSettings", start_edit)
         self.assertIn(
             "#editDrawer .product-setting-row", self.styles
         )

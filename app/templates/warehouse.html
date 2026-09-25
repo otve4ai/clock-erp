@@ -2308,7 +2308,6 @@
         function startInlineProductEdit() {
             const form = document.getElementById("inlineProductForm");
             form.classList.add("is-editing");
-            collapseProductAdditionalSettings(form);
             const editor = document.getElementById("detailPhotoEditor");
             editor.hidden = form.dataset.photoEditable !== "true";
             if (!editor.hidden) syncDetailPhotoActions();
@@ -2350,7 +2349,6 @@
             });
             resetDetailPhotoChanges(true);
             document.getElementById("detailPhotoEditor").hidden = true;
-            collapseProductAdditionalSettings(form);
             form.classList.remove("is-editing");
         }
 
@@ -2817,7 +2815,6 @@
                 renderStockHistory(productId);
                 resetDetailPhotoChanges(false);
                 document.getElementById("detailPhotoEditor").hidden = true;
-                collapseProductAdditionalSettings(form);
                 form.classList.remove("is-editing");
                 setDetailPhotoStatus(payload.meta?.image_message || "Карточка обновлена.");
             } catch (error) {

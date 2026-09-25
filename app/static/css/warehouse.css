@@ -2009,11 +2009,6 @@ tr:last-child td {
     display: block;
 }
 
-#editDrawer .product-inline-form:not(.is-editing) [data-required-strap-settings],
-#editDrawer .product-inline-form:not(.is-editing) [data-required-strap-status] {
-    display: none;
-}
-
 #editDrawer .product-additional-settings summary {
     display: flex;
     min-height: 46px;
