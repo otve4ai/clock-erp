@@ -342,8 +342,12 @@ class OrdersUiRedesignTest(unittest.TestCase):
         self.assertNotIn("Удалить комментарий", comments)
         self.assertIn("Редактировать", comments)
 
-    def test_order_card_uses_two_columns_and_escapes_comment_text(self):
+    def test_order_card_uses_one_column_and_escapes_comment_text(self):
         self.assertIn(
+            ".order-detail-grid { display:grid; grid-template-columns:minmax(0,1fr)",
+            self.source,
+        )
+        self.assertNotIn(
             "grid-template-columns:minmax(0,1.65fr) minmax(280px,1fr)",
             self.source,
         )

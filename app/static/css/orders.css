@@ -188,7 +188,7 @@ details.more summary::-webkit-details-marker { display:none; }
 .status-save-state.is-saved { color:#15803d; }
 .status-save-state.is-error { color:var(--danger); }
 .order-detail-panel { container-type:inline-size; }
-.order-detail-grid { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(280px,1fr); gap:14px; align-items:start; }
+.order-detail-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:14px; align-items:start; }
 .order-detail-main { display:flex; min-width:0; flex-direction:column; gap:12px; }
 .order-detail-main .section,.order-comments { padding:14px; border:1px solid var(--line); border-radius:9px; background:var(--theme-surface,#fff); }
 .order-detail-main .section { order:10; }
