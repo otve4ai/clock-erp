@@ -1,0 +1,16 @@
+[Unit]
+Description=Vechasu Bitrix product site-status synchronization
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/clock-erp-current
+EnvironmentFile=/etc/clock-erp/clock-erp.env
+ExecCondition=/usr/bin/test ! -e /run/clock-erp-maintenance.json
+ExecStart=/opt/clock-erp/venv/bin/python -m scripts.sync_bitrix_site_status
+TimeoutStartSec=600
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=20%
+MemoryLimit=256M
