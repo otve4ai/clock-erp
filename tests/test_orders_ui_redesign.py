@@ -391,8 +391,12 @@ class OrdersUiRedesignTest(unittest.TestCase):
         self.assertIn("vechasu:orders:view:v2", html)
         self.assertIn("minmax(0,63%)", self.source)
         self.assertIn("min-width:0", self.source)
-        self.assertIn("Проведение недоступно:", html)
-        self.assertIn("Заказ не подтверждён · Есть несопоставленные позиции", html)
+        self.assertIn("сначала подтвердите заказ", html)
+        self.assertIn("Дополнительно: Есть несопоставленные позиции.", html)
+        self.assertNotIn(
+            "Заказ не подтверждён · Есть несопоставленные позиции",
+            html,
+        )
 
 
 if __name__ == "__main__":

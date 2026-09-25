@@ -137,7 +137,10 @@ details.more summary::-webkit-details-marker { display:none; }
 .map-actions { display:flex; gap:5px; margin-top:7px; }
 .line-price { align-items:flex-end; flex-direction:column; min-width:105px; font-weight:750; }
 .line-price small { color:var(--muted); font-weight:400; }
+.order-calculation { container-type:inline-size; }
 .calculation-layout { display:grid; grid-template-columns:minmax(280px,420px) minmax(240px,1fr); gap:20px; align-items:start; }
+.order-calculation-alerts { display:grid; gap:8px; min-width:0; }
+.order-calculation-alerts .warning { margin:0; }
 .summary { width:100%; }
 .summary-row { display:flex; justify-content:space-between; gap:14px; padding:6px 0; }
 .summary-row.total { margin-top:5px; padding-top:10px; border-top:1px solid var(--line); font-size:16px; font-weight:750; }
@@ -226,6 +229,9 @@ details.more summary::-webkit-details-marker { display:none; }
 .comment-show-more:focus-visible { outline:0; box-shadow:var(--erp-focus-ring); }
 @container (max-width:760px) {
     .order-detail-grid { grid-template-columns:1fr; }
+}
+@container (max-width:620px) {
+    .calculation-layout { grid-template-columns:1fr; gap:12px; }
 }
 @media (max-width:1200px) {
     .page-head { grid-template-columns:minmax(220px,1fr) auto; }
