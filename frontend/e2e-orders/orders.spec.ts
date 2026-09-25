@@ -74,9 +74,62 @@ test('responsive layout and explicit units', async ({ page }) => {
     await page.goto('/order/wildberries/9001?source=wildberries');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await expect(page.locator('.orders-split-table .order-units').first()).toHaveText('1 шт.');
-    await page.screenshot({path:`/tmp/orders-progressive-${width}.png`,fullPage:true});
+    await page.screenshot({path:`test-results/orders-progressive-${width}.png`,fullPage:true});
   }
   expect(errors).toEqual([]);
+});
+
+test('order action toolbar keeps readable fixed controls at every responsive width', async ({ page }) => {
+  for (const width of [1920, 1440, 1200, 900, 760, 620, 560, 440, 360]) {
+    await page.setViewportSize({width, height: 900});
+    await page.goto('/order/7002');
+
+    const panel = page.locator('.order-control-panel');
+    const controls = [
+      page.locator('#orderStatusSelect'),
+      panel.getByRole('button', {name: 'Обновить из Bitrix', exact: true}),
+      panel.getByRole('button', {name: 'Провести продажу', exact: true}),
+      panel.getByRole('button', {name: '⋯ Ещё', exact: false}),
+    ];
+    await expect(panel).toBeVisible();
+    for (const control of controls) await expect(control).toBeVisible();
+
+    const [panelBox, ...boxes] = await Promise.all([
+      panel.boundingBox(),
+      ...controls.map(control => control.boundingBox()),
+    ]);
+    expect(panelBox).not.toBeNull();
+    expect(boxes.every(Boolean)).toBe(true);
+    for (const box of boxes) {
+      expect(box!.x).toBeGreaterThanOrEqual(panelBox!.x);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(panelBox!.x + panelBox!.width + 1);
+    }
+    for (let left = 0; left < boxes.length; left += 1) {
+      for (let right = left + 1; right < boxes.length; right += 1) {
+        const a = boxes[left]!;
+        const b = boxes[right]!;
+        const horizontal = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+        const vertical = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+        expect(horizontal > 0 && vertical > 0).toBe(false);
+      }
+    }
+
+    await expect(controls[1]).toHaveCSS('white-space', 'nowrap');
+    expect(Math.round(boxes[1]!.width)).toBe(148);
+    expect(await controls[1].evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await panel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+    await controls[3].click();
+    const menu = page.locator('[data-order-actions-dropdown]');
+    await expect(menu).toBeVisible();
+    const menuBox = await menu.boundingBox();
+    expect(menuBox).not.toBeNull();
+    expect(menuBox!.x).toBeGreaterThanOrEqual(0);
+    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(width);
+    expect(menuBox!.y).toBeGreaterThanOrEqual(0);
+    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(900);
+  }
 });
 
 test('order calculation follows its narrow card width at the reported viewport', async ({ page }) => {
@@ -188,7 +241,7 @@ test('reference header fits target viewports and overflow statuses remain usable
       await overflow.click();
       await expect(page).toHaveURL(new RegExp(`status=${status}`));
     }
-    await page.screenshot({path:`/tmp/orders-reference-${width}.png`,fullPage:true});
+    await page.screenshot({path:`test-results/orders-reference-${width}.png`,fullPage:true});
   }
 });
 
@@ -245,6 +298,6 @@ test('compact rows retain density, disclosure and independent scrolling', async 
       expect(await page.locator('.order-detail-panel').boundingBox()).toEqual(panel);
       await expect(page.locator('.list-footer')).toBeInViewport();
     }
-    await page.screenshot({path: '/tmp/orders-compact-' + width + '.png', fullPage: true});
+    await page.screenshot({path: 'test-results/orders-compact-' + width + '.png', fullPage: true});
   }
 });
