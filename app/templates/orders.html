@@ -131,10 +131,9 @@
                             <span class="badge order-status-{{ selected_order.ui_status_tone }}">{{ selected_order.ui_status_label }}</span>
                             {% else %}
                             <form class="status-form order-status-control" method="post" action="/order/{{ detail_id }}/status" data-status-autosave>
-                                <label class="order-control-label" for="orderStatusSelect">Статус заказа</label>
                                 <div class="order-status-field">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <select class="field" id="orderStatusSelect" name="status" data-saved-status="{{ detail_status_code }}">
+                                    <select class="field" id="orderStatusSelect" name="status" aria-label="Статус заказа" data-saved-status="{{ detail_status_code }}">
                                         <option value="UNKNOWN" disabled{% if detail_status_code == 'UNKNOWN' %} selected{% endif %}>Статус не определён</option>
                                         <option value="N"{% if detail_status_code == 'N' %} selected{% endif %}>Не подтверждён</option>
                                         <option value="A"{% if detail_status_code == 'A' %} selected{% endif %}>Подтверждён</option>
@@ -147,6 +146,11 @@
                             {% endif %}
                             <div class="order-control-actions">
                                 {% if not is_wb %}<form method="post" action="{{ url_for('order_refresh', order_id=detail_id, **orders_query_args) }}" data-erp-pending data-pending-label="Обновляем…"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-secondary" type="submit">Обновить из Bitrix</button></form>{% endif %}
+                                    {% if sale_state.sale_completed %}
+                                        <a class="button button-primary order-primary-action" href="/sales?source={{ selected_order.get('source') or 'tictactoy' }}&sale_id={{ sale_state.sale_id }}">Открыть продажу</a>
+                                    {% else %}
+                                        <button class="button button-primary order-primary-action" type="button" data-order-sale-action{% if sale_state.can_create_sale %} data-open-sale-dialog{% else %} data-show-sale-block{% endif %}>Провести продажу</button>
+                                    {% endif %}
                                 <div class="order-actions-menu" data-order-actions-menu>
                                 <button class="button button-secondary order-actions-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="orderActionsMenu" data-order-actions-trigger>⋯ Ещё <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
                                 <div class="order-actions-dropdown" id="orderActionsMenu" role="menu" hidden data-order-actions-dropdown>
@@ -159,11 +163,6 @@
                                     {% if not is_wb and detail_id and selected_order.get('sync_state') != 'error' %}<a role="menuitem" href="{{ url_for('order_print_page', order_id=detail_id) }}" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 7V3h8v4M5 15H3V8h14v7h-2M6 12h8v5H6z"/></svg>Печать заказа</a>{% endif %}
                                 </div>
                                 </div>
-                                    {% if sale_state.sale_completed %}
-                                        <a class="button button-primary order-primary-action" href="/sales?source={{ selected_order.get('source') or 'tictactoy' }}&sale_id={{ sale_state.sale_id }}">Открыть продажу</a>
-                                    {% else %}
-                                        <button class="button button-primary order-primary-action" type="button" data-order-sale-action{% if sale_state.can_create_sale %} data-open-sale-dialog{% else %} data-show-sale-block{% endif %}>Провести продажу</button>
-                                    {% endif %}
                             </div>
                             {% if request.args.get('notice') and request.args.get('message') %}<div class="action-feedback notice-{{ request.args.get('notice') }}" role="{{ 'alert' if request.args.get('notice') == 'error' else 'status' }}">{{ request.args.get('message') }}</div>{% endif %}
                         </div>
