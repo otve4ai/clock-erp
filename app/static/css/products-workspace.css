@@ -1265,10 +1265,6 @@
         gap: 3px;
     }
 
-    .products-workspace-actions > :last-child {
-        grid-column: 1 / -1;
-    }
-
     .products-workspace-actions .products-workspace-button,
     .products-workspace-actions .products-workspace-more {
         width: 100%;
