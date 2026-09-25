@@ -998,21 +998,30 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
     box-shadow: 0 16px 38px rgba(15, 23, 42, .18);
 }
 
-.orders-page .order-actions-dropdown a {
+.orders-page .order-actions-dropdown a,
+.orders-page .order-actions-dropdown button {
     display: flex;
+    width: 100%;
     min-height: 38px;
     align-items: center;
     gap: 9px;
     padding: 8px 10px;
+    border: 0;
     border-radius: 7px;
+    background: transparent;
     color: var(--erp-text);
+    font: inherit;
     font-size: 13px;
     font-weight: 650;
+    text-align: left;
     text-decoration: none;
+    cursor: pointer;
 }
 
 .orders-page .order-actions-dropdown a:hover,
-.orders-page .order-actions-dropdown a:focus-visible {
+.orders-page .order-actions-dropdown a:focus-visible,
+.orders-page .order-actions-dropdown button:hover,
+.orders-page .order-actions-dropdown button:focus-visible {
     outline: 0;
     background: var(--erp-surface-muted);
     box-shadow: var(--erp-focus-ring);
@@ -1042,12 +1051,13 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
 
 @container (max-width: 800px) {
     .orders-page .order-control-panel {
-        align-items: stretch;
-        flex-wrap: wrap;
+        align-items: flex-end;
+        flex-wrap: nowrap;
     }
 
     .orders-page .order-status-control {
-        flex: 1 1 220px;
+        flex: 1 1 180px;
+        min-width: 160px;
     }
 }
 

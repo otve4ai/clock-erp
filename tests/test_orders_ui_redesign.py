@@ -270,9 +270,16 @@ class OrdersUiRedesignTest(unittest.TestCase):
         self.assertNotIn('class="button button-secondary" aria-label="Продажа проведена"', header)
         self.assertEqual(header.count('data-order-actions-trigger'), 1)
         menu = header.split('data-order-actions-dropdown', 1)[1]
-        labels = ("Отправить SMS", "История SMS", "Открыть в Bitrix", "Печать заказа")
+        labels = (
+            "История заказа",
+            "Отправить SMS",
+            "История SMS",
+            "Открыть в Bitrix",
+            "Печать заказа",
+        )
         positions = [menu.index(label) for label in labels]
         self.assertEqual(positions, sorted(positions))
+        self.assertIn('data-open-order-history', menu)
         self.assertNotIn("Создать задачу", menu)
         self.assertNotIn("url_for('tasks_page'", menu)
         self.assertIn("url_for('sms_page'", menu)
@@ -305,6 +312,9 @@ class OrdersUiRedesignTest(unittest.TestCase):
         self.assertIn("event.key==='Escape'", self.source)
         self.assertIn("!orderActions.contains(event.target)", self.source)
         self.assertIn("position: fixed", self.source)
+        self.assertIn(".order-actions-dropdown button", self.source)
+        self.assertIn("@container (max-width: 800px)", self.source)
+        self.assertIn("flex-wrap: nowrap", self.source)
         self.assertIn("@media (max-width: 900px)", self.source)
         self.assertIn("@media (max-width: 560px)", self.source)
         self.assertIn("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)", self.source)
@@ -317,12 +327,14 @@ class OrdersUiRedesignTest(unittest.TestCase):
         header = self.source.split('class="card-head order-card-head"', 1)[1].split(
             '</header>', 1
         )[0]
-        positions = [
-            header.index('data-open-order-history'),
+        self.assertLess(
             header.index('data-order-actions-trigger'),
+            header.index('data-open-order-history'),
+        )
+        self.assertLess(
+            header.index('data-open-order-history'),
             header.index('data-order-sale-action'),
-        ]
-        self.assertEqual(positions, sorted(positions))
+        )
 
     def test_order_page_has_no_task_integration(self):
         self.assertNotIn("entity-tasks", self.source)

@@ -147,11 +147,11 @@
                             {% endif %}
                             <div class="order-control-actions">
                                 {% if not is_wb %}<form method="post" action="{{ url_for('order_refresh', order_id=detail_id, **orders_query_args) }}" data-erp-pending data-pending-label="Обновляем…"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-secondary" type="submit">Обновить из Bitrix</button></form>{% endif %}
-                                {% if not is_wb %}<button class="button button-secondary" type="button" aria-expanded="false" aria-controls="orderLifecyclePanel" data-open-order-history>История</button>{% endif %}
                                 <div class="order-actions-menu" data-order-actions-menu>
                                 <button class="button button-secondary order-actions-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="orderActionsMenu" data-order-actions-trigger>⋯ Ещё <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
                                 <div class="order-actions-dropdown" id="orderActionsMenu" role="menu" hidden data-order-actions-dropdown>
-                                    <span class="order-actions-separator" role="separator"></span>
+                                    {% if not is_wb %}<button type="button" role="menuitem" aria-expanded="false" aria-controls="orderLifecyclePanel" data-open-order-history><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4a6 6 0 1 1-5.2 3M3 4v4h4M10 7v4l3 2"/></svg>История заказа</button>{% endif %}
+                                    {% if not is_wb %}<span class="order-actions-separator" role="separator"></span>{% endif %}
                                     {% if sms_permissions.send %}<a role="menuitem" href="{{ url_for('sms_page', order_id=detail_id, compose=1) }}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14v10H3zM4 6l6 5 6-5"/></svg>Отправить SMS</a>{% endif %}
                                     {% if sms_permissions.view %}<a role="menuitem" href="{{ url_for('sms_page', order_id=detail_id) }}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4a6 6 0 1 1-5.2 3M3 4v4h4M10 7v4l3 2"/></svg>История SMS</a>{% endif %}
                                     <span class="order-actions-separator" role="separator"></span>
