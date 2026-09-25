@@ -1475,7 +1475,7 @@
             <input id="editReturnQuery" type="hidden" name="return_query" value="{{ request.query_string.decode('utf-8') }}">
             <input type="hidden" name="stock_reason" value="Редактирование карточки товара">
             <div class="product-detail-grid">
-            <div class="product-detail-card">
+            <div class="product-detail-card product-detail-name">
                 <div class="product-detail-label">Название</div>
                 <div id="detailName" class="product-detail-value">—</div>
                 <input id="editName" class="product-detail-input" type="text" name="name" aria-label="Название товара" required>
@@ -1485,12 +1485,6 @@
                 <div class="product-detail-label">Артикул</div>
                 <div id="detailArticle" class="product-detail-value">—</div>
                 <input id="editArticle" class="product-detail-input" type="text" name="article" aria-label="Артикул товара">
-            </div>
-
-            <div class="product-detail-card">
-                <div class="product-detail-label">Модель часов</div>
-                <div id="detailModel" class="product-detail-value">—</div>
-                <input id="editModel" class="product-detail-input" type="text" name="model" aria-label="Модель товара">
             </div>
 
             <div class="product-detail-card">
@@ -1552,6 +1546,11 @@
             <details class="product-additional-settings" data-product-additional-settings>
                 <summary>Дополнительные настройки</summary>
                 <div class="product-additional-settings-body">
+                    <div class="product-detail-card product-detail-model">
+                        <div class="product-detail-label">Модель часов</div>
+                        <div id="detailModel" class="product-detail-value">—</div>
+                        <input id="editModel" class="product-detail-input" type="text" name="model" aria-label="Модель товара">
+                    </div>
                     <div class="product-setting-row" data-required-strap-settings>
                         <div class="product-setting-copy">
                             <div class="product-setting-title">Ремешок обязателен при продаже</div>
@@ -1580,6 +1579,8 @@
                 <button type="button" data-edit-start onclick="startInlineProductEdit()">Редактировать</button>
                 <button type="submit" data-edit-actions>Сохранить</button>
                 <button class="cancel-button" type="button" data-edit-actions onclick="cancelInlineProductEdit()">Отмена</button>
+            </div>
+            <div class="product-inline-actions product-external-actions" role="group" aria-label="Внешние ссылки товара">
                 <a
                     id="detailBitrixLink"
                     class="moysklad-link"

@@ -1994,8 +1994,8 @@ tr:last-child td {
 #editDrawer .product-inline-form.is-editing [data-edit-actions] { display: inline-flex; }
 
 #editDrawer .product-additional-settings {
-    display: none;
-    margin: 0 0 14px;
+    display: block;
+    margin: 10px 0 14px;
     overflow: hidden;
     border: 1px solid #e5eaf2;
     border-radius: 15px;
@@ -2007,6 +2007,11 @@ tr:last-child td {
 
 #editDrawer .product-inline-form.is-editing .product-additional-settings {
     display: block;
+}
+
+#editDrawer .product-inline-form:not(.is-editing) [data-required-strap-settings],
+#editDrawer .product-inline-form:not(.is-editing) [data-required-strap-status] {
+    display: none;
 }
 
 #editDrawer .product-additional-settings summary {
@@ -3669,6 +3674,18 @@ body.edit-drawer-open:has(.app.sidebar-collapsed) #drawerBackdrop {
     transform: none;
 }
 
+#editDrawer .product-detail-card.product-detail-name {
+    grid-column: 1 / -1;
+}
+
+#editDrawer .product-detail-name .product-detail-value {
+    font-size: var(--erp-type-section-title-size);
+}
+
+#editDrawer .product-detail-model {
+    margin-top: 12px;
+}
+
 #editDrawer .product-detail-label {
     flex: 0 0 auto;
     margin-bottom: 4px;
@@ -3907,6 +3924,16 @@ body.edit-drawer-open:has(.app.sidebar-collapsed) #drawerBackdrop {
     flex-wrap: wrap;
     gap: 8px;
     margin-top: 14px;
+}
+
+#editDrawer .product-external-actions {
+    padding-top: 12px;
+    border-top: 1px solid var(--erp-border);
+}
+
+#editDrawer .product-external-actions .moysklad-link::after {
+    content: "↗";
+    margin-left: 6px;
 }
 
 #editDrawer .product-inline-actions button,
