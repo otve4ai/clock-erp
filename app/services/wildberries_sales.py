@@ -23,7 +23,7 @@ class WildberriesSales:
             ).fetchone()
         return self.inventory.get_sale(row["id"]) if row else None
 
-    def conduct(self, order, user_name="", audit_actor=None, replacement=None):
+    def conduct(self, order, user_name="", audit_actor=None, replacement=None, straps=None):
         order_id = str((order or {}).get("wb_order_id") or "").strip()
         if not order_id or order.get("source") != "wildberries":
             raise SalesInventoryError("Заказ Wildberries не найден")
@@ -36,7 +36,7 @@ class WildberriesSales:
         products = order.get("products") or []
         mappings = self.resolve_products(order)
         items = []
-        for product, mapping in zip(products, mappings):
+        for index, (product, mapping) in enumerate(zip(products, mappings)):
             catalog_product = mapping.get("product")
             if mapping.get("state") != "mapped" or not catalog_product:
                 identity = product.get("article") or product.get("nm_id") or product.get("barcode") or "—"
@@ -51,6 +51,7 @@ class WildberriesSales:
                 raise SalesInventoryError("В заказе Wildberries отсутствует цена")
             items.append({
                 "product_id": catalog_product["id"],
+                "strap_product_id": (straps or {}).get(index),
                 "quantity": product.get("quantity"),
                 "unit_price": product["price"],
                 "product_name": catalog_product.get("name") or "",

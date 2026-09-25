@@ -119,6 +119,8 @@ class ProductBundles:
             if previous and not enabled and float(product["stock"] or 0) != 0:
                 raise BundleError("Нельзя вернуть legacy-остаток в физический учёт сменой режима.")
             if enabled:
+                if connection.execute("SELECT 1 FROM erp_required_straps WHERE product_id=?", (product_id,)).fetchone():
+                    raise BundleError("У товара включён признак «Требуется ремешок».")
                 if connection.execute("SELECT 1 FROM erp_component_inventory WHERE product_id=?", (product_id,)).fetchone():
                     raise BundleError("У товара уже есть отдельный физический учёт компонента.")
                 if connection.execute(

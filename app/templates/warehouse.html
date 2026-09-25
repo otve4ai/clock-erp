@@ -1549,6 +1549,33 @@
             </div>
             </div>
 
+            <details class="product-additional-settings" data-product-additional-settings>
+                <summary>Дополнительные настройки</summary>
+                <div class="product-additional-settings-body">
+                    <div class="product-setting-row" data-required-strap-settings>
+                        <div class="product-setting-copy">
+                            <div class="product-setting-title">Ремешок обязателен при продаже</div>
+                            <div class="product-setting-hint">Для продажи из заказа</div>
+                        </div>
+                        <label class="toggle-switch product-setting-toggle">
+                            <input
+                                type="checkbox"
+                                data-requires-strap
+                                aria-label="Ремешок обязателен при продаже"
+                                disabled
+                            >
+                            <span class="toggle-slider" aria-hidden="true"></span>
+                        </label>
+                    </div>
+                    <p
+                        class="product-setting-status"
+                        data-required-strap-status
+                        role="status"
+                        aria-live="polite"
+                    ></p>
+                </div>
+            </details>
+
             <div class="product-inline-actions">
                 <button type="button" data-edit-start onclick="startInlineProductEdit()">Редактировать</button>
                 <button type="submit" data-edit-actions>Сохранить</button>
@@ -2270,9 +2297,17 @@
             placeholder.hidden = true;
         }
 
+        function collapseProductAdditionalSettings(form) {
+            const additionalSettings = form.querySelector(
+                "[data-product-additional-settings]"
+            );
+            if (additionalSettings) additionalSettings.open = false;
+        }
+
         function startInlineProductEdit() {
             const form = document.getElementById("inlineProductForm");
             form.classList.add("is-editing");
+            collapseProductAdditionalSettings(form);
             const editor = document.getElementById("detailPhotoEditor");
             editor.hidden = form.dataset.photoEditable !== "true";
             if (!editor.hidden) syncDetailPhotoActions();
@@ -2314,6 +2349,7 @@
             });
             resetDetailPhotoChanges(true);
             document.getElementById("detailPhotoEditor").hidden = true;
+            collapseProductAdditionalSettings(form);
             form.classList.remove("is-editing");
         }
 
@@ -2490,6 +2526,7 @@
             }
 
             document.getElementById("editProductId").value = button.dataset.id || "";
+            window.loadRequiredStrapSetting?.(button.dataset.id);
             const editableValues = {
                 editName: button.dataset.name || "",
                 editModel: button.dataset.model || "",
@@ -2518,6 +2555,7 @@
             inlineProductForm.dataset.photoFileId = "";
             inlineProductForm.dataset.photoEditable = "false";
             inlineProductForm.dataset.photoSource = "";
+            collapseProductAdditionalSettings(inlineProductForm);
             window.restoreSharedCatalogCascade(
                 inlineProductForm,
                 {
@@ -2778,6 +2816,7 @@
                 renderStockHistory(productId);
                 resetDetailPhotoChanges(false);
                 document.getElementById("detailPhotoEditor").hidden = true;
+                collapseProductAdditionalSettings(form);
                 form.classList.remove("is-editing");
                 setDetailPhotoStatus(payload.meta?.image_message || "Карточка обновлена.");
             } catch (error) {
@@ -6717,6 +6756,7 @@
     </script>
     {% endif %}
 {% include "_manual_product.html" %}
+<script src="{{ static_asset_url('js/required-strap.js') }}"></script>
 </body>
 {% if pagination_e2e %}<script src="{{ url_for('static', filename='js/pagination-e2e.js') }}"></script>{% endif %}
 </html>

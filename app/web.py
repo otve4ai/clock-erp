@@ -2753,6 +2753,7 @@ def build_order_sale_dialog_summary(products, mapping_context=None,
                 product, "name", "NAME"
             ) or "Товар без названия"),
             "article": str(article).strip(),
+            "requires_strap": bool(mapped_product.get("requires_strap")),
             "quantity": float(quantity),
             "quantity_display": format_stock_number(quantity),
             "unit_price": format(unit_price, ".2f"),
@@ -2892,12 +2893,22 @@ def build_order_product_mapping_context(
     from app.services.order_product_candidates import batch_order_candidates
     with catalog.database.connect() as connection:
         candidates = batch_order_candidates(connection, products, identities, saved_rows)
+        required_strap_rows = {int(row["product_id"]): dict(row) for row in connection.execute(
+            "SELECT r.product_id,ci.product_id AS physical_id,ci.physical_stock FROM erp_required_straps r "
+            "LEFT JOIN erp_component_inventory ci ON ci.product_id=r.product_id"
+        )}
     automatic_ids = [candidate[0] for candidate in candidates]
     automatic_methods = [candidate[1] for candidate in candidates]
     product_ids.extend(value for value in automatic_ids if value is not None)
     products_by_id = catalog.products_by_ids(
         product_ids, include_archived=True
     )
+    for mapped in products_by_id.values():
+        required_strap = required_strap_rows.get(int(mapped["id"]))
+        mapped["requires_strap"] = required_strap is not None
+        if required_strap and required_strap["physical_id"] is not None:
+            mapped["stock"] = required_strap["physical_stock"] or 0
+            mapped["stock_display"] = format_stock_number(mapped["stock"])
     result = {}
 
     for product, identity, saved, automatic_id, automatic_method, mapping_key in zip(
@@ -3480,6 +3491,7 @@ def automatic_sale_stock_notification_from_request():
 
 def automatic_sale_touched_product_ids(prepared_items, replacement=None):
     product_ids = [item.get("product_id") for item in prepared_items]
+    product_ids.extend(item.get("strap_product_id") for item in prepared_items)
     replacement = replacement or {}
     product_ids.extend([
         replacement.get("base_product_id"),
@@ -3522,7 +3534,9 @@ def wildberries_conduct_sale(wb_order_id):
             if not existing else {}
         )
         sale = existing or service.conduct(
-            order, current_sales_user_name(), current_audit_actor(), replacement
+            order, current_sales_user_name(), current_audit_actor(), replacement,
+            straps={index: request.form.get("required_strap_{}_product_id".format(index))
+                    for index in range(len((order or {}).get("products") or []))},
         )
         stock_notification = None
         if not existing:
@@ -3801,6 +3815,7 @@ def _conduct_order_sale(order_id):
 
         prepared_items.append({
             "product_id": product_id,
+            "strap_product_id": request.form.get("required_strap_{}_product_id".format(line_index)),
             "quantity": quantity,
             **pricing,
             "line_index": line_index,
@@ -4051,6 +4066,7 @@ def order_item_mapping_state(order, database, catalog):
     )
     return {
         "all_items_mapped": all_items_mapped,
+        "requires_strap": any((entry.get("product") or {}).get("requires_strap") for entry in context.values()),
         "sale_ready": bool(readiness["ready"]),
         "issues": readiness["issues"],
     }
@@ -12747,6 +12763,16 @@ def build_sales_report_records(
                 )
                 if value is not None and str(value).strip() != ""
             ), None),
+            "components": [
+                dict(component)
+                for component in stored_sale.get("components", [])
+                if isinstance(component, dict)
+            ],
+            "strap_components": [
+                dict(component)
+                for component in stored_sale.get("strap_components", [])
+                if isinstance(component, dict)
+            ],
             "quantity_value": quantity_number,
             "quantity_display": format_stock_number(
                 quantity_number
@@ -20761,6 +20787,24 @@ def api_bitrix_product_import(bitrix_id):
             "BITRIX_IMPORT_FAILED",
             "Не удалось сохранить товар. Изменения отменены.", 500,
         )
+
+
+@app.route("/api/v1/products/<int:product_id>/required-strap", methods=["GET", "PUT"])
+def api_product_required_strap(product_id):
+    from app.services.required_straps import RequiredStraps
+    service = RequiredStraps()
+    if ExcelProductCatalog(service.database).get_product(product_id) is None:
+        return api_error("PRODUCT_NOT_FOUND", "Товар не найден.", 404)
+    can_manage = not auth_is_enabled() or (current_auth_user() or {}).get("role") == "admin"
+    if request.method == "PUT":
+        if not can_manage:
+            return api_error("FORBIDDEN", "Признак товара может менять только администратор.", 403)
+        require_csrf_when_authenticated()
+        try:
+            service.configure(product_id, api_json_payload().get("requires_strap"), current_audit_actor())
+        except ValueError as error:
+            return api_error("REQUIRED_STRAP_INVALID", str(error), 422)
+    return api_success({"requires_strap": product_id in service.product_ids(), "can_manage": can_manage})
 
 
 @app.route("/app/products/<int:product_id>/bundle", methods=["GET", "POST"])

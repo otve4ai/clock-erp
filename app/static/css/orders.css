@@ -475,6 +475,9 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
 .orders-page .strap-replacement-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .orders-page .strap-replacement-head p { margin:2px 0 10px; color:var(--theme-text-muted,#64748b); font-size:12px; }
 .orders-page .strap-picker { display:grid; gap:6px; margin-top:12px; }
+.orders-page .required-strap-line { margin-top:14px; padding:12px; border:1px solid var(--theme-border,var(--line)); border-radius:var(--erp-control-radius); }
+.orders-page .required-strap-line > p { margin:4px 0 0; color:var(--theme-text-muted,#64748b); font-size:12px; }
+.orders-page .strap-picker .field { width:100%; min-width:0; }
 .orders-page .strap-picker-tabs { display:flex; gap:6px; }
 .orders-page .strap-picker-tabs .button { min-height:30px; padding:4px 9px; font-size:12px; }
 .orders-page .strap-picker-tabs .is-active { border-color:var(--theme-accent,#2563eb); color:var(--theme-accent,#2563eb); }
@@ -482,6 +485,8 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
 .orders-page .strap-picker-reference { min-width:0; }
 .orders-page .strap-picker-reference > label { display:block; margin-bottom:4px; font-size:12px; color:var(--theme-text-muted,#64748b); }
 .orders-page .strap-picker-reference .brand-combobox { width:100%; }
+.orders-page .strap-picker-reference .brand-combobox-trigger,.orders-page .strap-picker-reference > .field { width:100%; min-height:42px; height:42px; }
+.orders-page .strap-picker-reference > select.field { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .orders-page .strap-picker-results { display:grid; max-height:170px; margin-top:4px; overflow:auto; border:1px solid var(--theme-border,var(--line)); border-radius:var(--erp-control-radius); background:var(--theme-surface,#fff); }
 .orders-page .strap-picker-results:empty { display:none; }
 .orders-page .strap-picker-status { padding:10px; color:var(--theme-text-muted,#64748b); font-size:12px; }
@@ -490,7 +495,7 @@ body.orders-page.has-open-delete-dialog { overflow:hidden; }
 .orders-page .strap-picker-option:last-child { border-bottom:0; }
 .orders-page .strap-picker-option:disabled { opacity:.55; cursor:not-allowed; }
 .orders-page .strap-picker-option small { color:var(--theme-text-muted,#64748b); }
-.orders-page .strap-picker-selected { padding:7px 9px; border-radius:var(--erp-control-radius); background:var(--theme-success-soft,#ecfdf5); font-size:12px; }
+.orders-page .strap-picker-selected { min-width:0; padding:7px 9px; border-radius:var(--erp-control-radius); background:var(--theme-success-soft,#ecfdf5); font-size:12px; overflow-wrap:anywhere; }
 .orders-page .strap-operation-comment { display:grid; grid-template-columns:minmax(0,1fr); gap:6px; width:100%; margin-top:12px; }
 .orders-page .strap-operation-comment textarea { display:block; width:100%; min-height:82px; resize:vertical; }
 .orders-page .strap-removed { display:flex; flex-wrap:wrap; gap:10px 16px; margin:14px 0 0; padding:10px; border:1px solid var(--theme-border,var(--line)); border-radius:var(--erp-control-radius); }
