@@ -112,3 +112,4 @@ WB через общий сервис продаж; код `app/services/wildber
   тестам `test_order_tictactoy_sale.py`, `test_orders_rework.py`.
 
 - 2026-09-25: [Обязательный ремешок](required-straps.md) — current: признак товара, ручной выбор ремешка только бренда часов, атомарное списание, отображение состава в продажах и исторический возврат; tests/test_required_straps.py. Статус не подтверждает production deploy.
+`docs/sales-navigation.md` — `current`, 2026-09-25: переход после проведения Tictactoy, подсветка без фильтра и явный просмотр одной продажи; production deploy не подтверждён.
