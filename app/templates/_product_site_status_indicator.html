@@ -1,0 +1,88 @@
+{% set sync = site_status_sync or {} %}
+{% set mismatches = sync.mismatch_count|default(0)|int %}
+<div
+    class="product-site-sync-control"
+    data-product-site-sync
+    data-summary-url="{{ url_for('api_product_site_status_sync') }}"
+    data-run-url="{{ url_for('api_product_site_status_sync') }}"
+    data-csrf-token="{{ site_status_sync_csrf }}"
+    data-sync-state="{% if sync.outcome == 'running' %}running{% elif sync.outcome == 'error' %}error{% elif not sync.has_data %}unknown{% elif mismatches %}attention{% else %}success{% endif %}"
+>
+    <button
+        class="products-workspace-button product-site-sync-indicator"
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded="false"
+        aria-controls="productSiteSyncPanel"
+        data-site-sync-toggle
+    >
+        <span class="product-site-sync-indicator__dot" aria-hidden="true"></span>
+        <span data-site-sync-indicator-label>
+            {% if sync.outcome == 'running' %}
+                Проверка…
+            {% elif sync.outcome == 'error' %}
+                Ошибка сверки
+            {% elif not sync.has_data %}
+                Нет данных
+            {% elif mismatches %}
+                Сверка сайта · {{ mismatches }} расхождений
+            {% else %}
+                Сверка сайта · Всё совпадает
+            {% endif %}
+        </span>
+        <span class="product-site-sync-indicator__chevron" aria-hidden="true">⌄</span>
+    </button>
+
+    <section
+        id="productSiteSyncPanel"
+        class="product-site-sync-panel"
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby="productSiteSyncTitle"
+        data-site-sync-panel
+        hidden
+    >
+        <header class="product-site-sync-panel__header">
+            <strong id="productSiteSyncTitle">Сверка статусов сайта</strong>
+            <div class="product-site-sync-panel__actions">
+                {% if can_sync_site_status %}
+                <button class="product-site-sync-update" type="button" data-site-sync-run>
+                    <span aria-hidden="true">↻</span> Обновить
+                </button>
+                {% endif %}
+                <details class="product-site-sync-menu" data-site-sync-menu>
+                    <summary aria-label="Дополнительные действия">…</summary>
+                    <div class="product-site-sync-menu__list">
+                        <button type="button" data-site-sync-refresh>Обновить данные панели</button>
+                        {% if can_sync_site_status %}
+                        <button type="button" data-site-sync-run>Запустить сверку</button>
+                        {% endif %}
+                    </div>
+                </details>
+            </div>
+        </header>
+
+        <div class="product-site-sync-panel__source">
+            <span class="product-site-sync-source-dot" aria-hidden="true"></span>
+            <strong>TicTacToy</strong>
+            <span class="product-site-sync-source-state" data-site-sync-state>
+                {% if sync.outcome == 'running' %}Проверка выполняется{% elif sync.outcome == 'error' %}Ошибка сверки{% elif not sync.has_data %}Нет данных{% elif mismatches %}Требует внимания{% else %}Всё совпадает{% endif %}
+            </span>
+            <time class="product-site-sync-source-time"{% if sync.last_attempt_at %} datetime="{{ sync.last_attempt_at }}"{% endif %} data-site-sync-attempt>{{ sync.last_attempt_at or 'Нет данных' }}</time>
+            {% if can_sync_site_status %}
+            <button class="product-site-sync-source-refresh" type="button" aria-label="Обновить TicTacToy" data-site-sync-run>↻</button>
+            {% endif %}
+            <span class="product-site-sync-source-detail">
+                <span><strong data-site-sync-inactive>{{ sync.in_stock_inactive|default(0) }}</strong> с остатком выключены</span>
+                <span><strong data-site-sync-active>{{ sync.out_of_stock_active|default(0) }}</strong> без остатка активны</span>
+            </span>
+        </div>
+
+        <footer class="product-site-sync-panel__footer">
+            <span>Автоматически ежедневно в 03:00</span>
+            <span data-site-sync-feedback>
+                {% if sync.last_success_at %}Последняя сверка: <time datetime="{{ sync.last_success_at }}" data-site-sync-success>{{ sync.last_success_at }}</time>{% else %}Последняя сверка: нет данных{% endif %}
+            </span>
+        </footer>
+    </section>
+</div>
