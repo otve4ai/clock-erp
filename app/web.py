@@ -12074,6 +12074,7 @@ def sale_cancel():
 
 @app.route("/sales/delete", methods=["POST"])
 def sale_delete():
+    _require_admin_section()
     require_csrf_when_authenticated()
     sale_id = str(request.form.get("sale_id") or "").strip()
     sale_type = str(request.form.get("sale_type") or "").strip()
@@ -12651,6 +12652,8 @@ def build_sales_report_records(
         })
 
     for stored_sale in reversed(stored_manual_sales):
+        if stored_sale.get("deleted_at"):
+            continue
         quantity_number = parse_manual_sale_quantity(
             stored_sale.get("quantity")
         )
@@ -19129,6 +19132,7 @@ def inject_sidebar_navigation():
         },
         "sms_status_label": sms_status_label,
         "sms_permissions": sms_permissions(),
+        "can_delete_sales": not auth_is_enabled() or user.get("role") == "admin",
     }
 
 
@@ -23608,6 +23612,8 @@ def api_sales_collection():
 @app.route("/api/sales/<sale_id>", methods=["GET", "PATCH", "DELETE"])
 @app.route("/api/v1/sales/<sale_id>", methods=["GET", "PATCH", "DELETE"])
 def api_sale_resource(sale_id):
+    if request.method == "DELETE":
+        _require_admin_section()
     record = find_api_sale(sale_id)
     if record is None:
         if request.method == "DELETE":

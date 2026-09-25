@@ -2020,16 +2020,84 @@ class SalesInventoryWebTest(SalesInventoryTest):
         self.assertIn("Сначала отмените", blocked.get_json()["message"])
         self.cancel_sale_form(sale, reason="duplicate")
         stock_before = self.stock(self.product["id"])
+        movements_before = self.inventory.list_movements(self.product["id"])
+        self.assertIn(
+            "ORDER-soft-delete",
+            self.client.get("/app/sales?source=all").get_data(as_text=True),
+        )
         deleted = self.delete_sale_form(sale)
         repeated = self.delete_sale_form(sale)
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(repeated.status_code, 200)
         self.assertEqual(self.stock(self.product["id"]), stock_before)
-        self.assertIn(
-            "ORDER-soft-delete",
-            self.client.get("/app/sales?source=all").get_data(as_text=True),
+        self.assertEqual(
+            self.inventory.list_movements(self.product["id"]), movements_before,
+        )
+        for path in (
+            "/app/sales?source=all",
+            "/app/sales?source=tictactoy&status=cancelled",
+            "/sales/report",
+            "/api/v1/sales",
+        ):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn("ORDER-soft-delete", response.get_data(as_text=True))
+        self.assertNotIn(sale["id"], [row["id"] for row in web.api_sales_records()])
+        self.assertEqual(
+            self.client.delete("/api/v1/sales/{}".format(sale["id"])).status_code,
+            200,
         )
         self.assertTrue(self.inventory.get_sale(sale["id"])["deleted_at"])
+
+    def test_sale_delete_is_admin_only_in_menu_and_all_routes(self):
+        sale = self.create_managed_sale(sale_id="delete-permission")
+        self.cancel_sale_form(sale, reason="duplicate")
+        stock_before = self.stock(self.product["id"])
+        movements_before = self.inventory.list_movements(self.product["id"])
+        for role in ("employee", "admin"):
+            with (
+                self.subTest(role=role),
+                mock.patch.object(web, "auth_is_enabled", return_value=True),
+                mock.patch.object(
+                    web, "current_auth_user", return_value={"id": 2, "role": role},
+                ),
+                mock.patch.object(web, "require_csrf_when_authenticated"),
+            ):
+                page = self.client.get("/app/sales?source=all")
+                self.assertEqual(page.status_code, 200)
+                # Both the desktop row and mobile card have their own menu.
+                self.assertEqual(
+                    page.get_data(as_text=True).count('onclick="openSaleDeleteModal(this)"'),
+                    2 if role == "admin" else 0,
+                )
+                responses = [
+                    self.delete_sale_form(sale),
+                    self.client.delete("/api/sales/{}".format(sale["id"])),
+                    self.client.delete("/api/v1/sales/{}".format(sale["id"])),
+                ]
+                self.assertEqual(
+                    [response.status_code for response in responses],
+                    [200, 200, 200] if role == "admin" else [403, 403, 403],
+                )
+                self.assertEqual(
+                    bool(self.inventory.get_sale(sale["id"])["deleted_at"]),
+                    role == "admin",
+                )
+        # Repeated deletes must not bypass permission checks either.
+        with (
+            mock.patch.object(web, "auth_is_enabled", return_value=True),
+            mock.patch.object(
+                web, "current_auth_user", return_value={"id": 2, "role": "employee"},
+            ),
+        ):
+            self.assertEqual(self.delete_sale_form(sale).status_code, 403)
+            for prefix in ("/api/sales/", "/api/v1/sales/"):
+                self.assertEqual(self.client.delete(prefix + sale["id"]).status_code, 403)
+        self.assertEqual(self.stock(self.product["id"]), stock_before)
+        self.assertEqual(
+            self.inventory.list_movements(self.product["id"]), movements_before,
+        )
 
     def test_api_patch_is_blocked_and_cancel_is_separate_from_return(self):
         sale = self.create_managed_sale(sale_id="api-block")

@@ -420,7 +420,7 @@ html[data-theme] :where(
     .erp-primary-action,
     .warehouse-calendar-apply,
     .confirm-button,
-    button[type="submit"]:not(.module-toggle):not(.sidebar-logout)
+    button[type="submit"]:not(.module-toggle):not(.sidebar-logout):not([role="menuitem"])
 ) {
     border-color: var(--theme-primary) !important;
     background: var(--theme-primary) !important;
@@ -435,7 +435,7 @@ html[data-theme] :where(
     .erp-primary-action,
     .warehouse-calendar-apply,
     .confirm-button,
-    button[type="submit"]:not(.module-toggle):not(.sidebar-logout)
+    button[type="submit"]:not(.module-toggle):not(.sidebar-logout):not([role="menuitem"])
 ):hover:not(:disabled) {
     border-color: var(--theme-primary-hover) !important;
     background: var(--theme-primary-hover) !important;
