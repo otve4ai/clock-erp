@@ -26,14 +26,15 @@
         try {
             const {diagnostics:d} = await request('');
             document.dispatchEvent(new CustomEvent('orders:wb-diagnostics', {detail:d}));
-            const lastSuccess = d.last_success_at ? new Date(d.last_success_at) : null;
+            const lastSuccess = d.last_success_at ? new Date(typeof d.last_success_at === 'number' ? d.last_success_at * 1000 : d.last_success_at) : null;
             const time = lastSuccess && !Number.isNaN(lastSuccess.getTime())
                 ? new Intl.DateTimeFormat('ru-RU', {dateStyle:'short',timeStyle:'short'}).format(lastSuccess) : '';
             const age = time ? Math.max(0, Math.floor((Date.now()-lastSuccess.getTime())/60000)) : null;
-            const stale = age === null || age > 15;
-            const hasIssues = stale || d.attention || (d.pending || []).length || ['partial','error','running'].includes(d.outcome) || d.full_outcome === 'partial' || d.full_outcome === 'error';
+            const stale = age === null || Date.now() - lastSuccess.getTime() > 15 * 60000;
+            const status = window.wbSyncStatus(d);
+            const hasIssues = ['attention', 'error'].includes(status.state);
             const names = {success:'успешно', partial:'частично', error:'ошибка', running:'выполняется'};
-            root.querySelector('[data-wb-health]').textContent = hasIssues
+            root.querySelector('[data-wb-health]').textContent = status.state === 'running' ? 'Обновляется…' : hasIssues
                 ? `Требует внимания · ${names[d.outcome] || 'нет успешной синхронизации'}`
                 : `Синхронизирован · ${time}`;
             const diagnostic = root.querySelector('[data-wb-diagnostic]');
