@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from app.tasks import migrations
-from app.tasks.repository import FOUNDATION_SIGNATURE, CORE_SIGNATURE, SCHEMA_SIGNATURE, TasksRepository
+from app.tasks.repository import FOUNDATION_SIGNATURE, CORE_SIGNATURE, PROJECT_SIGNATURE, SCHEMA_SIGNATURE, TasksRepository
 from app.tasks.schema import LEDGER_DDL
 
 
@@ -30,7 +30,7 @@ class TasksCoreSchemaTest(unittest.TestCase):
             for statement in ddl:
                 connection.execute(statement)
             connection.executemany("INSERT INTO tasks_module_migrations VALUES(?,?,'now','fixture')",
-                                   ((1, FOUNDATION_SIGNATURE), (2, CORE_SIGNATURE), (3, SCHEMA_SIGNATURE)))
+                                   ((1, FOUNDATION_SIGNATURE), (2, CORE_SIGNATURE), (3, PROJECT_SIGNATURE), (4, SCHEMA_SIGNATURE)))
             connection.commit()
         finally:
             connection.close()
@@ -66,7 +66,7 @@ class TasksCoreSchemaTest(unittest.TestCase):
                 self.rejected(before, after)
 
     def test_missing_and_weakened_checks_are_rejected(self):
-        for check in ("CHECK(task_type='normal')", "CHECK(version>0)", "CHECK(created_by>0)",
+        for check in ("CHECK(task_type IN ('normal','micro'))", "CHECK(version>0)", "CHECK(created_by>0)",
                       "CHECK(assigned_to>0)", "CHECK(length(trim(title)) BETWEEN 1 AND 500)",
                       "CHECK(status IN ('new','in_progress','waiting','done'))",
                       "CHECK(priority IN ('low','normal','high'))"):
@@ -93,13 +93,13 @@ class TasksCoreSchemaTest(unittest.TestCase):
         path = self.root / "tasks-module.db"
         migrations.migrate_database(path)
         original = path.read_bytes()
-        self.assertEqual(TasksRepository(path).status()["schema_version"], 3)
+        self.assertEqual(TasksRepository(path).status()["schema_version"], 4)
         migrations.migrate_database(path)
         self.assertEqual(path.read_bytes(), original)
 
     def test_whitespace_is_ignored_but_literal_case_is_not(self):
         path = self.drifted_database("CREATE TABLE tasks (", "create table tasks\n(\n")
-        self.assertEqual(TasksRepository(path).status()["schema_version"], 3)
+        self.assertEqual(TasksRepository(path).status()["schema_version"], 4)
         self.rejected("task_type='normal'", "task_type='NORMAL'")
 
 

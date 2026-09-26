@@ -9,6 +9,7 @@ from .permissions import can_inspect_module
 from .repository import TasksRepository
 from .services import TasksService
 from .project_services import ProjectsService
+from .inbox_services import InboxService
 
 
 def create_blueprint(current_user, user_lookup=None, csrf_check=None):
@@ -19,6 +20,9 @@ def create_blueprint(current_user, user_lookup=None, csrf_check=None):
 
     def projects_service():
         return ProjectsService(TasksRepository(current_app.config["TASKS_MODULE_DATABASE"]), user_lookup)
+
+    def inbox_service():
+        return InboxService(TasksRepository(current_app.config["TASKS_MODULE_DATABASE"]))
 
     def data_response(data, status=200):
         response = jsonify(data=data)
@@ -146,5 +150,52 @@ def create_blueprint(current_user, user_lookup=None, csrf_check=None):
     @module_boundary
     def project_details(project_id):
         return data_response(projects_service().details(current_user(), project_id, request.path.rsplit("/", 1)[-1], query()))
+
+    @blueprint.route("/microtasks", methods=["GET", "POST"])
+    @module_boundary
+    def microtasks():
+        if request.method == "POST":
+            return data_response(service().create_micro(current_user(), payload()), 201)
+        return data_response(service().micros(current_user(), query()))
+
+    @blueprint.route("/microtasks/summary", methods=["GET"])
+    @module_boundary
+    def micro_summary():
+        return data_response(service().micros(current_user(), query(), summary=True))
+
+    @blueprint.route("/microtasks/<int:task_id>", methods=["PATCH"])
+    @module_boundary
+    def micro_patch(task_id):
+        return data_response(service().mutate(current_user(), task_id, payload(), expected_type="micro"))
+
+    @blueprint.route("/microtasks/<int:task_id>/complete", methods=["POST"])
+    @blueprint.route("/microtasks/<int:task_id>/reopen", methods=["POST"])
+    @blueprint.route("/microtasks/<int:task_id>/convert", methods=["POST"])
+    @module_boundary
+    def micro_action(task_id):
+        operation = request.path.rsplit("/", 1)[-1]
+        values = payload()
+        if set(values) != {"version"}:
+            raise invalid("body", "Нужна только version.")
+        if operation != "convert":
+            values["status"] = "done" if operation == "complete" else "new"
+            operation = "status"
+        return data_response(service().mutate(current_user(), task_id, values, operation, expected_type="micro"))
+
+    @blueprint.route("/inbox", methods=["GET"])
+    @blueprint.route("/inbox/badge", methods=["GET"])
+    @module_boundary
+    def inbox():
+        return data_response(inbox_service().list(current_user(), query(), badge=request.path.endswith("/badge")))
+
+    @blueprint.route("/inbox/<int:event_id>/read", methods=["POST"])
+    @module_boundary
+    def inbox_read(event_id):
+        return data_response(inbox_service().read(current_user(), event_id, payload()))
+
+    @blueprint.route("/notifications/claim", methods=["POST"])
+    @module_boundary
+    def notifications_claim():
+        return data_response(inbox_service().claim(current_user(), payload()))
 
     return blueprint

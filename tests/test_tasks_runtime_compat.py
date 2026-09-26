@@ -51,8 +51,8 @@ class TasksRuntimeCompatibilityTest(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone()[0].lower(), "delete")
         finally:
             connection.close()
-        self.assertEqual(TasksRepository(path).status()["schema_version"], 3)
-        self.assertEqual(_count(path, "SELECT COUNT(*) FROM tasks_module_migrations", ()), 3)
+        self.assertEqual(TasksRepository(path).status()["schema_version"], 4)
+        self.assertEqual(_count(path, "SELECT COUNT(*) FROM tasks_module_migrations", ()), 4)
         self.assertEqual(path.read_bytes(), before)
         EVIDENCE["uri_percent_encoding_readonly_dml_ddl"] = "passed"
 
@@ -85,8 +85,8 @@ runpy.run_path(sys.argv[0], run_name='__main__')
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=10,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(json.loads(completed.stdout), {"schema_version": 3, "stage": "projects"})
-        self.assertEqual(TasksRepository(path).status()["schema_version"], 3)
+        self.assertEqual(json.loads(completed.stdout), {"schema_version": 4, "stage": "microtasks"})
+        self.assertEqual(TasksRepository(path).status()["schema_version"], 4)
         EVIDENCE["offline_cli_without_erp_import"] = "passed"
 
     def test_migration_exception_rolls_back_ddl_and_can_be_retried(self):

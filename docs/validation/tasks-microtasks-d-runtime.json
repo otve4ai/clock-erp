@@ -1,0 +1,201 @@
+{
+  "compiled_python_files": [
+    "app/collaboration_schema.py",
+    "app/navigation_badges.py",
+    "app/schema_migrations.py",
+    "app/services/collaboration.py",
+    "app/services/tasks.py",
+    "app/task_errors.py",
+    "app/tasks/__init__.py",
+    "app/tasks/error_boundary.py",
+    "app/tasks/migrations.py",
+    "app/tasks/permissions.py",
+    "app/tasks/repository.py",
+    "app/tasks/routes.py",
+    "app/tasks/services.py",
+    "app/tasks_boundary.py",
+    "app/web.py",
+    "scripts/migrate_tasks_module.py",
+    "scripts/run_backend_tests.py",
+    "tests/test_tasks_isolation.py",
+    "tests/test_tasks_module.py",
+    "app/auth.py",
+    "app/tasks/domain.py",
+    "tests/test_tasks_core.py",
+    "tests/test_tasks_core_api.py",
+    "app/tasks/schema.py",
+    "tests/test_tasks_core_schema.py",
+    "app/tasks/project_repository.py",
+    "app/tasks/project_services.py",
+    "tests/test_tasks_projects.py",
+    "app/tasks/inbox_repository.py",
+    "app/tasks/inbox_services.py",
+    "app/tasks/micro_repository.py",
+    "tests/test_tasks_microtasks.py",
+    "scripts/validate_tasks_runtime.py",
+    "tests/test_tasks_runtime_compat.py",
+    "tests/test_tasks.py"
+  ],
+  "database_guard": {
+    "attachments": 30,
+    "connections": 4843,
+    "denied_paths": []
+  },
+  "euid": 99,
+  "flask": "2.0.3",
+  "jinja": "3.0.3",
+  "platform": "Linux-3.10.0-1160.25.1.el7.x86_64-x86_64-with-centos-7.9.2009-Core",
+  "project_evidence": {
+    "project_list_plans": [
+      [
+        0,
+        0,
+        0,
+        "SCAN TABLE task_projects USING COVERING INDEX task_projects_owner_active (~50000 rows)"
+      ],
+      [
+        0,
+        0,
+        0,
+        "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+      ],
+      [
+        1,
+        0,
+        0,
+        "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+      ],
+      [
+        1,
+        0,
+        0,
+        "SCAN TABLE task_projects USING INTEGER PRIMARY KEY (~50000 rows)"
+      ],
+      [
+        1,
+        0,
+        0,
+        "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+      ],
+      [
+        2,
+        0,
+        0,
+        "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+      ],
+      [
+        0,
+        0,
+        0,
+        "SCAN SUBQUERY 1 AS selected (~50000 rows)"
+      ],
+      [
+        0,
+        1,
+        1,
+        "SEARCH TABLE tasks AS t USING COVERING INDEX tasks_project_active (project_id=?) (~2 rows)"
+      ],
+      [
+        0,
+        0,
+        0,
+        "USE TEMP B-TREE FOR GROUP BY"
+      ]
+    ],
+    "project_list_query_counts": [
+      2,
+      2
+    ],
+    "sqlite": "3.7.17"
+  },
+  "python": "3.6.8",
+  "runtime_evidence": {
+    "begin_immediate_ddl_rollback_retry": "passed",
+    "offline_cli_without_erp_import": "passed",
+    "pragma_indexes_fk_row_factory": "passed",
+    "progress_handler_elapsed_seconds": 0.1008,
+    "readonly_missing_file": "not created",
+    "readonly_wal_existing_writer": "passed",
+    "readonly_wal_without_writer": "read succeeded",
+    "sqlite_source_id": "2013-05-20 00:56:22 118a3b35693b134d56ebd780123b7fd6f1497668",
+    "uri_percent_encoding_readonly_dml_ddl": "passed"
+  },
+  "source_root": "/tmp/erp-tasks-d.kyAiOq8w/source",
+  "source_sha256": {
+    "app/auth.py": "8fef0506951755c2abe4014f067a519d7e432e8eea039aba3e7bf9173add722c",
+    "app/collaboration_schema.py": "aa950a7bf51d3b11b1d96499b1e203a91c102fcb3b3de35d37b96d75417a4735",
+    "app/navigation_badges.py": "a69f2570a36429441726e206c422da58212f4caa44469d54c45bd384a644c86b",
+    "app/schema_migrations.py": "63f928a2dcf15cc7f7fcab326376ec95e866195d67b8dbee193cd51df7a83e34",
+    "app/services/collaboration.py": "3b7937c7a92fd5ac4c69a7b4696bad52a0fc3af6eac0b127ffb9f10ee1f1d2ae",
+    "app/services/tasks.py": "5c6f26ea5ccbffd487c1ca29316dcc16e1a944917aec955875c1c5f076a33795",
+    "app/task_errors.py": "bc71cd72630185e36a33b8c76f2fc72e7f22c6a3240cd6ff01842adcdd509c78",
+    "app/tasks/__init__.py": "df5a806fc22c3ed18b653c449ab528f459cff6a8341ff60d73a090c7872c963c",
+    "app/tasks/domain.py": "681b3a2e32e93c3cfe7ca8d78e13bd33f72d70e898f777eda7ba280006c5e233",
+    "app/tasks/error_boundary.py": "2268a63fd49c4cd05ff8ef3223f1e672c060f026d965ba5c5a7dd1d89e8b0bf3",
+    "app/tasks/inbox_repository.py": "c494116ea17ab65830d5c0b3cace00f5abec438dc1849e22186d5138a1382676",
+    "app/tasks/inbox_services.py": "92f6ce7b5cd567fc0e8daaabff1eccf976f337abf0185ae4c975049e65a2e582",
+    "app/tasks/micro_repository.py": "6cbd346351ab2e4ceb8c6b3876a7874ca442b2bebc9fbaebe2a195bfdfa51ae6",
+    "app/tasks/migrations.py": "20997bf18046d5b5ece43c6a5fc87808fa31392f618939dc040bdd89fdafdad4",
+    "app/tasks/permissions.py": "ab60473aedda4fc09851453fe96bc6d0af6394fd770572c80200f4bd525296d1",
+    "app/tasks/project_repository.py": "f7e981be011b94c6e385f56574b9d248bd6135ec3b28941045d21a74a131b232",
+    "app/tasks/project_services.py": "a9506b5f76ced359d74cc98db8736cb72db93fb04f22bde337e04338dd4ff064",
+    "app/tasks/repository.py": "49ade0c6a484c867d7462ad1e8acdd884a8419d80f319f81f59885e2ab595999",
+    "app/tasks/routes.py": "3ad273c8f2bc30896adcd1bab0e59d1b05148a299514ecb6de8d5f577291506b",
+    "app/tasks/schema.py": "e4c0b2785771ef91945032a00a7da54d405a9fbef9e3ea9829a4a656fbd9029b",
+    "app/tasks/services.py": "94966bdccd6459cbf6216387a8a7115d0de0618f18f0635dc0931333c87fa673",
+    "app/tasks_boundary.py": "0a3e7aa38f61b3815efbb189a8e385360e74e85d0fd09df914906543948b1bde",
+    "app/web.py": "050e972dee92c5fe68a7982d1046ce89103031a88149bbd550e6dc909f076566",
+    "scripts/migrate_tasks_module.py": "383d282244c79cd182e04eba1ac873efe596eb37b0c183b6569bf2b9ca4af976",
+    "scripts/run_backend_tests.py": "8aa4037e89d299816e3ab5074fc86a58c35f42a4ab27a10154804fcc86015edf",
+    "scripts/validate_tasks_runtime.py": "02886bb42f046d29730c021c63c09aa0f9724b7e59e536cd0b96021fcb21f52e",
+    "tests/test_tasks.py": "a9d4dac5cb9b41dbcb8e6e27f2715509e39368470d7de099d7df440cea62c4a0",
+    "tests/test_tasks_core.py": "7219cebe42253d1e914daed864762d40ebade9726da95282878745de962070c6",
+    "tests/test_tasks_core_api.py": "a0dddf068f42fd0f1a2fe8a9594347cea5a1b4ce8f2f3b76140f88912fab70c7",
+    "tests/test_tasks_core_schema.py": "4789d6447cb03336ed914400b27a81363cdbeecd6b7d7e8becf2c186d501618f",
+    "tests/test_tasks_isolation.py": "10e235dd92544dd6daf970cb1070d3bbefd40b42804852adbf3a4b3ceb15d500",
+    "tests/test_tasks_microtasks.py": "3b4bfeb97599691393a18bcf5293de2694415cb396fe7a7137e6b76d206a6cf1",
+    "tests/test_tasks_module.py": "68cccb63fb7a4e718d71f723ec9b32cc340fd5c146cb522a1059c05658dbbff3",
+    "tests/test_tasks_projects.py": "f7fcec13b10f54d8f3fd369b57f011c5bec89c8ff37acd1a9ce15e6f91031068",
+    "tests/test_tasks_runtime_compat.py": "09eddab79b2aaf815d853fef02c81bfd63d2ee94266536a3c9e56acf4fb74070"
+  },
+  "sql_compatibility_files": [
+    "/tmp/erp-tasks-d.kyAiOq8w/source/app/catalog_migration_steps.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/app/bundle_migration.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/app/component_inventory_migration.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/app/remove_product_collections_migration.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/app/writeoff_migration.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/app/incoming_receipts_migration.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/app/required_strap_migration.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/app/domain_schema_migrations.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/app/tasks/migrations.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/app/tasks/schema.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/scripts/migrate_auth_mvp.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/scripts/migrate_brand_inventory.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/scripts/migrate_customers.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/scripts/migrate_inventory_scopes.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/scripts/migrate_mail.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/scripts/migrate_purchases.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/scripts/migrate_repair_cases.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/scripts/migrate_services_vault.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/scripts/migrate_sms.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/scripts/migrate_tasks_module.py",
+    "/tmp/erp-tasks-d.kyAiOq8w/source/scripts/migrate_unified_catalog.py"
+  ],
+  "sqlite": "3.7.17",
+  "stage": "D",
+  "stage_a_commit": "a806ef287792524e730ff2074d3137eb7aee8664",
+  "stage_b1_base": "c5c1762785d0ce0f840da05f37456e0c3004e941",
+  "stage_b_base": "6d06b8f34381665aed37deeacb643ae18ab12d49",
+  "stage_c_base": "beb68e820572c223729671953f41a0cc203d15b3",
+  "stage_d_base": "8e7ae709e76e9b67d51b3f200e360f7c7aec034a",
+  "status": "passed",
+  "tests": [
+    {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 248
+    }
+  ],
+  "werkzeug": "2.0.3"
+}

@@ -8,17 +8,21 @@ from pathlib import Path
 from .domain import conflict
 from .schema import COLUMN_CONTRACTS, FOREIGN_KEY_CONTRACTS, TABLE_DDL, sql_tokens
 from .schema import V2_COLUMN_CONTRACTS, V2_FOREIGN_KEY_CONTRACTS, V2_TABLE_DDL
+from .schema import V3_COLUMN_CONTRACTS, V3_FOREIGN_KEY_CONTRACTS, V3_TABLE_DDL
 from .project_repository import ProjectQueries
+from .inbox_repository import InboxQueries
+from .micro_repository import MicroQueries
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 CORE_SIGNATURE = "tasks-module-core-v2"
-SCHEMA_SIGNATURE = "tasks-module-projects-v3"
+PROJECT_SIGNATURE = "tasks-module-projects-v3"
+SCHEMA_SIGNATURE = "tasks-module-microtasks-v4"
 FOUNDATION_SIGNATURE = "tasks-module-foundation-v1"
 TASK_COLUMNS = ("id", "task_type", "title", "description", "status", "priority",
                 "created_by", "assigned_to", "deadline_date", "created_at", "updated_at",
                 "completed_at", "version", "deleted_at", "related_entity_type",
-                "related_entity_id", "related_entity_label", "project_id")
+                "related_entity_id", "related_entity_label", "project_id", "micro_deadline_at")
 INDEXES = {"tasks_assignee_active": ("assigned_to", "deleted_at", "deadline_date", "id"),
            "tasks_creator_active": ("created_by", "deleted_at", "deadline_date", "id"),
            "tasks_active_deadline": ("deleted_at", "deadline_date", "id"),
@@ -28,6 +32,10 @@ PROJECT_INDEXES = {"task_projects_owner_active": ("owner_id", "archived_at", "id
                    "tasks_project_active": ("project_id", "deleted_at", "status", "deadline_date", "id"),
                    "tasks_completed": ("deleted_at", "status", "completed_at", "id"),
                    "task_project_activity_order": ("project_id", "id")}
+D_INDEXES = {"tasks_micro_deadline": ("task_type", "deleted_at", "micro_deadline_at", "id"),
+             "task_inbox_recipient_pending": ("recipient_id", "handled_at", "id"),
+             "task_inbox_recipient_toast": ("recipient_id", "notified_at", "id"),
+             "task_inbox_assignment": ("task_id", "recipient_id", "handled_at")}
 
 
 def database_path(path):
@@ -38,11 +46,12 @@ def database_path(path):
 
 
 def validate_connection(connection, version=SCHEMA_VERSION):
-    if version not in (1, 2, 3):
+    if version not in (1, 2, 3, 4):
         raise ValueError("Unknown Tasks schema version")
-    column_contracts = V2_COLUMN_CONTRACTS if version < 3 else COLUMN_CONTRACTS
-    table_ddl = V2_TABLE_DDL if version < 3 else TABLE_DDL
-    fk_contracts = V2_FOREIGN_KEY_CONTRACTS if version < 3 else FOREIGN_KEY_CONTRACTS
+    column_contracts, table_ddl, fk_contracts = (
+        (V2_COLUMN_CONTRACTS, V2_TABLE_DDL, V2_FOREIGN_KEY_CONTRACTS) if version < 3 else
+        (V3_COLUMN_CONTRACTS, V3_TABLE_DDL, V3_FOREIGN_KEY_CONTRACTS) if version == 3 else
+        (COLUMN_CONTRACTS, TABLE_DDL, FOREIGN_KEY_CONTRACTS))
     tables = {row[0] for row in connection.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
     )}
@@ -60,18 +69,22 @@ def validate_connection(connection, version=SCHEMA_VERSION):
         if foreign_keys != fk_contracts[table]:
             raise ValueError("Tasks foreign key contract differs")
     rows = [tuple(row) for row in connection.execute(
-        "SELECT version,signature FROM tasks_module_migrations ORDER BY version LIMIT 4")]
+        "SELECT version,signature FROM tasks_module_migrations ORDER BY version LIMIT 5")]
     expected_versions = [(1, FOUNDATION_SIGNATURE)]
     if version >= 2:
         expected_versions.append((2, CORE_SIGNATURE))
-    if version == 3:
-        expected_versions.append((3, SCHEMA_SIGNATURE))
+    if version >= 3:
+        expected_versions.append((3, PROJECT_SIGNATURE))
+    if version >= 4:
+        expected_versions.append((4, SCHEMA_SIGNATURE))
     if rows != expected_versions:
         raise ValueError("Tasks module migration version is missing or unknown")
     if connection.execute("SELECT name FROM sqlite_master WHERE type IN ('view','trigger')").fetchone():
         raise ValueError("Unexpected Tasks schema objects")
     if version >= 2:
-        indexes = dict(INDEXES, **(PROJECT_INDEXES if version == 3 else {}))
+        indexes = dict(INDEXES, **(PROJECT_INDEXES if version >= 3 else {}))
+        if version >= 4:
+            indexes.update(D_INDEXES)
         for index, fields in indexes.items():
             if tuple(row[2] for row in connection.execute("PRAGMA index_info(" + index + ")")) != fields:
                 raise ValueError("Tasks index differs from contract")
@@ -103,7 +116,7 @@ class TasksRepository:
 
     def status(self):
         with self.transaction():
-            return {"schema_version": SCHEMA_VERSION, "stage": "projects"}
+            return {"schema_version": SCHEMA_VERSION, "stage": "microtasks"}
 
 
 def _authorize(action, first, second, database, trigger):
@@ -112,7 +125,7 @@ def _authorize(action, first, second, database, trigger):
     return sqlite3.SQLITE_OK
 
 
-class TaskSession(ProjectQueries):
+class TaskSession(ProjectQueries, InboxQueries, MicroQueries):
     def __init__(self, connection):
         self.connection = connection
 
@@ -165,7 +178,7 @@ class TaskSession(ProjectQueries):
     @staticmethod
     def _where(scope, options, today):
         visibility, parameters = scope["visibility"]
-        clauses, parameters = ["deleted_at IS NULL", visibility], list(parameters)
+        clauses, parameters = ["task_type='normal'", "deleted_at IS NULL", visibility], list(parameters)
         for field in ("assigned_to", "created_by"):
             if field in scope:
                 clauses.append(field + "=?")
@@ -238,5 +251,5 @@ class TaskSession(ProjectQueries):
             "FROM tasks WHERE " + where,
             [today, today, scope["actor_id"], scope["actor_id"]] + parameters).fetchone()
         result = dict(row)
-        result["inbox"] = None
+        result["inbox"] = self.inbox_badge(scope["actor_id"])
         return result

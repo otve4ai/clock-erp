@@ -261,7 +261,7 @@ class ProjectTaskVisibilityTest(ProjectsFixture):
         for actor in (1, 4):
             self.assertEqual(len(self.ids(actor, scope="all", search="Needle")), 1)
             summary = self.tasks.list(self.users[actor], {"scope": "all"}, summary=True)
-            self.assertEqual((summary["total"], summary["in_progress"], summary["overdue"], summary["inbox"]), (2, 1, 1, None))
+            self.assertEqual((summary["total"], summary["in_progress"], summary["overdue"], summary["inbox"]), (2, 1, 1, 0))
             expected = {"open": 1, "in_progress": 1, "overdue": 1}
             self.assertEqual(self.projects.details(self.users[actor], project["id"], "summary"), expected)
             self.assertEqual(self.projects.list(self.users[actor])["items"][0]["counters"], expected)
@@ -387,7 +387,7 @@ class TaskViewsTest(ProjectsFixture):
             self.tasks.mutate(self.users[actor], deleted["id"], {"version": 1}, "delete")
             dashboard = self.tasks.list(self.users[actor], summary=True)
             self.assertEqual({key: dashboard[key] for key in ("total", "done", "in_progress", "today", "overdue", "delegated_waiting", "inbox")},
-                             dict(total=3, done=1, in_progress=1, today=1, overdue=1, delegated_waiting=1, inbox=None))
+                             dict(total=3, done=1, in_progress=1, today=1, overdue=1, delegated_waiting=1, inbox=3))
             explicit = self.tasks.list(self.users[actor], {"scope": "my"}, summary=True)
             self.assertEqual(explicit["delegated_waiting"], 0)
             filtered = self.tasks.list(self.users[actor], {"project_id": str(project["id"])}, summary=True)
@@ -522,7 +522,8 @@ class ProjectsStorageTest(ProjectsFixture):
                 for position, sql in enumerate(CORE_DDL):
                     connection.execute(sql.replace(before, after) if position == index else sql)
                 connection.executemany("INSERT INTO tasks_module_migrations VALUES(?,?,'now','fixture')",
-                                       ((1, 'tasks-module-foundation-v1'), (2, 'tasks-module-core-v2'), (3, 'tasks-module-projects-v3')))
+                                       ((1, 'tasks-module-foundation-v1'), (2, 'tasks-module-core-v2'),
+                                        (3, 'tasks-module-projects-v3'), (4, 'tasks-module-microtasks-v4')))
                 connection.commit()
                 connection.close()
                 original = path.read_bytes()

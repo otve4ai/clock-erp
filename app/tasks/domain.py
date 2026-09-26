@@ -101,6 +101,34 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def utc_instant(value):
+    """Parse our server UTC clock without Python 3.7's fromisoformat API."""
+    if not isinstance(value, str) or not re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?\+00:00", value):
+        raise ValueError("Invalid server UTC clock")
+    raw = value[:-6]
+    pattern = "%Y-%m-%dT%H:%M:%S.%f" if "." in raw else "%Y-%m-%dT%H:%M:%S"
+    return datetime.strptime(raw, pattern).replace(tzinfo=timezone.utc)
+
+
+def micro_values(payload, creating=False):
+    allowed = {"title", "assigned_to"} if creating else {"title", "assigned_to", "status", "version"}
+    if not isinstance(payload, dict) or set(payload) - allowed:
+        raise invalid("body", "У микрозадачи доступны только название, исполнитель и завершение.")
+    if "status" in payload and payload["status"] not in ("new", "done"):
+        raise invalid("status")
+    return task_values(payload, creating=creating)
+
+
+def micro_options(options):
+    if set(options) - {"scope", "search", "assigned_to", "created_by", "overdue", "status", "limit", "offset"}:
+        raise invalid("query")
+    result = list_options(options)
+    if "status" in result and result["status"] not in ("new", "done"):
+        raise invalid("status")
+    return result
+
+
 def business_today():
     # Date-only deadlines never become timestamps; only the business day's
     # boundary follows the ERP Moscow calendar, not the host's timezone.

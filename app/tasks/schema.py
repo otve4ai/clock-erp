@@ -157,6 +157,54 @@ for _table in ("tasks", "task_project_members", "task_project_activity"):
     FOREIGN_KEY_CONTRACTS[_table] = ((0, 0, "task_projects", "project_id", "id", "NO ACTION", "NO ACTION", "NONE"),)
 
 
+# Freeze the accepted project contract for the explicit v3 -> v4 rebuild.
+V3_CORE_DDL = CORE_DDL
+V3_TABLE_DDL = TABLE_DDL
+V3_COLUMN_CONTRACTS = COLUMN_CONTRACTS
+V3_FOREIGN_KEY_CONTRACTS = FOREIGN_KEY_CONTRACTS
+
+INBOX_DDL = """CREATE TABLE task_inbox_events (
+    id INTEGER PRIMARY KEY,
+    recipient_id INTEGER NOT NULL CHECK(recipient_id>0),
+    task_id INTEGER NOT NULL REFERENCES tasks(id),
+    actor_id INTEGER NOT NULL CHECK(actor_id>0),
+    event_type TEXT NOT NULL CHECK(event_type IN ('task_assigned','task_reassigned')),
+    created_at TEXT NOT NULL,
+    handled_at TEXT,
+    notified_at TEXT,
+    dedupe_key TEXT NOT NULL UNIQUE,
+    payload TEXT NOT NULL
+)"""
+CORE_DDL = (
+    V3_CORE_DDL[0].replace("CHECK(task_type='normal')", "CHECK(task_type IN ('normal','micro'))").replace(
+        "project_id INTEGER REFERENCES task_projects(id),",
+        """project_id INTEGER REFERENCES task_projects(id),
+        micro_deadline_at TEXT,
+        CHECK((task_type='normal' AND micro_deadline_at IS NULL) OR
+              (task_type='micro' AND micro_deadline_at IS NOT NULL AND status IN ('new','done')
+               AND deadline_date IS NULL AND project_id IS NULL)),"""),
+    V3_CORE_DDL[1].replace("'project_changed'", "'project_changed','converted_to_normal'"),
+) + V3_CORE_DDL[2:] + (
+    INBOX_DDL,
+    "CREATE INDEX tasks_micro_deadline ON tasks(task_type,deleted_at,micro_deadline_at,id)",
+    "CREATE INDEX task_inbox_recipient_pending ON task_inbox_events(recipient_id,handled_at,id)",
+    "CREATE INDEX task_inbox_recipient_toast ON task_inbox_events(recipient_id,notified_at,id)",
+    "CREATE INDEX task_inbox_assignment ON task_inbox_events(task_id,recipient_id,handled_at)",
+)
+TABLE_DDL = dict(V3_TABLE_DDL, tasks=CORE_DDL[0], task_activity=CORE_DDL[1], task_inbox_events=INBOX_DDL)
+COLUMN_CONTRACTS = dict(V3_COLUMN_CONTRACTS)
+COLUMN_CONTRACTS.update({
+    "tasks": V3_COLUMN_CONTRACTS["tasks"] + (("micro_deadline_at", "TEXT", 0, None, 0),),
+    "task_inbox_events": (("id", "INTEGER", 0, None, 1), ("recipient_id", "INTEGER", 1, None, 0),
+                          ("task_id", "INTEGER", 1, None, 0), ("actor_id", "INTEGER", 1, None, 0),
+                          ("event_type", "TEXT", 1, None, 0), ("created_at", "TEXT", 1, None, 0),
+                          ("handled_at", "TEXT", 0, None, 0), ("notified_at", "TEXT", 0, None, 0),
+                          ("dedupe_key", "TEXT", 1, None, 0), ("payload", "TEXT", 1, None, 0)),
+})
+FOREIGN_KEY_CONTRACTS = dict(V3_FOREIGN_KEY_CONTRACTS)
+FOREIGN_KEY_CONTRACTS["task_inbox_events"] = ((0, 0, "tasks", "task_id", "id", "NO ACTION", "NO ACTION", "NONE"),)
+
+
 def sql_tokens(sql):
     # Compare the full table definition, not CHECK substrings (which an OR or
     # comment could bypass). Ignore whitespace and keyword case only; preserve

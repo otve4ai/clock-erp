@@ -158,3 +158,12 @@ members, visibility, scopes/views, archive, counters и персональный
 208 успешных tests на Linux / Python 3.6.8 / SQLite 3.7.17 / Flask 2.0.3 /
 Werkzeug 2.0.3, DDL gate, SHA31 sources и query plans. Только synthetic fixtures,
 без сети, от UID99. TD-TASKS-001 остаётся отложенным; production не переключён.
+
+2026-09-27: `docs/architecture/tasks-roadmap-d-f.md` — `planned`: автоматический
+цикл D/E/F с независимым review, согласованный через ветку «Задачи по ERP» по
+прямому поручению владельца. Не является evidence завершения будущих этапов.
+`docs/architecture/tasks-microtasks-stage-d.md` — `current` Stage D, final review PASS: schema v4,
+точные UTC microtasks24h, recipient Inbox и отдельный notification claim.
+`docs/validation/tasks-microtasks-d-runtime.json` и `tasks-microtasks-d-ddl.json`:
+248/248 PASS на Linux/Python3.6.8/SQLite3.7.17/Flask2.0.3/Werkzeug2.0.3,
+35 source hashes, DDL gate, synthetic fixtures UID99 без сети. Flag OFF.

@@ -403,7 +403,7 @@ class TasksCoreTest(unittest.TestCase):
             with self.assertRaises(sqlite3.OperationalError):
                 migrations.migrate_database(path)
         self.assertEqual(path.read_bytes(), before)
-        self.assertEqual(migrations.migrate_database(path)["schema_version"], 3)
+        self.assertEqual(migrations.migrate_database(path)["schema_version"], 4)
         self.assertEqual(TasksService(TasksRepository(path)).list(self.admin, {"scope": "all"})["total"], 0)
 
     def test_mixed_patch_cannot_partially_save_content_before_forbidden_reassign(self):

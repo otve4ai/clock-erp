@@ -158,7 +158,7 @@ class TasksIsolationTest(unittest.TestCase):
                 connection.execute(statement.replace("status TEXT NOT NULL", "status TEXT"))
             connection.executemany("INSERT INTO tasks_module_migrations VALUES(?,?,'now','fixture')",
                                    ((1, "tasks-module-foundation-v1"), (2, "tasks-module-core-v2"),
-                                    (3, "tasks-module-projects-v3")))
+                                    (3, "tasks-module-projects-v3"), (4, "tasks-module-microtasks-v4")))
             connection.commit()
         finally:
             connection.close()
@@ -174,6 +174,10 @@ class TasksIsolationTest(unittest.TestCase):
         response = client.get("/api/v1/tasks-module/status")
         self.assertEqual((response.status_code, response.get_json()["code"]), (503, "TASKS_MODULE_UNAVAILABLE"))
         self.assertEqual(self.module.read_bytes(), before)
+        # The new asynchronous delivery path fails locally on the same damaged
+        # schema; it must not become an ERP render dependency.
+        response = client.post("/api/v1/tasks-module/notifications/claim", json={}, headers=headers)
+        self.assertEqual(response.status_code, 503)
         response = client.post("/api/v1/tasks-module/tasks", data="{broken", content_type="application/json", headers=headers)
         self.assertEqual((response.status_code, response.get_json()["code"]), (400, "HTTP_ERROR"))
         app.config["MAX_CONTENT_LENGTH"] = 10
