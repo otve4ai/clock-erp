@@ -17,8 +17,10 @@ from app import web
 from app.domain_schema_migrations import apply_domain_migrations
 from app.services.collaboration import CollaborationStore
 from app.services.tasks import TaskStore
+from app.sms_migrations import migrate_database as migrate_sms
 from app.tasks.migrations import migrate_database
 from app.tasks.repository import TasksRepository
+from app.tasks.schema import CORE_DDL, LEDGER_DDL
 
 
 class TasksIsolationTest(unittest.TestCase):
@@ -29,6 +31,12 @@ class TasksIsolationTest(unittest.TestCase):
         self.auth = self.root / "auth.db"
         self.legacy = self.root / "tasks.db"
         self.module = self.root / "tasks-module.db"
+        # Startup must not depend on the shared SMS fixture left by other tests.
+        self.sms = self.root / "sms.db"
+        migrate_sms(self.sms)
+        environment = mock.patch.dict(os.environ, {"ERP_SMS_DATABASE": str(self.sms)})
+        environment.start()
+        self.addCleanup(environment.stop)
         apply_domain_migrations(self.auth, "auth", "isolation-test")
         apply_domain_migrations(self.legacy, "tasks", "isolation-test")
         connection = sqlite3.connect(str(self.auth))
@@ -141,6 +149,40 @@ class TasksIsolationTest(unittest.TestCase):
             self.assertEqual(response.status_code, 503)
             self.assertEqual(response.get_json()["code"], "BADGE_UNAVAILABLE")
             self.render_core()
+
+    def test_b1_schema_and_http_failures_remain_local_to_enabled_tasks(self):
+        connection = sqlite3.connect(str(self.module))
+        try:
+            connection.execute(LEDGER_DDL)
+            for statement in CORE_DDL:
+                connection.execute(statement.replace("status TEXT NOT NULL", "status TEXT"))
+            connection.executemany("INSERT INTO tasks_module_migrations VALUES(?,?,'now','fixture')",
+                                   ((1, "tasks-module-foundation-v1"), (2, "tasks-module-core-v2")))
+            connection.commit()
+        finally:
+            connection.close()
+        before = self.module.read_bytes()
+        with mock.patch.dict(os.environ, {"ERP_TASKS_MODULE_ENABLED": "1", "ERP_TASKS_MODULE_DATABASE": str(self.module),
+                                          "ERP_AUTH_DATABASE": str(self.auth), "ERP_TASKS_DATABASE": str(self.legacy)}):
+            namespace = runpy.run_path(web.__file__, run_name="tasks_b1_isolation")
+        app = namespace["app"]
+        app.config.update(TESTING=True, AUTH_TESTING=True, AUTH_ENABLED=True, SESSION_COOKIE_SECURE=False)
+        client = app.test_client()
+        self.login(client)
+        headers = {"X-CSRF-Token": "isolation-csrf"}
+        response = client.get("/api/v1/tasks-module/status")
+        self.assertEqual((response.status_code, response.get_json()["code"]), (503, "TASKS_MODULE_UNAVAILABLE"))
+        self.assertEqual(self.module.read_bytes(), before)
+        response = client.post("/api/v1/tasks-module/tasks", data="{broken", content_type="application/json", headers=headers)
+        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "HTTP_ERROR"))
+        app.config["MAX_CONTENT_LENGTH"] = 10
+        response = client.post("/api/v1/tasks-module/tasks", json={"title": "x" * 100}, headers=headers)
+        self.assertEqual((response.status_code, response.get_json()["code"]), (413, "HTTP_ERROR"))
+        calls, guard = self.reject_task_connections()
+        with guard, mock.patch.dict(namespace["orders_page"].__globals__, {"get_orders": lambda *a, **k: []}):
+            self.render_core(client)
+        self.assertEqual(calls, [])
+        self.assertEqual(self.module.read_bytes(), before)
 
     def test_startup_never_runs_migration_even_when_its_code_would_raise(self):
         original_import = builtins.__import__

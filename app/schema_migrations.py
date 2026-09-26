@@ -1615,6 +1615,9 @@ def validate_known_sql_compatibility(source_root):
     tasks_module_migrations = source_root / "app" / "tasks" / "migrations.py"
     if tasks_module_migrations.exists():
         paths.append(tasks_module_migrations)
+    tasks_module_schema = source_root / "app" / "tasks" / "schema.py"
+    if tasks_module_schema.exists():
+        paths.append(tasks_module_schema)
     paths.extend(sorted((source_root / "scripts").glob("migrate_*.py")))
     forbidden = (
         (re.compile(r"\bON\s+CONFLICT\b", re.I), "modern UPSERT"),

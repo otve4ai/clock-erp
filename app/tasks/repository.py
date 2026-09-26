@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .domain import conflict
+from .schema import COLUMN_CONTRACTS, FOREIGN_KEY_CONTRACTS, TABLE_DDL, sql_tokens
 
 
 SCHEMA_VERSION = 2
@@ -15,7 +16,6 @@ TASK_COLUMNS = ("id", "task_type", "title", "description", "status", "priority",
                 "created_by", "assigned_to", "deadline_date", "created_at", "updated_at",
                 "completed_at", "version", "deleted_at", "related_entity_type",
                 "related_entity_id", "related_entity_label")
-ACTIVITY_COLUMNS = ("id", "task_id", "actor", "event_type", "timestamp", "task_version", "payload")
 INDEXES = {"tasks_assignee_active": ("assigned_to", "deleted_at", "deadline_date", "id"),
            "tasks_creator_active": ("created_by", "deleted_at", "deadline_date", "id"),
            "tasks_active_deadline": ("deleted_at", "deadline_date", "id"),
@@ -36,9 +36,16 @@ def validate_connection(connection, version=SCHEMA_VERSION):
     expected = {"tasks_module_migrations"} if version == 1 else {"tasks_module_migrations", "tasks", "task_activity"}
     if tables != expected:
         raise ValueError("Tasks module schema is missing or unknown")
-    columns = tuple(row[1] for row in connection.execute("PRAGMA table_info(tasks_module_migrations)"))
-    if columns != ("version", "signature", "applied_at", "app_commit"):
-        raise ValueError("Tasks module migration ledger differs from contract")
+    for table in sorted(expected):
+        columns = tuple(tuple(row[1:]) for row in connection.execute("PRAGMA table_info(" + table + ")"))
+        if columns != COLUMN_CONTRACTS[table]:
+            raise ValueError("Tasks column contract differs")
+        sql = connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()[0]
+        if not sql or sql_tokens(sql) != sql_tokens(TABLE_DDL[table]):
+            raise ValueError("Tasks table constraints differ from contract")
+        foreign_keys = tuple(tuple(row) for row in connection.execute("PRAGMA foreign_key_list(" + table + ")"))
+        if foreign_keys != FOREIGN_KEY_CONTRACTS[table]:
+            raise ValueError("Tasks foreign key contract differs")
     rows = [tuple(row) for row in connection.execute(
         "SELECT version,signature FROM tasks_module_migrations ORDER BY version LIMIT 3")]
     expected_versions = [(1, FOUNDATION_SIGNATURE)]
@@ -49,15 +56,9 @@ def validate_connection(connection, version=SCHEMA_VERSION):
     if connection.execute("SELECT name FROM sqlite_master WHERE type IN ('view','trigger')").fetchone():
         raise ValueError("Unexpected Tasks schema objects")
     if version == 2:
-        for table, fields in (("tasks", TASK_COLUMNS), ("task_activity", ACTIVITY_COLUMNS)):
-            if tuple(row[1] for row in connection.execute("PRAGMA table_info(" + table + ")")) != fields:
-                raise ValueError("Tasks table differs from contract")
         for index, fields in INDEXES.items():
             if tuple(row[2] for row in connection.execute("PRAGMA index_info(" + index + ")")) != fields:
                 raise ValueError("Tasks index differs from contract")
-        foreign_keys = list(connection.execute("PRAGMA foreign_key_list(task_activity)"))
-        if len(foreign_keys) != 1 or tuple(foreign_keys[0][2:5]) != ("tasks", "task_id", "id"):
-            raise ValueError("Tasks activity foreign key differs from contract")
 
 
 class TasksRepository:

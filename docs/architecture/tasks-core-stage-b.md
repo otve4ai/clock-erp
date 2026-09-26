@@ -3,6 +3,9 @@
 Статус: `current` для ветки `codex/tasks-core-stage-b`, 2026-09-26.
 Реализация выключена по умолчанию. Документ не подтверждает merge, push или deploy.
 
+Уточнения validation/error handling и повторная runtime-проверка:
+[этап B.1](tasks-core-review-fixes-b1.md). Модель, права и schema version 2 сохранены.
+
 Ветка создана от принятого `6d06b8f34381665aed37deeacb643ae18ab12d49`.
 Проверка `git merge-base --is-ancestor` подтвердила наличие
 `a806ef287792524e730ff2074d3137eb7aee8664` в ancestry. SHA итогового commit

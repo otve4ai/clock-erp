@@ -52,6 +52,10 @@ def text_value(value, field, maximum, nullable=False):
         return None
     if not isinstance(value, str) or "\x00" in value or len(value) > maximum:
         raise invalid(field)
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise invalid(field, "Строка содержит некорректные символы Unicode.")
     return value.strip() if field == "title" else value
 
 

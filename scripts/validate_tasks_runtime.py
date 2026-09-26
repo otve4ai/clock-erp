@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stages A/B: exact-runtime tests in an isolated source copy, never live ERP."""
+"""Stages A/B.1: exact-runtime tests in an isolated source copy, never live ERP."""
 
 import argparse
 import hashlib
@@ -20,6 +20,7 @@ from urllib.parse import unquote, urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 STAGE_A = "a806ef287792524e730ff2074d3137eb7aee8664"
 STAGE_B_BASE = "6d06b8f34381665aed37deeacb643ae18ab12d49"
+STAGE_B1_BASE = "c5c1762785d0ce0f840da05f37456e0c3004e941"
 STAGE_A_PYTHON = (
     "app/collaboration_schema.py", "app/navigation_badges.py", "app/schema_migrations.py",
     "app/services/collaboration.py", "app/services/tasks.py", "app/task_errors.py",
@@ -29,6 +30,7 @@ STAGE_A_PYTHON = (
     "scripts/migrate_tasks_module.py", "scripts/run_backend_tests.py",
     "tests/test_tasks_isolation.py", "tests/test_tasks_module.py",
     "app/auth.py", "app/tasks/domain.py", "tests/test_tasks_core.py", "tests/test_tasks_core_api.py",
+    "app/tasks/schema.py", "tests/test_tasks_core_schema.py",
 )
 PATTERNS = (
     "test_tasks_isolation.py", "test_tasks_module.py", "test_tasks_runtime_compat.py",
@@ -72,7 +74,8 @@ def main():
         parser.error("ERP_TASKS_MODULE_DATABASE must be unset before the isolated runner")
 
     report = {
-        "stage": "B", "stage_a_commit": STAGE_A, "stage_b_base": STAGE_B_BASE,
+        "stage": "B.1", "stage_a_commit": STAGE_A, "stage_b_base": STAGE_B_BASE,
+        "stage_b1_base": STAGE_B1_BASE,
         "python": platform.python_version(),
         "sqlite": sqlite3.sqlite_version, "platform": platform.platform(),
         "euid": os.geteuid(), "source_root": str(ROOT),

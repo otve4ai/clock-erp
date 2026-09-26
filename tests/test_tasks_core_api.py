@@ -1,6 +1,7 @@
 """HTTP contract, real auth adapter and ERP isolation for the new namespace."""
 
 import builtins
+import io
 import os
 import runpy
 import sqlite3
@@ -11,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from flask import Flask, request
+from werkzeug.exceptions import BadRequest, Unauthorized, Forbidden, NotFound, RequestEntityTooLarge
 
 from app.tasks.migrations import migrate_database
 from app.tasks.repository import TaskSession, TasksRepository
@@ -118,7 +120,7 @@ class TasksCoreApiTest(unittest.TestCase):
     def test_invalid_json_filters_and_missing_versions(self):
         task = self.create()
         url = BASE + "/" + str(task["id"])
-        for content in ("{broken", "[]", "null", '"string"'):
+        for content in ("[]", "null", '"string"'):
             response = self.client.post(BASE, data=content, content_type="application/json", headers=self.headers)
             self.assertEqual(response.status_code, 422)
         for suffix in ("?status=bad", "?scope=team", "?today=yes", "?status=new&status=done", "?include_deleted=true"):
@@ -134,6 +136,78 @@ class TasksCoreApiTest(unittest.TestCase):
                 self.assertEqual(self.client.get(path).status_code, 401)
             self.assertEqual(self.client.post(BASE, json={"title": "No auth"}, headers=self.headers).status_code, 401)
         transaction.assert_not_called()
+
+    def test_malformed_or_truncated_body_is_400_without_storage_access(self):
+        with mock.patch.object(TasksRepository, "transaction", side_effect=AssertionError("body opened storage")) as transaction:
+            malformed = self.client.post(BASE, data="{broken", content_type="application/json", headers=self.headers)
+            truncated = self.client.open(BASE, method="POST", headers=self.headers, environ_overrides={
+                "CONTENT_TYPE": "application/json", "CONTENT_LENGTH": "100", "wsgi.input": io.BytesIO(b"{}")})
+            for response in (malformed, truncated):
+                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "HTTP_ERROR"))
+                self.assertEqual(response.headers["Cache-Control"], "no-store")
+        transaction.assert_not_called()
+
+    def test_configured_request_body_limit_is_413_without_storage_access(self):
+        self.app.config["MAX_CONTENT_LENGTH"] = 10
+        with mock.patch.object(TasksRepository, "transaction", side_effect=AssertionError("body opened storage")) as transaction:
+            response = self.client.post(BASE, json={"title": "x" * 100}, headers=self.headers)
+        self.assertEqual((response.status_code, response.get_json()["code"]), (413, "HTTP_ERROR"))
+        transaction.assert_not_called()
+
+    def test_body_limit_also_bounds_stream_without_content_length(self):
+        self.app.config["MAX_CONTENT_LENGTH"] = 10
+        stream = io.BytesIO(b'{"title":"' + b"x" * 100 + b'"}')
+        response = self.client.open(BASE, method="POST", headers=self.headers, environ_overrides={
+            "CONTENT_TYPE": "application/json", "CONTENT_LENGTH": "", "wsgi.input": stream,
+            "wsgi.input_terminated": True})
+        self.assertEqual((response.status_code, response.get_json()["code"]), (413, "HTTP_ERROR"))
+        self.assertLessEqual(stream.tell(), 11)
+
+    def test_json_within_configured_limit_preserves_normal_validation(self):
+        self.app.config["MAX_CONTENT_LENGTH"] = 1000
+        self.assertEqual(self.create(title="Valid body")["title"], "Valid body")
+        response = self.client.post(BASE, data="{broken", content_type="application/json", headers=self.headers)
+        self.assertEqual(response.status_code, 400)
+        response = self.client.post(BASE, json=[], headers=self.headers)
+        self.assertEqual(response.status_code, 422)
+
+    def test_stream_exactly_at_body_limit_is_accepted(self):
+        raw = b'{"title":"at limit"}'
+        self.app.config["MAX_CONTENT_LENGTH"] = len(raw)
+        response = self.client.open(BASE, method="POST", headers=self.headers, environ_overrides={
+            "CONTENT_TYPE": "application/json", "CONTENT_LENGTH": "", "wsgi.input": io.BytesIO(raw),
+            "wsgi.input_terminated": True})
+        self.assertEqual(response.status_code, 201, response.get_json())
+
+    def test_http_exception_statuses_are_preserved_and_details_are_hidden(self):
+        for exception, status in ((BadRequest, 400), (Unauthorized, 401), (Forbidden, 403),
+                                  (NotFound, 404), (RequestEntityTooLarge, 413)):
+            with self.subTest(status=status), mock.patch.object(
+                    TasksRepository, "transaction", side_effect=exception(description="secret SQL /internal/path traceback")):
+                response = self.client.get(BASE)
+            self.assertEqual((response.status_code, response.get_json()["code"]), (status, "HTTP_ERROR"))
+            self.assertEqual(set(response.get_json()), {"code", "message"})
+            for secret in ("secret", "SQL", "/internal/path", "traceback"):
+                self.assertNotIn(secret, response.get_data(as_text=True))
+
+    def test_invalid_unicode_in_http_payload_is_validation_error(self):
+        for field in ("title", "description"):
+            with self.subTest(field=field):
+                payload = {"title": "Unicode"}
+                payload[field] = "\ud800"
+                response = self.client.post(BASE, json=payload, headers=self.headers)
+                self.assertEqual((response.status_code, response.get_json()["code"]), (422, "VALIDATION_ERROR"))
+        self.assertEqual(self.client.get(BASE + "?scope=created").get_json()["data"]["total"], 0)
+
+    def test_http_mixed_patch_is_atomic_when_reassignment_is_forbidden(self):
+        task = self.create()
+        url = BASE + "/" + str(task["id"])
+        history = self.client.get(url + "/activity").get_json()
+        self.actor = self.users[2]
+        response = self.client.patch(url, json={"version": 1, "title": "Not saved", "assigned_to": 3}, headers=self.headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.client.get(url).get_json()["data"], task)
+        self.assertEqual(self.client.get(url + "/activity").get_json(), history)
 
     def test_activity_failure_returns_safe_error_and_no_partial_task(self):
         with mock.patch.object(TaskSession, "add_activity", side_effect=sqlite3.OperationalError("secret SQL traceback")):
@@ -222,9 +296,12 @@ class TasksCoreApiTest(unittest.TestCase):
 
     def test_real_erp_auth_csrf_namespace_and_crud_do_not_open_other_erp_stores(self):
         from app import web
+        from app.sms_migrations import migrate_database as migrate_sms
         path, store = self.make_auth_fixture()
+        sms_path = self.root / "sms.db"
+        migrate_sms(sms_path)
         with mock.patch.dict(os.environ, {"ERP_TASKS_MODULE_ENABLED": "1", "ERP_TASKS_MODULE_DATABASE": str(self.path),
-                                          "ERP_AUTH_DATABASE": str(path)}):
+                                          "ERP_AUTH_DATABASE": str(path), "ERP_SMS_DATABASE": str(sms_path)}):
             namespace = runpy.run_path(web.__file__, run_name="tasks_core_enabled")
         app = namespace["app"]
         app.config.update(TESTING=True, AUTH_TESTING=True, SESSION_COOKIE_SECURE=False)

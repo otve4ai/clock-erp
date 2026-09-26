@@ -3,6 +3,7 @@
 from functools import wraps
 
 from flask import current_app, jsonify
+from werkzeug.exceptions import HTTPException
 
 from .domain import TaskError
 
@@ -30,6 +31,12 @@ def module_boundary(view):
                 body["fields"] = error.fields
             response = jsonify(body)
             response.status_code = error.status
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        except HTTPException as error:
+            # Preserve the HTTP status, never expose description/response details.
+            response = jsonify(code="HTTP_ERROR", message="Не удалось обработать запрос.")
+            response.status_code = error.code or 500
             response.headers["Cache-Control"] = "no-store"
             return response
         except Exception:

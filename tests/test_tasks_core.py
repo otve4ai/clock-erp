@@ -5,11 +5,12 @@ import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
 from app.tasks import migrations, permissions
-from app.tasks.domain import TaskError
+from app.tasks.domain import TaskError, business_today
 from app.tasks.repository import FOUNDATION_SIGNATURE, TaskSession, TasksRepository
 from app.tasks.services import TasksService
 
@@ -404,6 +405,86 @@ class TasksCoreTest(unittest.TestCase):
         self.assertEqual(path.read_bytes(), before)
         self.assertEqual(migrations.migrate_database(path)["schema_version"], 2)
         self.assertEqual(TasksService(TasksRepository(path)).list(self.admin, {"scope": "all"})["total"], 0)
+
+    def test_mixed_patch_cannot_partially_save_content_before_forbidden_reassign(self):
+        task = self.create()
+        history = self.service.activity(self.creator, task["id"])
+        self.error(403, self.update, task, user=self.assignee, title="Must not save", assigned_to=3)
+        self.assertEqual(self.service.get(self.creator, task["id"]), task)
+        self.assertEqual(self.service.activity(self.creator, task["id"]), history)
+
+    def test_reassign_activity_failure_rolls_back_task_and_all_history(self):
+        task = self.create()
+        history = self.service.activity(self.creator, task["id"])
+        original = TaskSession.add_activity
+
+        def fail_reassignment(session, updated, actor, event, timestamp, payload):
+            if event == "reassigned":
+                raise sqlite3.OperationalError("reassignment history failed")
+            return original(session, updated, actor, event, timestamp, payload)
+
+        with mock.patch.object(TaskSession, "add_activity", fail_reassignment):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.update(task, title="Also roll back", assigned_to=3)
+        self.assertEqual(self.service.get(self.creator, task["id"]), task)
+        self.assertEqual(self.service.activity(self.creator, task["id"]), history)
+
+    def test_today_and_overdue_at_moscow_midnight(self):
+        current = self.create(deadline_date="2026-09-26")
+        following = self.create(deadline_date="2026-09-27")
+        self.create(deadline_date="2026-09-26", status="done")
+        self.create()
+        self.service.today = business_today
+        for instant, day, today_ids, overdue_ids in (
+                (datetime(2026, 9, 26, 20, 59, 59, tzinfo=timezone.utc), "2026-09-26", [current["id"]], []),
+                (datetime(2026, 9, 26, 21, 0, 0, tzinfo=timezone.utc), "2026-09-27", [following["id"]], [current["id"]])):
+            with self.subTest(instant=instant), mock.patch("app.tasks.domain.datetime") as clock:
+                clock.now.side_effect = lambda zone: instant.astimezone(zone)
+                self.assertEqual(business_today(), day)
+                today = self.service.list(self.assignee, {"today": "true", "status": "new"})
+                overdue = self.service.list(self.assignee, {"overdue": "true"})
+                self.assertEqual([row["id"] for row in today["items"]], today_ids)
+                self.assertEqual([row["id"] for row in overdue["items"]], overdue_ids)
+                self.assertEqual(self.service.list(self.assignee, summary=True)["overdue"], len(overdue_ids))
+
+    def test_repeated_delete_and_restore_preserve_versions_and_history(self):
+        original = self.create()
+        deleted = self.update(original, operation="delete")
+        history = self.service.activity(self.creator, original["id"])
+        self.error(409, self.update, original, operation="delete")
+        self.error(403, self.update, deleted, operation="delete")
+        self.assertEqual(self.service.get(self.creator, original["id"]), deleted)
+        self.assertEqual(self.service.activity(self.creator, original["id"]), history)
+        restored = self.update(deleted, operation="restore")
+        history = self.service.activity(self.creator, original["id"])
+        self.error(409, self.update, deleted, operation="restore")
+        self.error(403, self.update, restored, operation="restore")
+        self.assertEqual(self.service.get(self.creator, original["id"]), restored)
+        self.assertEqual(self.service.activity(self.creator, original["id"]), history)
+        self.assertEqual([event["event_type"] for event in history["items"]], ["created", "deleted", "restored"])
+        self.assertEqual(restored["version"], 3)
+        self.assertIsNone(restored["deleted_at"])
+
+    def test_invalid_unicode_is_rejected_before_task_or_activity_changes(self):
+        task = self.create()
+        history = self.service.activity(self.creator, task["id"])
+        for field in ("title", "description", "related_entity_type", "related_entity_id", "related_entity_label"):
+            for value in ("\ud800", "\udfff", "text\ud800text"):
+                with self.subTest(field=field, value=repr(value)):
+                    self.error(422, self.create, **{field: value})
+                    self.error(422, self.update, task, **{field: value})
+        self.error(422, self.service.list, self.assignee, {"search": "\ud800"})
+        self.assertEqual(self.service.get(self.creator, task["id"]), task)
+        self.assertEqual(self.service.activity(self.creator, task["id"]), history)
+        self.assertEqual(self.service.list(self.assignee)["total"], 1)
+
+    def test_valid_unicode_survives_sqlite_and_activity(self):
+        for text in ("Plain text", "Задача: позвонить", "日本語のタスク", "مرحبا", "Ready \U0001f680 \U0001f600", "Cafe\u0301"):
+            with self.subTest(text=text):
+                task = self.create(title=text, description=text, related_entity_label=text)
+                saved = self.service.get(self.creator, task["id"])
+                self.assertEqual((saved["title"], saved["description"], saved["related_entity_label"]), (text, text, text))
+                self.assertEqual(self.service.activity(self.creator, task["id"])["items"][0]["payload"]["task"]["title"], text)
 
 
 if __name__ == "__main__":

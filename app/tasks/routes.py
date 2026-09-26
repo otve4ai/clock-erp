@@ -1,6 +1,7 @@
 """Separate API namespace; never replaces /app/tasks or /api/v1/tasks."""
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, json, jsonify, request
+from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
 
 from .domain import TaskError, invalid
 from .error_boundary import module_boundary
@@ -24,7 +25,27 @@ def create_blueprint(current_user, user_lookup=None, csrf_check=None):
     def payload():
         if not csrf_check or not csrf_check():
             raise TaskError("CSRF_INVALID", "Не удалось подтвердить запрос.", 403)
-        body = request.get_json(silent=True)
+        if not request.is_json:
+            raise BadRequest()
+        maximum = current_app.config.get("MAX_CONTENT_LENGTH")
+        if maximum is None:
+            body = request.get_json()
+        else:
+            # Werkzeug 2.0 does not enforce this limit when reading JSON.
+            # Bound even a terminated WSGI stream without Content-Length.
+            if request.content_length is not None and request.content_length > maximum:
+                raise RequestEntityTooLarge()
+            # New Werkzeug may clamp request.stream at exactly the maximum,
+            # hiding the extra byte. A terminated WSGI stream is safe to read
+            # directly with our own explicit bound, including at exact limit.
+            stream = request.input_stream if request.environ.get("wsgi.input_terminated") else request.stream
+            raw = stream.read(maximum + 1)
+            if len(raw) > maximum:
+                raise RequestEntityTooLarge()
+            try:
+                body = json.loads(raw)
+            except (ValueError, UnicodeError):
+                raise BadRequest()
         if not isinstance(body, dict):
             raise invalid("body", "Ожидается JSON object.")
         return body

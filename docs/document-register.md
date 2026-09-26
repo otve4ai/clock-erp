@@ -139,3 +139,13 @@ API и schema v2 новой tasks-module.db. По умолчанию OFF, UI и 
 `docs/validation/tasks-core-b-runtime.json` и `tasks-core-b-ddl.json` фиксируют
 134 успешных теста на Linux / Python 3.6.8 / SQLite 3.7.17 и runtime DDL gate.
 Только временные fixtures; merge, push, deploy не выполнялись.
+
+2026-09-26: `docs/architecture/tasks-core-review-fixes-b1.md` — `current` для
+`codex/tasks-core-stage-b1` от `c5c1762`: строгий schema contract, сохранение
+HTTPException status, bounded JSON body на Werkzeug 2.0.3 и UTF-8 validation.
+24 новых regression tests; 158 обязательных тестов прошли на Linux / Python 3.6.8 /
+SQLite 3.7.17. Результаты: `docs/validation/tasks-core-b1-runtime.json`,
+`docs/validation/tasks-core-b1-ddl.json`. Schema v2 и бизнес-функции не менялись.
+`docs/technical-debt/tasks-query-performance.md` — `deferred`, TD-TASKS-001:
+оптимизация SQL/индексов отложена до измерений перед performance acceptance.
+Auth sessions не переделаны, legacy не переносится; push, merge, deploy запрещены.
