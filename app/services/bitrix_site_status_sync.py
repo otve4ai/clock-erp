@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.catalog_db import CatalogDatabase
+from app.services.excel_product_catalog import product_site_issue_sql
 
 try:
     import fcntl
@@ -75,16 +76,16 @@ class BitrixSiteStatusSync:
 
     def summary(self):
         self.database.initialize()
+        in_stock_inactive_sql = product_site_issue_sql("in_stock_inactive")
+        out_of_stock_active_sql = product_site_issue_sql("out_of_stock_active")
         with self.database.connect() as connection:
             counts = connection.execute(
                 "SELECT COUNT(*) AS positions, "
                 "SUM(CASE WHEN trim(COALESCE(bitrix_external_product_id, '')) "
                 "<> '' THEN 1 ELSE 0 END) AS linked, "
-                "SUM(CASE WHEN stock > 0 AND bitrix_active = 0 AND "
-                "trim(COALESCE(bitrix_external_product_id, '')) <> '' "
+                "SUM(CASE WHEN " + in_stock_inactive_sql + " "
                 "THEN 1 ELSE 0 END) AS in_stock_inactive, "
-                "SUM(CASE WHEN stock <= 0 AND bitrix_active = 1 AND "
-                "trim(COALESCE(bitrix_external_product_id, '')) <> '' "
+                "SUM(CASE WHEN " + out_of_stock_active_sql + " "
                 "THEN 1 ELSE 0 END) AS out_of_stock_active, "
                 "SUM(CASE WHEN stock > 0 AND "
                 "trim(COALESCE(bitrix_external_product_id, '')) = '' "
@@ -92,7 +93,7 @@ class BitrixSiteStatusSync:
                 "SUM(CASE WHEN trim(COALESCE(bitrix_external_product_id, '')) "
                 "<> '' AND bitrix_active IS NULL THEN 1 ELSE 0 END) "
                 "AS unknown_statuses "
-                "FROM catalog_excel_products WHERE active = 1"
+                "FROM catalog_excel_products p WHERE active = 1"
             ).fetchone()
             run = connection.execute(
                 "SELECT status, started_at, finished_at, products_received, "

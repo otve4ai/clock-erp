@@ -49,6 +49,18 @@ class ProductSiteStatusIndicatorTest(unittest.TestCase):
         ):
             self.assertIn(text, panel)
 
+    def test_issue_counts_link_to_the_existing_products_table(self):
+        panel = self.source("app/templates/_product_site_status_indicator.html")
+        products = self.source("app/templates/warehouse.html")
+        catalog = self.source("app/services/excel_product_catalog.py")
+
+        self.assertIn("site_issue='in_stock_inactive'", panel)
+        self.assertIn("site_issue='out_of_stock_active'", panel)
+        self.assertIn('data-warehouse-filter="site_issue"', products)
+        self.assertIn('name="site_issue"', products)
+        self.assertIn('data-site-issue="{{ site_issue|e }}"', products)
+        self.assertIn("product_site_issue_sql(site_issue)", catalog)
+
     def test_systemd_units_are_compatible_with_production_systemd_219(self):
         service = self.source(
             "deploy/systemd/vechasu-bitrix-site-status-sync.service"

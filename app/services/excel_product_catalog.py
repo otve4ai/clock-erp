@@ -72,6 +72,34 @@ PRODUCT_MUTABLE_COLUMNS = (
 
 UNSET = object()
 
+PRODUCT_SITE_ISSUE_LABELS = {
+    "in_stock_inactive": "С остатком выключены",
+    "out_of_stock_active": "Без остатка активны",
+}
+
+
+def normalize_product_site_issue(value):
+    value = str(value or "").strip()
+    return value if value in PRODUCT_SITE_ISSUE_LABELS else ""
+
+
+def product_site_issue_sql(value, product_alias="p"):
+    """Return a fixed SQL predicate for one read-only site-status issue."""
+    value = normalize_product_site_issue(value)
+    prefix = "{}.".format(product_alias) if product_alias else ""
+    linked = "trim(COALESCE({}bitrix_external_product_id, '')) <> ''".format(
+        prefix
+    )
+    if value == "in_stock_inactive":
+        return "{}stock > 0 AND {}bitrix_active = 0 AND {}".format(
+            prefix, prefix, linked
+        )
+    if value == "out_of_stock_active":
+        return "{}stock <= 0 AND {}bitrix_active = 1 AND {}".format(
+            prefix, prefix, linked
+        )
+    return ""
+
 
 def canonical_model_text(value):
     value = unicodedata.normalize("NFKC", str(value or ""))
@@ -796,7 +824,7 @@ class ExcelProductCatalog:
                       product_ids=None,
                       include_cell_item_names=True, include_facets=True,
                       include_inventory_locked=False, stock_state="all",
-                      check_state="all"):
+                      check_state="all", site_issue=""):
         self.database.initialize()
         if stock_state == "out" or check_state != "all":
             OutOfStockChecks(self.database).sync()
@@ -880,6 +908,9 @@ class ExcelProductCatalog:
             where.append("p.stock = 0")
         elif stock_state == "in":
             where.append("p.stock > 0")
+        site_issue_sql = product_site_issue_sql(site_issue)
+        if site_issue_sql:
+            where.append(site_issue_sql)
         if check_state in {"unchecked", "partial", "complete"}:
             count_sql = (
                 "SELECT COUNT(*) FROM erp_out_of_stock_checks k "

@@ -10,6 +10,7 @@
         var model = currentState?.model || params.get("model");
         var cell = currentState?.cell || params.get("cell");
         var stock = currentState?.stock_state || params.get("stock_state");
+        var siteIssue = currentState?.site_issue || params.get("site_issue");
         var view = params.get("view");
         if (query) labels.push("Поиск: " + query);
         if (params.get("brand_id") === "0") labels.push("Бренд: Без бренда");
@@ -27,6 +28,12 @@
         if (stock === "out") labels.push("Наличие: Нет в наличии");
         if (stock === "out" && params.get("check_state") && params.get("check_state") !== "all") {
             labels.push("Статус проверки: " + params.get("check_state"));
+        }
+        if (siteIssue === "in_stock_inactive") {
+            labels.push("Статус сайта: С остатком выключены");
+        }
+        if (siteIssue === "out_of_stock_active") {
+            labels.push("Статус сайта: Без остатка активны");
         }
         return labels;
     }

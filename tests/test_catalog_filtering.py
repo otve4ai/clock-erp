@@ -225,6 +225,74 @@ class CatalogFilteringTest(unittest.TestCase):
         self.assertEqual(counts["positions"], 122)
         self.assertEqual(counts["units_total"], 4)
 
+    def test_site_issue_filter_is_server_paginated_and_composes_with_search(self):
+        with self.database.transaction() as connection:
+            positive_ids = [row[0] for row in connection.execute(
+                "SELECT id FROM catalog_excel_products WHERE brand_id = ? "
+                "AND stock > 0 ORDER BY id LIMIT 3",
+                (self.brand["id"],),
+            ).fetchall()]
+            zero_ids = [row[0] for row in connection.execute(
+                "SELECT id FROM catalog_excel_products WHERE brand_id = ? "
+                "AND stock <= 0 ORDER BY id LIMIT 2",
+                (self.brand["id"],),
+            ).fetchall()]
+            connection.executemany(
+                "UPDATE catalog_excel_products SET "
+                "bitrix_external_product_id = ?, bitrix_active = 0 WHERE id = ?",
+                [("inactive-{}".format(value), value) for value in positive_ids],
+            )
+            connection.executemany(
+                "UPDATE catalog_excel_products SET "
+                "bitrix_external_product_id = ?, bitrix_active = 1 WHERE id = ?",
+                [("active-{}".format(value), value) for value in zero_ids],
+            )
+            first_name = connection.execute(
+                "SELECT excel_name_raw FROM catalog_excel_products WHERE id = ?",
+                (positive_ids[0],),
+            ).fetchone()[0]
+
+        inactive = self.excel.list_products(
+            site_issue="in_stock_inactive", page=2, per_page=1,
+        )
+        active = self.excel.list_products(
+            site_issue="out_of_stock_active", per_page=1,
+        )
+        searched = self.excel.list_products(
+            site_issue="in_stock_inactive", query=first_name, per_page=50,
+        )
+
+        self.assertEqual((inactive["total"], inactive["page"]), (3, 2))
+        self.assertEqual((active["total"], len(active["items"])), (2, 1))
+        self.assertEqual(
+            (searched["total"], searched["items"][0]["excel_name_raw"]),
+            (1, first_name),
+        )
+
+        response = self.client.get(
+            "/app/products?site_issue=in_stock_inactive&per_page=1"
+        )
+        html = response.get_data(as_text=True)
+        toolbar = html.split(
+            '<div class="search-card erp-toolbar-card">', 1
+        )[1].split('<div class="warehouse-mobile-stock-controls">', 1)[0]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-total="3"', html)
+        self.assertIn("Статус сайта: С остатком выключены", html)
+        self.assertIn('name="site_issue" value="in_stock_inactive"', toolbar)
+        self.assertIn("site_issue=in_stock_inactive", html.replace("&amp;", "&"))
+        self.assertNotIn('class="erp-filter-count"', toolbar)
+
+        invalid = self.client.get(
+            "/app/products?site_issue=not-a-real-filter&per_page=200"
+        ).get_data(as_text=True)
+        invalid_active_filters = invalid.split(
+            'id="warehouseActiveFilters"', 1
+        )[1].split('<div class="search-card erp-toolbar-card">', 1)[0]
+        self.assertIn('data-total="122"', invalid)
+        self.assertNotIn('data-warehouse-filter="site_issue"', invalid_active_filters)
+
     def test_brand_and_category_pages_hide_empty_entries_by_default(self):
         empty_category = self.shared.create_category(
             self.other_brand["id"], "Пустая категория"
