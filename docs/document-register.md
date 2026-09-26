@@ -124,3 +124,9 @@ WB через общий сервис продаж; код `app/services/wildber
 счётчики, отдельная проверка collaboration и выключенный фундамент нового
 модуля с `tasks-module.db`. Связанный `tasks-boundary.md` уточнён; схема legacy
 `tasks.db` сохранена. Документы не подтверждают merge или production deploy.
+
+2026-09-26: `docs/architecture/tasks-runtime-compatibility-a1.md` — `current`
+для `codex/tasks-runtime-a1`: проверка фундамента A на Linux / Python 3.6.8 /
+SQLite 3.7.17, только временная копия и синтетические данные. Production-код
+этапа A не изменён, добавлены воспроизводимые проверки и исправлен legacy
+test trace callback. Merge, push и deploy не выполнялись.

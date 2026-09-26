@@ -4,6 +4,10 @@
 `a0e53422c023bfaa8bdc40759b2f4587ea650d1c`, 2026-09-26.
 Это отчёт о локальной реализации. Merge, push и deploy не выполнялись.
 
+Дополнение A.1: ограничение проверки на современном Windows runtime закрыто
+отдельным [exact-runtime validation](tasks-runtime-compatibility-a1.md).
+Ниже сохранены результаты и ограничения именно первоначального этапа A.
+
 ## Результат и границы этапа
 
 Обычный рендер Orders, Products, Sales, Receipts и Inventory не открывает
