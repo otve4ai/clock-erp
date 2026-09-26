@@ -341,14 +341,13 @@
                     </div>
                     {% endif %}
                     {% endfor %}
-                    {% if not order_sale_dialog_summary.lines|selectattr("requires_strap")|list %}<button class="button button-secondary strap-replacement-open" type="button" data-open-strap-replacement>Заменить ремешок</button>{% endif %}
                 </section>
                 <section class="sale-dialog-section strap-replacement" data-strap-replacement hidden aria-labelledby="strapReplacementTitle">
                     <input type="hidden" name="operation_mode" value="" data-operation-mode>
                     <input type="hidden" name="strap_operation_id" value="" data-strap-operation-id>
                     <div class="strap-replacement-head"><div><h3 id="strapReplacementTitle">Замена ремешка</h3><p>Клиентская позиция заказа не изменится; выберите фактически используемые часы и комплектующие.</p></div><button class="button button-secondary" type="button" data-cancel-strap-replacement>Скрыть</button></div>
                     <label for="strapLineIndex">Заказанный товар *</label>
-                    <select class="field" id="strapLineIndex" name="strap_line_index" data-strap-line-index>{% for item in order_sale_dialog_summary.lines %}<option value="{{ loop.index0 }}" data-name="{{ item.name }}" data-quantity="{{ item.quantity_display }}">{{ item.name }} · {{ item.quantity_display }} шт.</option>{% endfor %}</select>
+                    <select class="field" id="strapLineIndex" name="strap_line_index" data-strap-line-index>{% for item in order_sale_dialog_summary.lines %}{% if item.strap_flow_enabled %}<option value="{{ item.line_index }}" data-name="{{ item.name }}" data-quantity="{{ item.quantity_display }}">{{ item.name }} · {{ item.quantity_display }} шт.</option>{% endif %}{% endfor %}</select>
                     {{ strap_product_picker('strap_base', 'Часы-основа', 'watch', true, true) }}
                     <fieldset class="strap-removed"><legend>Снимаем с часов</legend>
                         <label><input type="radio" name="removed_strap_mode" value="none" checked> Без ремешка</label>
@@ -833,7 +832,7 @@
     function updateStrapSubmitState(){if(!strapSubmit)return;if(operationMode.value!=='strap_replacement'){strapSubmit.disabled=Array.from(modal.querySelectorAll('[data-required-strap-line] [data-picker-value]')).some(input=>!input.value);return;}const base=saleForm.elements.namedItem('strap_base_product_id').value;const installed=saleForm.elements.namedItem('installed_strap_product_id').value;const mode=saleForm.querySelector('input[name="removed_strap_mode"]:checked')?.value||'none';const removed=saleForm.elements.namedItem('removed_strap_product_id').value;const createdReady=saleForm.elements.namedItem('new_removed_strap_brand').value.trim()&&saleForm.elements.namedItem('new_removed_strap_name').value.trim();strapSubmit.disabled=!base||!installed||(mode==='existing'&&!removed)||(mode==='created'&&!createdReady);}
     modal.querySelector('[data-strap-line-index]')?.addEventListener('change',updateStrapPreview);modal.querySelectorAll('[data-new-strap-name],[data-new-strap-brand]').forEach(input=>input.addEventListener('input',()=>{updateStrapPreview();updateStrapSubmitState();}));
     function ensureOperationId(){const input=modal.querySelector('[data-strap-operation-id]');if(!input.value)input.value=globalThis.crypto?.randomUUID?.().replaceAll('-','')||`${Date.now()}${Math.random().toString(16).slice(2)}`;}
-    function openStrap(){if(modal.querySelector('[data-required-strap-line]'))return;strapSection.hidden=false;operationMode.value='strap_replacement';strapSubmit.textContent='Заменить ремешок и провести продажу';ensureOperationId();updateRemovedMode();updateStrapPreview();updateStrapSubmitState();strapSection.scrollIntoView({behavior:'smooth',block:'start'});}
+    function openStrap(){if(!modal.querySelector('[data-open-strap-replacement]')||modal.querySelector('[data-required-strap-line]'))return;strapSection.hidden=false;operationMode.value='strap_replacement';strapSubmit.textContent='Заменить ремешок и провести продажу';ensureOperationId();updateRemovedMode();updateStrapPreview();updateStrapSubmitState();strapSection.scrollIntoView({behavior:'smooth',block:'start'});}
     function closeStrap(){strapSection.hidden=true;operationMode.value='';strapSubmit.textContent=strapSubmitDefaultLabel;updateStrapSubmitState();}
     modal.querySelector('[data-open-strap-replacement]')?.addEventListener('click',openStrap);modal.querySelector('[data-cancel-strap-replacement]')?.addEventListener('click',closeStrap);
     function saveStrapDraft(){try{const values={};for(const [key,value] of new FormData(saleForm).entries())values[key]=value;const pickers={};modal.querySelectorAll('[data-strap-picker]').forEach(picker=>pickers[picker.dataset.strapPicker]=selectedItem(picker));sessionStorage.setItem(strapStorageKey,JSON.stringify({values,pickers}));}catch(error){}}

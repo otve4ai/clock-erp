@@ -261,3 +261,46 @@ class RequiredStrapOrderTest(unittest.TestCase):
                 self.assertTrue(result[0].get_json()["data"]["requires_strap"])
                 csrf.assert_called_once()
         self.assertEqual(RequiredStraps(self.database).product_ids(), {self.watch["id"]})
+
+    def test_toggle_persists_immediately_across_reopen_and_disable(self):
+        service = RequiredStraps(self.database)
+        with mock.patch.object(
+            web, "auth_is_enabled", return_value=True
+        ), mock.patch.object(
+            web, "current_auth_user",
+            return_value={"role": "admin", "id": 1},
+        ), mock.patch.object(
+            web, "require_csrf_when_authenticated"
+        ) as csrf, mock.patch.object(
+            web, "ExcelProductCatalog"
+        ), mock.patch(
+            "app.services.required_straps.CatalogDatabase",
+            return_value=self.database,
+        ):
+            with web.app.test_request_context(
+                method="PUT", json={"requires_strap": True}
+            ):
+                enabled = web.api_product_required_strap(self.watch["id"])
+            with web.app.test_request_context(method="GET"):
+                reopened_enabled = web.api_product_required_strap(
+                    self.watch["id"]
+                )
+            with web.app.test_request_context(
+                method="PUT", json={"requires_strap": False}
+            ):
+                disabled = web.api_product_required_strap(self.watch["id"])
+            with web.app.test_request_context(method="GET"):
+                reopened_disabled = web.api_product_required_strap(
+                    self.watch["id"]
+                )
+
+        self.assertTrue(enabled.get_json()["data"]["requires_strap"])
+        self.assertTrue(
+            reopened_enabled.get_json()["data"]["requires_strap"]
+        )
+        self.assertFalse(disabled.get_json()["data"]["requires_strap"])
+        self.assertFalse(
+            reopened_disabled.get_json()["data"]["requires_strap"]
+        )
+        self.assertEqual(service.product_ids(), set())
+        self.assertEqual(csrf.call_count, 2)

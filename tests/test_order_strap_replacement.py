@@ -370,7 +370,7 @@ class OrderStrapReplacementTest(unittest.TestCase):
     def test_ui_contains_both_picker_modes_preview_and_zero_stock_guard(self):
         root = Path(__file__).resolve().parents[1]
         template = (root / "app/templates/orders.html").read_text(encoding="utf-8")
-        self.assertIn("Заменить ремешок", template)
+        self.assertNotIn("data-open-strap-replacement>Заменить ремешок", template)
         self.assertIn("Часы-основа", template)
         self.assertIn("По каталогу", template)
         self.assertIn("После проведения", template)

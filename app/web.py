@@ -190,6 +190,7 @@ from app.services.shared_catalog import (
     DuplicateCatalogValueError,
     SharedCatalog,
     normalized_name,
+    product_strap_flow_enabled,
 )
 from app.services.tasks import (
     ENTITY_TYPES as TASK_ENTITY_TYPES,
@@ -2707,7 +2708,7 @@ def build_order_sale_dialog_summary(products, mapping_context=None,
     calculated_total = Decimal("0")
     mapping_context = mapping_context or {}
 
-    for product in products or []:
+    for line_index, product in enumerate(products or []):
         raw_quantity = first_order_product_value(
             product, "quantity", "QUANTITY"
         )
@@ -2750,11 +2751,15 @@ def build_order_sale_dialog_summary(products, mapping_context=None,
             ) or mapped_product.get("article") or ""
 
         lines.append({
+            "line_index": line_index,
             "name": str(first_order_product_value(
                 product, "name", "NAME"
             ) or "Товар без названия"),
             "article": str(article).strip(),
             "requires_strap": bool(mapped_product.get("requires_strap")),
+            "strap_flow_enabled": product_strap_flow_enabled(
+                mapped_product
+            ),
             "brand": str(mapped_product.get("brand") or "").strip(),
             "brand_id": mapped_product.get("brand_id"),
             "quantity": float(quantity),
@@ -3767,6 +3772,23 @@ def _conduct_order_sale(order_id):
     prepared_items = []
     required_by_product = {}
     product_by_id = {}
+
+    if strap_replacement_requested:
+        if strap_line_index < 0 or strap_line_index >= len(products):
+            issues.append("Выберите позицию часов для замены ремешка")
+        else:
+            replacement_mapping = get_order_product_mapping(
+                mapping_context, products[strap_line_index]
+            )
+            if (
+                replacement_mapping.get("state") == "mapped"
+                and not product_strap_flow_enabled(
+                    replacement_mapping.get("product")
+                )
+            ):
+                issues.append(
+                    "Для этого товара ремешок не включён в настройках"
+                )
 
     if order_status not in {"A", "D"}:
         issues.append("Чтобы провести продажу, сначала подтвердите заказ")
