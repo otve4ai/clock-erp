@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stages A-E: exact-runtime tests in an isolated source copy, never live ERP."""
+"""Stages A-F: exact-runtime tests in an isolated source copy, never live ERP."""
 
 import argparse
 import hashlib
@@ -24,6 +24,7 @@ STAGE_B1_BASE = "c5c1762785d0ce0f840da05f37456e0c3004e941"
 STAGE_C_BASE = "beb68e820572c223729671953f41a0cc203d15b3"
 STAGE_D_BASE = "8e7ae709e76e9b67d51b3f200e360f7c7aec034a"
 STAGE_E_BASE = "c4fb1d02596a722e7d314e3c8b537c617bcb1234"
+STAGE_F_BASE = "b56e3b061c0f983288781793ce580ad775867852"
 STAGE_A_PYTHON = (
     "app/collaboration_schema.py", "app/navigation_badges.py", "app/schema_migrations.py",
     "app/services/collaboration.py", "app/services/tasks.py", "app/task_errors.py",
@@ -38,6 +39,7 @@ STAGE_A_PYTHON = (
     "app/tasks/inbox_repository.py", "app/tasks/inbox_services.py", "app/tasks/micro_repository.py",
     "tests/test_tasks_microtasks.py",
     "app/tasks/presentation.py", "app/tasks/ui_routes.py", "tests/test_tasks_ui.py",
+    "tests/test_tasks_acceptance.py", "scripts/benchmark_tasks_module.py",
 )
 PATTERNS = (
     "test_tasks_isolation.py", "test_tasks_module.py", "test_tasks_runtime_compat.py",
@@ -45,6 +47,7 @@ PATTERNS = (
     "test_tasks_projects.py",
     "test_tasks_microtasks.py",
     "test_tasks_ui.py",
+    "test_tasks_acceptance.py",
     "test_tasks.py", "test_tasks_api.py", "test_collaboration*.py",
     "test_navigation_preferences.py", "test_orders_navigation_performance.py",
     "test_sidebar_visual_contract.py", "test_user_notifications.py",
@@ -84,11 +87,12 @@ def main():
         parser.error("ERP_TASKS_MODULE_DATABASE must be unset before the isolated runner")
 
     report = {
-        "stage": "E", "stage_a_commit": STAGE_A, "stage_b_base": STAGE_B_BASE,
+        "stage": "F", "stage_a_commit": STAGE_A, "stage_b_base": STAGE_B_BASE,
         "stage_b1_base": STAGE_B1_BASE,
         "stage_c_base": STAGE_C_BASE,
         "stage_d_base": STAGE_D_BASE,
         "stage_e_base": STAGE_E_BASE,
+        "stage_f_base": STAGE_F_BASE,
         "python": platform.python_version(),
         "sqlite": sqlite3.sqlite_version, "platform": platform.platform(),
         "euid": os.geteuid(), "source_root": str(ROOT),

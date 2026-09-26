@@ -174,3 +174,10 @@ legacy не переключён. Три MEDIUM JS races/read dependency исп�
 checks; ещё 15 adapter checks PASS. `docs/validation/tasks-ui-e-runtime.json` и
 `tasks-ui-e-ddl.json`: 257/257 PASS на exact production runtime, 38 source hashes,
 DDL gate PASS. Feature OFF, без push/merge/deploy. LOW polish относится к Stage F.
+
+2026-09-27: `docs/architecture/tasks-final-stage-f.md` — `current`, final/delta review
+PASS, итог A–F PASS. 261/261 exact-runtime PASS, 22 JS checks PASS, browser
+workflows/fault injection/themes/responsive, 32000-task synthetic benchmark.
+`docs/validation/tasks-final-f-runtime.json`, `tasks-final-f-ddl.json`,
+`tasks-final-f-performance.json` — воспроизводимые результаты; TD-TASKS-001 измерен.
+Нет schema/business changes, legacy migration, push/merge/deploy/enable.

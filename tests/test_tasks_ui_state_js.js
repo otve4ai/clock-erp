@@ -23,7 +23,10 @@ function harness() {
     const elements = new Map(), listeners = {}, timers = new Map(), cancelled = [], calls = [], shown = [];
     let timerId = 0;
     const element = selector => { if (!elements.has(selector)) elements.set(selector, new Element(selector)); return elements.get(selector); };
+    const periods = ['30', '90', '365', 'all'].map(period => { const item = new Element('button'); item.dataset.period = period; return item; });
+    element('#tm-filters').reset = () => ['date_from', 'date_to'].forEach(key => { element('#tm-filters [name=' + key + ']').value = ''; });
     const env = {calls, shown, element, timers, cancelled};
+    env.periods = periods;
     env.respond = async url => {
         const parsed = new URL(url, 'https://test.invalid');
         if (parsed.pathname === '/directory') return {items: [{id: 1, name: 'Initial'}], server_now: new Date().toISOString(), business_date: '2026-09-27'};
@@ -34,12 +37,12 @@ function harness() {
         if (parsed.pathname === '/inbox/7/read') throw {status: 503, message: 'Unavailable'};
         return {items: [], total: 0};
     };
-    const document = {querySelector: element, querySelectorAll: () => [], createElement: tag => new Element(tag),
+    const document = {querySelector: element, querySelectorAll: selector => selector === '[data-period]' ? periods : [], createElement: tag => new Element(tag),
         addEventListener: (key, fn) => { listeners[key] = fn; }};
     const sandbox = {document, URLSearchParams, URL, Date, Intl, Map, Set, Option: function(text, value) { this.text = text; this.value = value; },
         localStorage: {getItem() {}, setItem() {}}, history: {pushState() {}}, location: {search: ''},
         setTimeout: fn => { timers.set(++timerId, fn); return timerId; }, clearTimeout: id => { if (timers.has(id)) cancelled.push(timers.get(id)); timers.delete(id); },
-        setInterval: () => 1, clearInterval() {},
+        setInterval: () => 1, clearInterval() {}, FormData: function() { return []; },
         window: {TASKS_MODULE_BOOTSTRAP: {userId: 1}, addEventListener() {}, TasksModuleDialogs: {showTask: task => shown.push(task)},
             TasksModuleAPI: {query: values => '?' + new URLSearchParams(values), request: (...args) => { calls.push(args); return env.respond(...args); }}}};
     vm.runInNewContext(code, sandbox);
@@ -91,7 +94,56 @@ async function referencesOutOfOrder(oldFails) {
     assert.equal(h.element('#tm-project-preview').children[0].children[1].textContent, 'New project');
     assert.equal(h.element('#tm-people').children[0].children[0].children[1].textContent, 'Newest');
 }
+async function finalPolish() {
+    const h = harness(); await h.initialize(); h.ui.navigate('archive'); await flush();
+    h.periods[0].listeners.click(); await flush();
+    assert.equal(h.periods[0].attributes['aria-pressed'], 'true');
+    h.element('#tm-filters [name=date_from]').value = '2020-01-01';
+    h.element('#tm-filters [name=date_from]').listeners.change();
+    assert.ok(h.periods.every(item => item.attributes['aria-pressed'] === 'false'));
+    h.element('#tm-reset-filters').listeners.click(); await flush();
+    assert.equal(h.periods[3].attributes['aria-pressed'], 'true');
+    assert.equal(h.periods[0].attributes['aria-pressed'], 'false');
+    h.ui.notice('Previous success'); h.ui.navigate('main'); await flush();
+    assert.equal(h.element('#tm-notice').hidden, true);
+    const stamp = Date.now() + h.ui.state.clockOffset;
+    const remaining = offset => h.ui.remaining(new Date(stamp + offset).toISOString());
+    assert.equal(remaining(-1000), 'Просрочено меньше минуты');
+    assert.equal(remaining(-61000), 'Просрочено 1 мин');
+    assert.equal(remaining(-3599000), 'Просрочено 59 мин');
+    assert.equal(remaining(-3661000), 'Просрочено 1 ч 1 м');
+    assert.equal(remaining(61000), '2 мин');
+}
+async function microRecovery() {
+    const h = harness(); await h.initialize(); const original = h.respond;
+    h.respond = url => url.startsWith('/microtasks') ? Promise.reject({status: 503, message: 'Unavailable'}) : original(url);
+    await h.ui.refresh(); assert.equal(h.element('#tm-micro-error').hidden, false);
+    assert.equal(h.element('#tm-micro-list').children[0].children[0].textContent, 'Микрозадачи недоступны');
+    h.respond = original; await h.ui.refresh(); assert.equal(h.element('#tm-micro-error').hidden, true);
+    const old = deferred(); let calls = 0;
+    h.respond = url => url.startsWith('/microtasks?') && ++calls === 1 ? old.promise : original(url);
+    const stale = h.ui.refresh(); await h.ui.refresh(); old.reject({status: 503, message: 'Old error'}); await stale;
+    assert.equal(h.element('#tm-micro-error').hidden, true);
+}
+async function projectCountersAfterStatus() {
+    const h = harness(), original = h.respond; let done = false;
+    h.respond = (url, method) => {
+        if (url === '/tasks/8/status' && method === 'POST') { done = true; return Promise.resolve({}); }
+        if (url.startsWith('/tasks?')) return Promise.resolve({items: done ? [] : [{id: 8, title: 'Project task', task_type: 'normal',
+            assigned_to: 1, project_id: 1, status: 'new', priority: 'normal', version: 1, permissions: {change_status: true}}], total: done ? 0 : 1});
+        if (url.startsWith('/projects?') && !url.includes('archived')) return Promise.resolve({items: [{id: 1, name: 'Project', counters: {open: done ? 0 : 1}}], total: 1});
+        return original(url, method);
+    };
+    await h.initialize(); await flush();
+    assert.equal(h.ui.state.activeProjects[0].counters.open, 1);
+    const checkbox = h.element('#tm-list').children[0].children[1].children[0];
+    checkbox.checked = true; checkbox.listeners.change(); await flush();
+    assert.equal(done, true);
+    assert.equal(h.ui.state.activeProjects[0].counters.open, 0);
+    assert.equal(h.element('#tm-project-preview').children[0].children[2].textContent, '0 открыто');
+}
 (async () => {
     await inboxFailure(); await searchNavigation(); await referencesOutOfOrder(false); await referencesOutOfOrder(true);
-    console.log('Tasks UI state regressions: 4 checks PASS');
+    await finalPolish(); await microRecovery(); await projectCountersAfterStatus();
+    console.log('Tasks UI state regressions: 7 checks PASS');
 })().catch(error => { console.error(error); process.exitCode = 1; });

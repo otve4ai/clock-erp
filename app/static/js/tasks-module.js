@@ -30,8 +30,13 @@
     const displayDate = value => value ? value.slice(0, 10).split('-').reverse().join('.') : 'Без срока';
     const displayInstant = value => value ? new Intl.DateTimeFormat('ru-RU', {timeZone: 'Europe/Moscow', dateStyle: 'short', timeStyle: 'short'}).format(new Date(value)) : '—';
     const remaining = value => {
-        const minutes = Math.ceil((Date.parse(value) - now()) / 60000);
-        if (minutes < 0) return `Просрочено ${Math.ceil(-minutes / 60)} ч`;
+        const delta = Date.parse(value) - now();
+        if (delta < 0) {
+            const late = Math.floor(-delta / 60000);
+            if (!late) return 'Просрочено меньше минуты';
+            return late < 60 ? `Просрочено ${late} мин` : `Просрочено ${Math.floor(late / 60)} ч${late % 60 ? ` ${late % 60} м` : ''}`;
+        }
+        const minutes = Math.ceil(delta / 60000);
         if (minutes < 60) return `${minutes} мин`;
         return `${Math.floor(minutes / 60)} ч${minutes % 60 ? ` ${minutes % 60} м` : ''}`;
     };
@@ -134,7 +139,7 @@
         if (state.busy.has(task.id)) return;
         state.busy.add(task.id);
         try {
-            await api.request(path, 'POST', Object.assign({version: task.version}, values)); notice(message || 'Изменение сохранено'); await refresh();
+            await api.request(path, 'POST', Object.assign({version: task.version}, values)); notice(message || 'Изменение сохранено'); await refresh(!!task.project_id);
         } catch (error) {
             if (error.status === 409) { notice('Задача уже изменена. Список обновлён; повторите действие.'); await refresh(); }
             else showError(error);
@@ -151,14 +156,21 @@
     }
     async function microPreview() {
         const generation = ++state.microGeneration;
-        const [list, summary] = await Promise.all([request('/microtasks', {scope: state.microScope, limit: 4}), request('/microtasks/summary')]);
-        if (generation !== state.microGeneration) return;
-        const root = $('#tm-micro-list'); root.replaceChildren(...list.items.map(task => taskRow(task, true)));
-        if (!list.items.length) empty(root, 'Нет активных микрозадач', 'Добавьте небольшое поручение на ближайшие 24 часа.');
-        $('#tm-micro-count').textContent = list.total;
-        $$('[data-micro-count]').forEach(item => { item.textContent = summary[item.dataset.microCount]; });
-        $$('[data-micro-scope]').forEach(item => item.setAttribute('aria-pressed', String(item.dataset.microScope === state.microScope)));
-        $('#tm-micro-brief').textContent = `${summary.my_active} моих · ${summary.my_overdue} просрочено${summary.nearest_my_deadline_at ? ` · ближайшая через ${remaining(summary.nearest_my_deadline_at)}` : ''}`;
+        try {
+            const [list, summary] = await Promise.all([request('/microtasks', {scope: state.microScope, limit: 4}), request('/microtasks/summary')]);
+            if (generation !== state.microGeneration) return;
+            $('#tm-micro-error').hidden = true;
+            const root = $('#tm-micro-list'); root.replaceChildren(...list.items.map(task => taskRow(task, true)));
+            if (!list.items.length) empty(root, 'Нет активных микрозадач', 'Добавьте небольшое поручение на ближайшие 24 часа.');
+            $('#tm-micro-count').textContent = list.total;
+            $$('[data-micro-count]').forEach(item => { item.textContent = summary[item.dataset.microCount]; });
+            $$('[data-micro-scope]').forEach(item => item.setAttribute('aria-pressed', String(item.dataset.microScope === state.microScope)));
+            $('#tm-micro-brief').textContent = `${summary.my_active} моих · ${summary.my_overdue} просрочено${summary.nearest_my_deadline_at ? ` · ближайшая через ${remaining(summary.nearest_my_deadline_at)}` : ''}`;
+        } catch (error) {
+            if (generation !== state.microGeneration) return;
+            empty($('#tm-micro-list'), 'Микрозадачи недоступны');
+            showError(error, '#tm-micro-error');
+        }
     }
     function listQuery() {
         const values = Object.assign({scope: state.scope, search: state.search, limit: state.limit, offset: state.page * state.limit}, state.filters);
@@ -302,6 +314,7 @@
     }
     function navigate(view, options = {}, push = true) {
         clearTimeout(searchTimer); searchGeneration += 1;
+        notice('');
         state.view = Object.hasOwn(viewNames, view) ? view : 'main'; state.scope = options.scope || (['archive', 'project', 'delegated_waiting'].includes(state.view) ? 'all' : 'my');
         state.filters = options.filters || {}; state.page = 0; state.search = options.search || ''; $('#tm-search').value = state.search;
         state.project = state.view === 'project' ? {id: Number(options.project)} : null; state.projectMode = 'list';
@@ -318,7 +331,15 @@
             const control = $(`[name="${key}"]`, $('#tm-filters')); if (!value || control.closest('[hidden]')) continue;
             if (key === 'project_id' && value === 'none') state.filters.project = 'none'; else state.filters[key] = value;
         }
-        state.page = 0; loadList();
+        syncPeriods(); state.page = 0; loadList();
+    }
+    function syncPeriods() {
+        const start = $('#tm-filters [name=date_from]').value, end = $('#tm-filters [name=date_to]').value;
+        $$('[data-period]').forEach(item => {
+            const date = new Date(today() + 'T00:00:00Z'); date.setUTCDate(date.getUTCDate() - Number(item.dataset.period) + 1);
+            const matches = item.dataset.period === 'all' ? !start && !end : end === today() && start === date.toISOString().slice(0, 10);
+            item.setAttribute('aria-pressed', String(matches));
+        });
     }
     async function initialize() {
         collapseMicro(microCollapsed);
@@ -340,7 +361,8 @@
         $$('[data-project-mode]').forEach(item => item.addEventListener('click', () => { state.projectMode = item.dataset.projectMode; state.page = 0; loadList(); }));
         $('#tm-filters-toggle').addEventListener('click', () => { const form = $('#tm-filters'); form.hidden = !form.hidden; $('#tm-filters-toggle').setAttribute('aria-expanded', String(!form.hidden)); });
         $('#tm-filters').addEventListener('submit', event => { event.preventDefault(); applyFilters(); });
-        $('#tm-reset-filters').addEventListener('click', () => { $('#tm-filters').reset(); state.filters = {}; state.page = 0; loadList(); });
+        $('#tm-reset-filters').addEventListener('click', () => { $('#tm-filters').reset(); syncPeriods(); state.filters = {}; state.page = 0; loadList(); });
+        ['date_from', 'date_to'].forEach(field => $(`#tm-filters [name=${field}]`).addEventListener('change', syncPeriods));
         $$('[data-period]').forEach(item => item.addEventListener('click', () => {
             const period = item.dataset.period; const end = today(); let start = '';
             if (period !== 'all') { const date = new Date(end + 'T00:00:00Z'); date.setUTCDate(date.getUTCDate() - Number(period) + 1); start = date.toISOString().slice(0, 10); }
