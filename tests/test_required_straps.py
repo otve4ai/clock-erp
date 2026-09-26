@@ -296,11 +296,11 @@ class RequiredStrapOrderTest(unittest.TestCase):
 
         self.assertTrue(enabled[0].get_json()["data"]["requires_strap"])
         self.assertTrue(
-            reopened_enabled.get_json()["data"]["requires_strap"]
+            reopened_enabled[0].get_json()["data"]["requires_strap"]
         )
         self.assertFalse(disabled[0].get_json()["data"]["requires_strap"])
         self.assertFalse(
-            reopened_disabled.get_json()["data"]["requires_strap"]
+            reopened_disabled[0].get_json()["data"]["requires_strap"]
         )
         self.assertEqual(service.product_ids(), set())
         self.assertEqual(csrf.call_count, 2)
