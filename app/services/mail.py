@@ -32,7 +32,7 @@ MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
 MAX_MESSAGE_BYTES = 25 * 1024 * 1024
 MAX_INITIAL_MESSAGES = 2000
 STATUSES = {"new", "in_progress", "waiting_customer", "answered", "closed"}
-ENTITY_TYPES = {"customer", "order", "repair", "purchase", "task"}
+ENTITY_TYPES = {"customer", "order", "repair", "purchase"}
 EMAIL_RE = re.compile(r"^[^\s@<>\r\n]+@[^\s@<>\r\n]+\.[^\s@<>\r\n]+$")
 MAIL_HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 

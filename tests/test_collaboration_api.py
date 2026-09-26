@@ -46,9 +46,9 @@ class CollaborationApiMultiUserTest(unittest.TestCase):
             session["session_version"] = 1
             session["_csrf_token"] = csrf
 
-    @mock.patch("app.web._collaboration_entity")
+    @mock.patch("app.web.OrdersSnapshotStore")
     def test_backend_actor_inbox_recipient_and_session_isolation(self, entity):
-        entity.return_value = {"id": "21123", "label": "Заказ №21123", "href": "/order/21123"}
+        entity.return_value.get.return_value = {"id": "21123", "number": "21123"}
         response = self.client_a.post(
             "/api/v1/responsibility/order/21123",
             json={"responsible_user_id": 2, "actor_user_id": 2},

@@ -13,7 +13,7 @@
       "erp_warehouses"
     ],
     "customers.db": ["customers", "registry_meta"],
-    "mail.db": ["mail_messages", "mail_threads"],
+    "mail.db": ["mail_messages", "mail_threads", "mail_links"],
     "orders.db": [
       "orders_snapshot",
       "orders_snapshot_meta"
@@ -26,7 +26,14 @@
       "service_permissions"
     ],
     "sms.db": ["sms_messages", "sms_meta"],
-    "tasks.db": ["tasks", "task_history"]
+    "tasks.db": [
+      "tasks",
+      "task_history",
+      "task_links",
+      "entity_assignments",
+      "assignment_history",
+      "inbox_events"
+    ]
   },
   "metadata": {
     "orders.db": {

@@ -17,7 +17,6 @@ SECTIONS = {"inbox", "anytime", "someday"}
 STATUSES = {"new", "in_progress", "waiting", "completed", "cancelled"}
 ACTIVE_STATUSES = {"new", "in_progress", "waiting"}
 PRIORITIES = {"urgent", "important", "other"}
-ENTITY_TYPES = {"customer", "order", "sale", "repair", "product", "purchase"}
 VIEWS = {"inbox", "overdue", "today", "plans", "waiting", "anytime", "someday", "logbook"}
 REPEAT_TYPES = {"none", "daily", "weekdays", "weekly", "monthly", "custom"}
 
@@ -151,29 +150,6 @@ class TaskStore:
         return result
 
     @staticmethod
-    def normalize_links(payload):
-        raw = payload.get("links")
-        if raw is None and (payload.get("entity_type") or payload.get("entity_id")):
-            raw = [{"entity_type": payload.get("entity_type"), "entity_id": payload.get("entity_id")}]
-        if raw is None:
-            return None
-        if not isinstance(raw, list) or len(raw) > 20:
-            raise TaskValidationError("Передан некорректный список связей.", "links")
-        result, seen = [], set()
-        for item in raw:
-            if not isinstance(item, dict):
-                raise TaskValidationError("Передана некорректная связь.", "links")
-            entity_type = _text(item.get("entity_type") or item.get("type"), 20)
-            entity_id = _text(item.get("entity_id") or item.get("id"), 120)
-            if entity_type not in ENTITY_TYPES or not entity_id:
-                raise TaskValidationError("Передана некорректная связь.", "links")
-            key = (entity_type, entity_id)
-            if key not in seen:
-                seen.add(key)
-                result.append(key)
-        return result
-
-    @staticmethod
     def _history(connection, task_id, event_type, actor_id, details=None, created_at=None):
         connection.execute(
             "INSERT INTO task_history(task_id,event_type,actor_id,created_at,details_json) VALUES(?,?,?,?,?)",
@@ -181,49 +157,10 @@ class TaskStore:
         )
 
     @staticmethod
-    def _resolve_links(links, resolver):
-        resolved = []
-        for entity_type, entity_id in links or []:
-            entity = resolver(entity_type, entity_id)
-            if not entity:
-                raise TaskValidationError("Связанная сущность не найдена или недоступна.", "links")
-            resolved.append({"entity_type": entity_type, "entity_id": entity_id,
-                             "entity_label": _text(entity.get("label"), 500),
-                             "entity_href": _text(entity.get("href"), 1000)})
-        return resolved
-
-    def _replace_links(self, connection, task_id, links, actor_id, now, emit_history=True):
-        old = {(str(row[0]), str(row[1])) for row in connection.execute(
-            "SELECT entity_type,entity_id FROM task_links WHERE task_id=?", (int(task_id),)
-        ).fetchall()}
-        new = {(item["entity_type"], item["entity_id"]) for item in links}
-        connection.execute("DELETE FROM task_links WHERE task_id=?", (int(task_id),))
-        for item in links:
-            connection.execute(
-                "INSERT INTO task_links(task_id,entity_type,entity_id,entity_label,entity_href,created_at,created_by) "
-                "VALUES(?,?,?,?,?,?,?)",
-                (int(task_id), item["entity_type"], item["entity_id"], item["entity_label"],
-                 item["entity_href"], now, int(actor_id)),
-            )
-        if emit_history:
-            for key in sorted(new - old):
-                self._history(connection, task_id, "link_added", actor_id,
-                              {"entity_type": key[0], "entity_id": key[1]}, now)
-            for key in sorted(old - new):
-                self._history(connection, task_id, "link_removed", actor_id,
-                              {"entity_type": key[0], "entity_id": key[1]}, now)
-
-    @staticmethod
-    def _serialize(row, links=None, history=None):
+    def _serialize(row, history=None):
         task = dict(row)
         task["completed"] = task["status"] == "completed"
-        task["links"] = links or []
         task["history"] = history or []
-        first = task["links"][0] if task["links"] else {}
-        task["entity_type"] = first.get("entity_type")
-        task["entity_id"] = first.get("entity_id")
-        task["entity_label"] = first.get("entity_label")
-        task["entity_href"] = first.get("entity_href")
         return task
 
     def _enrich(self, connection, rows, include_history=False):
@@ -231,13 +168,6 @@ class TaskStore:
             return []
         ids = [int(row["id"]) for row in rows]
         marks = ",".join("?" for _ in ids)
-        link_rows = connection.execute(
-            "SELECT task_id,entity_type,entity_id,entity_label,entity_href FROM task_links "
-            "WHERE task_id IN ({}) ORDER BY id".format(marks), ids
-        ).fetchall()
-        links = {task_id: [] for task_id in ids}
-        for row in link_rows:
-            links[int(row["task_id"])].append(dict(row))
         histories = {task_id: [] for task_id in ids}
         if include_history:
             event_rows = connection.execute(
@@ -251,14 +181,13 @@ class TaskStore:
                 except (TypeError, ValueError):
                     item["details"] = {}
                 histories[int(row["task_id"])].append(item)
-        return [self._serialize(row, links[int(row["id"])], histories[int(row["id"])]) for row in rows]
+        return [self._serialize(row, histories[int(row["id"])]) for row in rows]
 
-    def create(self, payload, actor_id, user_exists, entity_resolver, collaboration=None,
+    def create(self, payload, actor_id, user_exists, collaboration=None,
                actor=None):
         values = self.normalize(payload)
         if not user_exists(values["assignee_id"]):
             raise TaskValidationError("Ответственный сотрудник не найден.", "assignee_id")
-        links = self._resolve_links(self.normalize_links(payload) or [], entity_resolver)
         if values["due_time"] and not values["due_date"]:
             raise TaskValidationError("Для времени укажите дату.", "due_date")
         if values["status"] == "waiting" and (not values["waiting_for"] or not values["check_date"]):
@@ -286,11 +215,7 @@ class TaskStore:
                 if values["repeat_type"] != "none" and not series_id:
                     series_id = "task-series-{}-{}".format(task_id, uuid.uuid4().hex)
                     connection.execute("UPDATE tasks SET series_id=? WHERE id=?", (series_id, task_id))
-                self._replace_links(connection, task_id, links, actor_id, now, False)
                 self._history(connection, task_id, "created", actor_id, {"status": values["status"]}, now)
-                for link in links:
-                    self._history(connection, task_id, "link_added", actor_id,
-                                  {"entity_type": link["entity_type"], "entity_id": link["entity_id"]}, now)
                 if values["assignee_id"] != int(actor_id):
                     self._notification(connection, task_id, values["assignee_id"], "assigned", "assigned", now)
                 if collaboration is not None:
@@ -355,14 +280,12 @@ class TaskStore:
             connection.commit()
         return self.get(task_id, include_deleted=True)
 
-    def update(self, task_id, payload, actor_id, user_exists, entity_resolver,
+    def update(self, task_id, payload, actor_id, user_exists,
                collaboration=None, actor=None):
         current = self.get(task_id)
         if current["status"] in {"completed", "cancelled"} and "status" not in payload:
             raise TaskValidationError("Сначала восстановите задачу.", "status")
         values = self.normalize(payload, partial=True)
-        links_raw = self.normalize_links(payload)
-        links = self._resolve_links(links_raw, entity_resolver) if links_raw is not None else None
         merged = dict(current)
         merged.update(values)
         if not user_exists(merged["assignee_id"]):
@@ -393,8 +316,6 @@ class TaskStore:
                 raise TaskConflictError(
                     "Эта запись была изменена другим сотрудником после того, как вы её открыли."
                 )
-            if links is not None:
-                self._replace_links(connection, task_id, links, actor_id, now)
             for field, change in changed.items():
                 event = "status_changed" if field == "status" else "field_changed"
                 self._history(connection, task_id, event, actor_id,
@@ -495,11 +416,6 @@ class TaskStore:
                          row["repeat_interval"], row["series_id"], int(task_id), now, now, occurrence_key),
                     )
                     next_id = cursor.lastrowid
-                    old_links = [dict(item) for item in connection.execute(
-                        "SELECT entity_type,entity_id,entity_label,entity_href FROM task_links WHERE task_id=? ORDER BY id",
-                        (int(task_id),),
-                    ).fetchall()]
-                    self._replace_links(connection, next_id, old_links, actor_id, now, False)
                     self._history(connection, next_id, "created_from_recurrence", actor_id,
                                   {"previous_task_id": int(task_id)}, now)
                     self._history(connection, task_id, "next_recurrence_created", actor_id,
@@ -604,7 +520,7 @@ class TaskStore:
         raise TaskValidationError("Неизвестное представление.", "view")
 
     @staticmethod
-    def _structural_clauses(assignee_id=None, priority="", entity_type="", status="", due="",
+    def _structural_clauses(assignee_id=None, priority="", status="", due="",
                             only_mine=None, scope="all", current_user_id=None, today=None):
         clauses, parameters = ["t.deleted_at IS NULL"], []
         if assignee_id or only_mine:
@@ -628,11 +544,6 @@ class TaskStore:
                 raise TaskValidationError("Неизвестный статус.", "status")
             clauses.append("t.status=?")
             parameters.append(status)
-        if entity_type:
-            if entity_type not in ENTITY_TYPES:
-                raise TaskValidationError("Неизвестный тип связи.", "entity_type")
-            clauses.append("EXISTS(SELECT 1 FROM task_links le WHERE le.task_id=t.id AND le.entity_type=?)")
-            parameters.append(entity_type)
         if due in {"none", "today", "overdue", "future"}:
             if due == "none":
                 clauses.append("t.due_date IS NULL")
@@ -663,11 +574,11 @@ class TaskStore:
         )
         return [clause], [folded] * 7 + [digits]
 
-    def counts(self, today=None, assignee_id=None, priority="", entity_type="", status="", due="",
+    def counts(self, today=None, assignee_id=None, priority="", status="", due="",
                only_mine=None, scope="all", current_user_id=None, selected_view=None, query=""):
         today = today or moscow_today()
         clauses, params = self._structural_clauses(
-            assignee_id=assignee_id, priority=priority, entity_type=entity_type, status=status,
+            assignee_id=assignee_id, priority=priority, status=status,
             due=due, only_mine=only_mine, scope=scope, current_user_id=current_user_id,
             today=today,
         )
@@ -709,7 +620,7 @@ class TaskStore:
             }
         return result
 
-    def list(self, view="today", query="", assignee_id=None, priority="", entity_type="",
+    def list(self, view="today", query="", assignee_id=None, priority="",
              status="", due="", only_mine=None, scope="all", current_user_id=None,
              page=1, per_page=50, today=None):
         if view not in VIEWS:
@@ -754,11 +665,6 @@ class TaskStore:
                 raise TaskValidationError("Неизвестный статус.", "status")
             clauses.append("t.status=?")
             parameters.append(status)
-        if entity_type:
-            if entity_type not in ENTITY_TYPES:
-                raise TaskValidationError("Неизвестный тип связи.", "entity_type")
-            clauses.append("EXISTS(SELECT 1 FROM task_links le WHERE le.task_id=t.id AND le.entity_type=?)")
-            parameters.append(entity_type)
         if due in {"none", "today", "overdue", "future"}:
             if due == "none": clauses.append("t.due_date IS NULL")
             elif due == "today": clauses.append("t.due_date=?"); parameters.append(today)
@@ -785,7 +691,7 @@ class TaskStore:
         return {"rows": serialized, "total": total, "page": page, "per_page": per_page,
                 "pages": pages, "today": today}
 
-    def calendar(self, start, end, query="", assignee_id=None, priority="", entity_type="",
+    def calendar(self, start, end, query="", assignee_id=None, priority="",
                  status="", due="", only_mine=None, scope="all", current_user_id=None,
                  include_completed=False, today=None):
         """Return only tasks needed by a bounded calendar window plus undated tasks."""
@@ -836,11 +742,6 @@ class TaskStore:
                 raise TaskValidationError("Неизвестный статус.", "status")
             clauses.append("t.status=?")
             parameters.append(status)
-        if entity_type:
-            if entity_type not in ENTITY_TYPES:
-                raise TaskValidationError("Неизвестный тип связи.", "entity_type")
-            clauses.append("EXISTS(SELECT 1 FROM task_links le WHERE le.task_id=t.id AND le.entity_type=?)")
-            parameters.append(entity_type)
         today = today or moscow_today()
         if due in {"none", "today", "overdue", "future"}:
             date_sql = "CASE WHEN t.status='waiting' AND t.check_date IS NOT NULL THEN t.check_date ELSE t.due_date END"
@@ -912,15 +813,3 @@ class TaskStore:
             }, now)
             connection.commit()
         return self.get(task_id)
-
-    def for_entity(self, entity_type, entity_id, limit=20):
-        if entity_type not in ENTITY_TYPES:
-            raise TaskValidationError("Неизвестный тип связи.", "entity_type")
-        with self.connect() as connection:
-            rows = connection.execute(
-                "SELECT t.* FROM tasks t JOIN task_links l ON l.task_id=t.id WHERE t.deleted_at IS NULL "
-                "AND l.entity_type=? AND l.entity_id=? "
-                "ORDER BY CASE WHEN t.status IN ('new','in_progress','waiting') THEN 0 ELSE 1 END,t.updated_at DESC LIMIT ?",
-                (entity_type, str(entity_id), int(limit)),
-            ).fetchall()
-            return self._enrich(connection, rows, False)

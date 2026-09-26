@@ -529,16 +529,6 @@ except Exception:
 preview_today = datetime.now(preview_timezone).date()
 
 
-def preview_task_entity(entity_type, entity_id):
-    if entity_type == "product":
-        return {
-            "id": str(entity_id),
-            "label": "Casio G-Shock GA-2100",
-            "href": "/app/products?selected_id={}".format(entity_id),
-        }
-    return {"id": str(entity_id), "label": "Объект {}".format(entity_id), "href": "/app/tasks"}
-
-
 def add_preview_task(title, **values):
     payload = {
         "title": title,
@@ -547,7 +537,7 @@ def add_preview_task(title, **values):
         "idempotency_key": "preview-{}".format(title),
     }
     payload.update(values)
-    task, _ = preview_task_store.create(payload, 1, lambda user_id: int(user_id) in {1, 2}, preview_task_entity)
+    task, _ = preview_task_store.create(payload, 1, lambda user_id: int(user_id) in {1, 2})
     return task
 
 
@@ -555,7 +545,6 @@ add_preview_task(
     "Подтвердить наличие часов для клиента",
     description="Проверить резерв и написать клиенту до конца рабочего дня.",
     priority="urgent", due_date=preview_today.isoformat(), due_time="12:30",
-    links=[{"entity_type": "product", "entity_id": str(warehouse_items[0]["id"])}],
 )
 add_preview_task(
     "Согласовать условия доставки заказа",

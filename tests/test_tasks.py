@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from app.domain_schema_migrations import (
     LEDGER_SQL,
@@ -31,11 +32,6 @@ class TaskStoreTest(unittest.TestCase):
         apply_domain_migrations(self.path, "tasks", "test")
         self.store = TaskStore(self.path)
         self.users = {1, 2}
-        self.entities = {
-            (kind, "1"): {"id": "1", "label": "{} объект".format(kind),
-                           "href": "/app/{}s/1".format(kind)}
-            for kind in ("customer", "order", "sale", "repair", "product", "purchase")
-        }
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -46,7 +42,6 @@ class TaskStoreTest(unittest.TestCase):
         payload.update(overrides)
         return self.store.create(
             payload, 1, lambda value: int(value) in self.users,
-            lambda kind, value: self.entities.get((kind, str(value))),
         )[0]
 
     def test_undated_sections_and_automatic_date_views(self):
@@ -84,20 +79,61 @@ class TaskStoreTest(unittest.TestCase):
         edited = self.store.update(
             task["id"], {"title": "Новое название", "assignee_id": 2}, 1,
             lambda value: int(value) in self.users,
-            lambda kind, value: self.entities.get((kind, str(value))),
         )
         self.assertEqual((edited["title"], edited["assignee_id"]), ("Новое название", 2))
         moved = self.store.move(task["id"], "someday", 1)
         self.assertIsNone(moved["due_date"])
         self.assertEqual(self.store.list("someday")["total"], 1)
 
-    def test_all_entity_types_validate_and_search_snapshot(self):
+    def test_legacy_link_payloads_are_ignored_on_create_and_update(self):
         for kind in ("customer", "order", "sale", "repair", "product", "purchase"):
-            task = self.create(title=kind, entity_type=kind, entity_id="1")
-            self.assertEqual(task["entity_label"], "{} объект".format(kind))
-            self.assertEqual(self.store.list("inbox", query=kind)["total"], 1)
-        with self.assertRaisesRegex(TaskValidationError, "не найдена"):
-            self.create(entity_type="customer", entity_id="404")
+            with self.subTest(kind=kind):
+                task = self.create(title=kind, entity_type=kind, entity_id="404",
+                                   links=[{"entity_type": kind, "entity_id": "404"}])
+                updated = self.store.update(task["id"], {
+                    "title": kind + " updated", "links": "invalid legacy payload",
+                    "entity_type": kind, "entity_id": "999",
+                }, 1, lambda value: True)
+                for key in ("links", "entity_type", "entity_id", "entity_label", "entity_href"):
+                    self.assertNotIn(key, task)
+                    self.assertNotIn(key, updated)
+                self.assertFalse(any(event["event_type"].startswith("link_")
+                                     for event in updated["history"]))
+        with self.store.connect() as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM task_links").fetchone()[0], 0)
+
+    def test_historical_links_are_preserved_but_never_read_or_copied(self):
+        task = self.create(due_date="2026-08-27", repeat_type="daily")
+        with self.store.connect() as connection:
+            connection.execute(
+                "INSERT INTO task_links(task_id,entity_type,entity_id,entity_label,entity_href,created_at,created_by) "
+                "VALUES(?,'order','42','Legacy marker','/order/42','x',1)", (task["id"],),
+            )
+            self.store._history(connection, task["id"], "link_added", 1,
+                                {"entity_type": "order", "entity_id": "42"})
+            legacy = [tuple(row) for row in connection.execute("SELECT * FROM task_links")]
+        original_connect = self.store.connect
+
+        def guarded_connect():
+            connection = original_connect()
+            connection.set_authorizer(lambda action, table, column, database, trigger:
+                sqlite3.SQLITE_DENY if table == "task_links" else sqlite3.SQLITE_OK)
+            return connection
+
+        with patch.object(self.store, "connect", side_effect=guarded_connect):
+            current = self.store.get(task["id"])
+            self.assertEqual(current["history"][0]["event_type"], "link_added")
+            self.assertNotIn("links", current)
+            self.assertEqual(self.store.list("today", query="Legacy marker")["total"], 0)
+            self.assertEqual(self.store.list("today", today="2026-08-27")["total"], 1)
+            self.assertEqual(self.store.counts("2026-08-27")["today"], 1)
+            self.assertEqual(len(self.store.calendar("2026-08-27", "2026-08-28")["rows"]), 1)
+            self.store.update(task["id"], {"description": "Updated", "links": []}, 1, lambda value: True)
+            completed = self.store.set_status(task["id"], "completed", 1, today="2026-08-27")
+            self.assertEqual(self.store.get(completed["next_task_id"])["due_date"], "2026-08-28")
+            self.store.soft_delete(task["id"], 1)
+        with self.store.connect() as connection:
+            self.assertEqual([tuple(row) for row in connection.execute("SELECT * FROM task_links")], legacy)
 
     def test_filters_counts_pagination_and_idempotency(self):
         for index in range(7):
@@ -111,10 +147,10 @@ class TaskStoreTest(unittest.TestCase):
         self.assertEqual((page["total"], page["page"], page["pages"], len(page["rows"])), (3, 2, 2, 1))
         first, created = self.store.create(
             {"title": "Один раз", "section": "inbox", "priority": "other", "assignee_id": 1,
-             "idempotency_key": "same-request"}, 1, lambda value: True, lambda kind, value: None)
+             "idempotency_key": "same-request"}, 1, lambda value: True)
         second, duplicate_created = self.store.create(
             {"title": "Один раз", "section": "inbox", "priority": "other", "assignee_id": 1,
-             "idempotency_key": "same-request"}, 1, lambda value: True, lambda kind, value: None)
+             "idempotency_key": "same-request"}, 1, lambda value: True)
         self.assertTrue(created)
         self.assertFalse(duplicate_created)
         self.assertEqual(first["id"], second["id"])
@@ -164,17 +200,15 @@ class TaskStoreTest(unittest.TestCase):
         self.assertEqual(searched["inbox"], baseline["inbox"])
         self.assertEqual(searched["statistics"], {"remaining": 1, "completed": 0, "total": 1})
 
-    def test_validation_rejects_bad_user_enum_time_and_relation(self):
+    def test_validation_rejects_bad_user_enum_and_time(self):
         for payload in (
             {"title": "", "assignee_id": 1},
             {"title": "X", "assignee_id": 99},
             {"title": "X", "assignee_id": 1, "priority": "critical"},
             {"title": "X", "assignee_id": 1, "due_time": "10:00"},
-            {"title": "X", "assignee_id": 1, "entity_type": "customer"},
         ):
             with self.subTest(payload=payload), self.assertRaises(TaskValidationError):
-                self.store.create(payload, 1, lambda value: int(value) in self.users,
-                                  lambda kind, value: None)
+                self.store.create(payload, 1, lambda value: int(value) in self.users)
 
     def test_moscow_day_boundary(self):
         before_midnight_utc = datetime(2026, 8, 26, 21, 30, tzinfo=timezone.utc)
@@ -223,7 +257,7 @@ class TaskStoreTest(unittest.TestCase):
                                            expected_version=moved["version"])
         foreign = self.store.create(
             {"title": "Чужая", "assignee_id": 2, "due_date": "2026-08-27"}, 2,
-            lambda value: True, lambda kind, value: None,
+            lambda value: True,
         )[0]
         with self.assertRaises(TaskPermissionError):
             self.store.calendar_reschedule(foreign["id"], "2026-08-29", None, 1)
@@ -257,26 +291,21 @@ class TaskStoreTest(unittest.TestCase):
             sqlite3.connect = original
         self.assertFalse(any(sql.lstrip().upper().startswith(("CREATE ", "ALTER ", "DROP ")) for sql in statements))
 
-    def test_waiting_views_multiple_links_contacts_search_and_history(self):
+    def test_waiting_views_contacts_search_and_history(self):
         task = self.create(
             title="Ответить без ФИО", status="waiting", waiting_for="Оплату клиента",
             check_date="2026-08-27", source_comment="Нужна синяя модель",
             contact_phone="+7 999 111-22-33", contact_channel="WhatsApp",
-            links=[{"entity_type": "customer", "entity_id": "1"},
-                   {"entity_type": "purchase", "entity_id": "1"}],
         )
-        self.assertEqual(len(task["links"]), 2)
         self.assertEqual(self.store.list("waiting", today="2026-08-27")["total"], 1)
         self.assertEqual(self.store.list("today", today="2026-08-27")["total"], 1)
         self.assertEqual(self.store.list("inbox", query="999111")["total"], 1)
         updated = self.store.update(
-            task["id"], {"description": "Уточнить размер", "links": [
-                {"entity_type": "purchase", "entity_id": "1"}]}, 2,
+            task["id"], {"description": "Уточнить размер"}, 2,
             lambda value: True,
-            lambda kind, value: self.entities.get((kind, str(value))),
         )
         event_types = {event["event_type"] for event in updated["history"]}
-        self.assertTrue({"created", "link_added", "link_removed", "field_changed"}.issubset(event_types))
+        self.assertTrue({"created", "field_changed"}.issubset(event_types))
 
     def test_waiting_check_becomes_overdue_without_status_change(self):
         task = self.create(status="waiting", waiting_for="Поставщика", check_date="2026-08-26")
@@ -304,7 +333,6 @@ class TaskStoreTest(unittest.TestCase):
     def test_soft_delete_preserves_audit_and_excludes_task_everywhere(self):
         task = self.create(
             title="Удаляемая задача", assignee_id=2, due_date="2026-08-27",
-            entity_type="order", entity_id="1",
         )
         with self.assertRaises(TaskPermissionError):
             self.store.soft_delete(task["id"], 3)
@@ -323,7 +351,6 @@ class TaskStoreTest(unittest.TestCase):
         self.assertEqual(self.store.calendar(
             "2026-08-24", "2026-08-30", current_user_id=2
         )["rows"], [])
-        self.assertEqual(self.store.for_entity("order", "1"), [])
         self.assertEqual(self.store.counts("2026-08-27", assignee_id=2)["active"], 0)
 
     def test_soft_delete_allows_author_and_administrator(self):
@@ -353,8 +380,10 @@ class TaskStoreTest(unittest.TestCase):
             )
         apply_domain_migrations(legacy, "tasks", "upgrade")
         migrated = TaskStore(legacy).get(1)
-        self.assertEqual((migrated["title"], migrated["status"], migrated["entity_id"]),
-                         ("Старая задача", "new", "42"))
+        self.assertEqual((migrated["title"], migrated["status"]), ("Старая задача", "new"))
+        self.assertNotIn("entity_id", migrated)
+        with sqlite3.connect(str(legacy)) as connection:
+            self.assertEqual(connection.execute("SELECT entity_id FROM task_links").fetchone()[0], "42")
 
 
 if __name__ == "__main__":
