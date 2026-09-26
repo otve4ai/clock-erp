@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import io
 import json
+import logging
 import math
 import os
 import fcntl
@@ -194,14 +195,17 @@ from app.services.shared_catalog import (
     normalized_name,
     product_strap_flow_enabled,
 )
-from app.services.tasks import (
-    TaskNotFoundError,
-    TaskStore,
-    TaskConflictError,
-    TaskPermissionError,
-    TaskValidationError,
-    moscow_today,
-)
+try:
+    from app.task_errors import (
+        TaskNotFoundError, TaskConflictError, TaskPermissionError, TaskValidationError,
+    )
+except Exception:
+    logging.getLogger(__name__).exception("Legacy Tasks error types unavailable")
+
+    class _UnavailableTaskError(Exception):
+        pass
+
+    TaskNotFoundError = TaskConflictError = TaskPermissionError = TaskValidationError = _UnavailableTaskError
 from app.services.sms import (
     MAX_TEXT_LENGTH as SMS_MAX_TEXT_LENGTH,
     PAGE_SIZES as SMS_PAGE_SIZES,
@@ -19102,19 +19106,13 @@ def get_current_navigation_preferences(definitions=None):
 
 def get_navigation_items(include_disabled=False):
     active_key = get_active_navigation_key(request.path)
-    task_badge = 0
-    inbox_badge = 0
     mail_badge = 0
     try:
         user = current_auth_user() or {}
         if user.get("id"):
-            store = TaskStore(app.config["TASKS_DATABASE"])
-            store.generate_notifications(user["id"])
-            task_badge = store.counts(assignee_id=user["id"])["active"]
-            inbox_badge = _collaboration_store().unread_count(user["id"])
             mail_badge = _mail_store().unread_count()
     except (MigrationRequiredError, sqlite3.Error):
-        task_badge = 0
+        mail_badge = 0
     definitions = get_available_navigation_definitions()
     preferences = get_current_navigation_preferences(definitions)
     definitions_by_key = {
@@ -19130,12 +19128,7 @@ def get_navigation_items(include_disabled=False):
             **definition,
             "enabled": key not in hidden_keys,
             "active": key == active_key,
-            "badge": (
-                task_badge if key == "tasks"
-                else inbox_badge if key == "inbox"
-                else mail_badge if key == "mail"
-                else 0
-            ),
+            "badge": mail_badge if key == "mail" else 0,
         })
     return items
 
@@ -24722,6 +24715,12 @@ def api_repair_attachments(case_id):
     return api_success(serialize_api_repair(find_api_repair(case_id)), 201)
 
 
+def TaskStore(*args, **kwargs):
+    # Legacy Tasks is optional to ERP startup and ordinary page rendering.
+    from app.services.tasks import TaskStore as LegacyTaskStore
+    return LegacyTaskStore(*args, **kwargs)
+
+
 def _tasks_store():
     return TaskStore(app.config["TASKS_DATABASE"])
 
@@ -26290,6 +26289,19 @@ def api_cancel_writeoff(writeoff_id):
     except Exception:
         app.logger.exception("Write-off cancellation failed")
         return api_error("WRITEOFF_CANCEL_FAILED","Отмена не выполнена. Остаток не изменён.",500)
+
+
+try:
+    from app.navigation_badges import register_navigation_badges
+    register_navigation_badges(app, current_auth_user)
+except Exception:
+    app.logger.exception("Optional navigation badges could not be registered")
+
+try:
+    from app.tasks_boundary import register_tasks_module
+    register_tasks_module(app, PROJECT_ROOT, current_auth_user)
+except Exception:
+    app.logger.exception("Optional Tasks module could not be registered")
 
 
 if __name__ == "__main__":

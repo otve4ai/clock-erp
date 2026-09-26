@@ -118,3 +118,9 @@ WB через общий сервис продаж; код `app/services/wildber
 
 2026-09-26: в `docs/orders-progressive-disclosure.md` уточнено разделение здоровья синхронизации WB и счётчика замечаний сверки; общий индикатор и диагностика используют один расчёт, backend и расписание не менялись.
 `docs/architecture/tasks-boundary.md` — `current`, 2026-09-26: удаление старых ERP-привязок задач с сохранением данных, общих назначений, почты и уведомлений; схема базы не меняется, production deploy не подтверждён.
+
+2026-09-26: `docs/architecture/tasks-isolation-stage-a.md` — `current` для ветки
+`codex/tasks-isolation-stage-a`: независимый от Tasks рендер ERP, асинхронные
+счётчики, отдельная проверка collaboration и выключенный фундамент нового
+модуля с `tasks-module.db`. Связанный `tasks-boundary.md` уточнён; схема legacy
+`tasks.db` сохранена. Документы не подтверждают merge или production deploy.

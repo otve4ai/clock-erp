@@ -22,6 +22,11 @@
   ],
   "migration_modules": [
     {
+      "file": "app/tasks/migrations.py",
+      "sha256": "df174daf493bbfc96364c5744433b1470709b9eea0ba9d297ef34ad53b3e3b8a",
+      "owner": "tasks-module-offline"
+    },
+    {
       "file": "app/purchases_migrations.py",
       "sha256": "c88fe195d4c786b8ef30c3f171f9c36dcd6579bb164e2ad9c70ea56d8d3e0897",
       "owner": "purchases"
@@ -48,7 +53,7 @@
     },
     {
       "file": "app/schema_migrations.py",
-      "sha256": "6f16c9b1f753fb04d49bc20c4ab6b80d8f7896438f7a6d2b31be28aef5124a7d",
+      "sha256": "3076f4ad97b008fbe399bd28a786844d0e30fff169ccb6bb2278d6a8f8cca06c",
       "owner": "migration-platform"
     },
     {

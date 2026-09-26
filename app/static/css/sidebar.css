@@ -360,6 +360,11 @@ body[class] {
     text-overflow: ellipsis;
 }
 
+.sidebar-count[hidden],
+.mobile-erp-count[hidden] {
+    display: none;
+}
+
 .sidebar-count,
 .mobile-erp-count {
     flex: 0 0 auto;

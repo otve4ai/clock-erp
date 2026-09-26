@@ -118,7 +118,7 @@ window.ERP_NOTIFICATION_CONTEXT={
                     {{ navigation_icon(item.icon) }}
                 </span>
                 <span class="sidebar-label">{{ item.label }}</span>
-                {% if item.badge %}<span class="sidebar-count" aria-label="{{ 'Новых писем, требующих внимания' if item.key == 'mail' else 'Непрочитанных входящих' if item.key == 'inbox' else 'Активных задач на сегодня и просроченных' }}: {{ item.badge }}">{{ item.badge }}</span>{% endif %}
+                {% if item.key in ('tasks', 'inbox') and current_user %}<span class="sidebar-count" data-sidebar-badge="{{ item.key }}" hidden></span>{% elif item.badge %}<span class="sidebar-count" aria-label="Новых писем, требующих внимания: {{ item.badge }}">{{ item.badge }}</span>{% endif %}
             </a>
         {% endfor %}
     </nav>
@@ -259,7 +259,7 @@ window.ERP_EVENT_NOTIFICATIONS={csrf:{{ csrf_token()|tojson }}};
                     {{ navigation_icon(item.icon) }}
                 </span>
                 <span>{{ item.label }}</span>
-                {% if item.badge %}<span class="mobile-erp-count">{{ item.badge }}</span>{% endif %}
+                {% if item.key in ('tasks', 'inbox') and current_user %}<span class="mobile-erp-count" data-sidebar-badge="{{ item.key }}" hidden></span>{% elif item.badge %}<span class="mobile-erp-count">{{ item.badge }}</span>{% endif %}
             </a>
         {% endif %}
     {% endfor %}
@@ -304,7 +304,7 @@ window.ERP_EVENT_NOTIFICATIONS={csrf:{{ csrf_token()|tojson }}};
                     {{ navigation_icon(item.icon) }}
                 </span>
                 <span>{{ item.label }}</span>
-                {% if item.badge %}<span class="sidebar-count">{{ item.badge }}</span>{% endif %}
+                {% if item.key in ('tasks', 'inbox') and current_user %}<span class="sidebar-count" data-sidebar-badge="{{ item.key }}" hidden></span>{% elif item.badge %}<span class="sidebar-count">{{ item.badge }}</span>{% endif %}
             </a>
         {% endif %}
     {% endfor %}
@@ -315,6 +315,7 @@ window.ERP_EVENT_NOTIFICATIONS={csrf:{{ csrf_token()|tojson }}};
 <script async src="{{ static_asset_url('js/notifications.js') }}"></script>
 {% if current_user %}<script async src="{{ static_asset_url('js/event-notifications.js') }}"></script>{% endif %}
 <script async src="{{ static_asset_url('js/sidebar.js') }}"></script>
+{% if current_user %}<script async src="{{ static_asset_url('js/sidebar-badges.js') }}"></script>{% endif %}
 {% if current_user %}
 <script>
 (() => {

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.domain_schema_migrations import validate_tasks_database
+from app.collaboration_schema import validate_collaboration_database
 from app.services.audit_journal import AuditJournal
 
 
@@ -32,7 +32,7 @@ class CollaborationStore:
         self.catalog_path = Path(catalog_path).resolve()
 
     def connect(self):
-        validate_tasks_database(self.tasks_path)
+        validate_collaboration_database(self.tasks_path)
         connection = sqlite3.connect(str(self.tasks_path), timeout=15)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 15000")
