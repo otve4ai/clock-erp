@@ -1678,6 +1678,10 @@ class SalesInventory:
                     "этой продажи. Остаток не изменён, продажа не отменена."
                 )
 
+            # WB cancellation does not return goods to the local ERP stock.
+            if str(sale["source"] or "").strip().casefold() == "wildberries":
+                plan["reversals"] = []
+
             assert_products_unlocked(
                 connection,
                 [reversal["product_id"] for reversal in plan["reversals"]],
