@@ -227,6 +227,19 @@
     font-size: 11px;
 }
 
+.product-site-sync-issue-link {
+    border-radius: 5px;
+    color: inherit;
+    text-decoration: none;
+    text-underline-offset: 2px;
+}
+
+.product-site-sync-issue-link:hover,
+.product-site-sync-issue-link:focus-visible {
+    color: var(--erp-primary, #165dff);
+    text-decoration: underline;
+}
+
 .product-site-sync-source-detail strong {
     color: var(--erp-text, #172033);
 }

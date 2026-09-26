@@ -155,6 +155,33 @@ class ProductExcelExportTest(unittest.TestCase):
         )
         self.assertTrue(all(cell.data_type != "f" for cell in sheet[2]))
 
+    def test_site_issue_filter_is_applied_to_export_and_described_in_ui(self):
+        with CatalogDatabase(self.database_path).transaction() as connection:
+            connection.execute(
+                "UPDATE catalog_excel_products "
+                "SET bitrix_external_product_id=?, bitrix_active=0 WHERE id=?",
+                ("warehouse-product", self.ziiiro["id"]),
+            )
+
+        _, workbook = self.workbook(
+            "/app/products/export.xlsx?scope=filtered"
+            "&site_issue=in_stock_inactive&fields=name"
+        )
+        self.assertEqual(workbook.active.max_row, 2)
+        self.assertEqual(workbook.active["A2"].value, "'=Опасная формула")
+
+        page = self.client.get(
+            "/app/products?site_issue=in_stock_inactive"
+        )
+        markup = page.get_data(as_text=True)
+        self.assertIn("Статус сайта: с остатком выключены", markup)
+
+        javascript = (
+            Path(web.app.root_path) / "static" / "js" / "product-export.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn('currentState?.site_issue || params.get("site_issue")', javascript)
+        self.assertIn("Статус сайта: С остатком выключены", javascript)
+
     def test_selected_export_mode_is_removed(self):
         response = self.client.post("/app/products/export.xlsx", data={
             "scope": "selected",

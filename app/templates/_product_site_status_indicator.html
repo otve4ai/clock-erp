@@ -73,8 +73,16 @@
             <button class="product-site-sync-source-refresh" type="button" aria-label="Обновить TicTacToy" data-site-sync-run>↻</button>
             {% endif %}
             <span class="product-site-sync-source-detail">
-                <span><strong data-site-sync-inactive>{{ sync.in_stock_inactive|default(0) }}</strong> с остатком выключены</span>
-                <span><strong data-site-sync-active>{{ sync.out_of_stock_active|default(0) }}</strong> без остатка активны</span>
+                <a
+                    class="product-site-sync-issue-link"
+                    href="{{ url_for('warehouse_page', site_issue='in_stock_inactive') }}"
+                    title="Показать товары с остатком, выключенные на сайте"
+                ><strong data-site-sync-inactive>{{ sync.in_stock_inactive|default(0) }}</strong> с остатком выключены</a>
+                <a
+                    class="product-site-sync-issue-link"
+                    href="{{ url_for('warehouse_page', site_issue='out_of_stock_active') }}"
+                    title="Показать товары без остатка, активные на сайте"
+                ><strong data-site-sync-active>{{ sync.out_of_stock_active|default(0) }}</strong> без остатка активны</a>
             </span>
         </div>
 

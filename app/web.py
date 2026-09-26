@@ -119,7 +119,9 @@ from app.services.catalog_reader import CatalogReader
 from app.catalog.application import CatalogApplication
 from app.services.excel_product_catalog import (
     ExcelProductCatalog,
+    PRODUCT_SITE_ISSUE_LABELS,
     ProductDeleteBlockedError,
+    normalize_product_site_issue,
 )
 from app.services.excel_receipt_import import (
     MAX_EXCEL_FILE_SIZE,
@@ -5921,6 +5923,8 @@ def warehouse_page():
         selected_model_id = ""
         selected_model = ""
     selected_cell = request.args.get("cell", "").strip()
+    site_issue = normalize_product_site_issue(request.args.get("site_issue"))
+    site_issue_label = PRODUCT_SITE_ISSUE_LABELS.get(site_issue, "")
     created_date_from = request.args.get("date_from", "").strip()
     created_date_to = request.args.get("date_to", "").strip()
     stock_state = (request.args.get("stock_state") or "all").strip()
@@ -5989,6 +5993,9 @@ def warehouse_page():
     warehouse_active_filter_label = format_active_filter_label(
         warehouse_active_filter_count
     )
+    warehouse_table_filter_count = (
+        warehouse_active_filter_count + int(bool(site_issue))
+    )
 
     catalog = product_catalog.list_products(
         query=query,
@@ -6010,6 +6017,7 @@ def warehouse_page():
         include_facets=False,
         stock_state=stock_state,
         check_state=check_state if out_of_stock else "all",
+        site_issue=site_issue,
     )
     catalog_stats = catalog.get("stats") or {}
     product_metrics = {
@@ -6120,6 +6128,10 @@ def warehouse_page():
             "partial": "Проверены частично",
             "complete": "Проверены полностью",
         }[check_state]))
+    if site_issue:
+        export_filter_labels.append("Статус сайта: {}".format(
+            site_issue_label.lower()
+        ))
     product_exporter = ProductExcelExport(product_catalog.database)
     try:
         export_warehouses = product_exporter.available_warehouses()
@@ -6163,6 +6175,8 @@ def warehouse_page():
             out_of_stock=out_of_stock,
             stock_state=stock_state,
             check_state=check_state,
+            site_issue=site_issue,
+            site_issue_label=site_issue_label,
             out_of_stock_count=(
                 tab_counts["out_of_stock"]
             ),
@@ -6185,6 +6199,7 @@ def warehouse_page():
             ),
             warehouse_active_filter_count=warehouse_active_filter_count,
             warehouse_active_filter_label=warehouse_active_filter_label,
+            warehouse_table_filter_count=warehouse_table_filter_count,
             open_add=False,
             sort_by=sort_by,
             sort_dir=sort_dir,
@@ -6374,6 +6389,7 @@ def _product_export_filters(values):
         stock_state = "all"
     if stock_state != "out":
         check_state = "all"
+    site_issue = normalize_product_site_issue(values.get("site_issue"))
     return {
         "query": (values.get("q") or "").strip(),
         "brand": "" if brand_id else brand,
@@ -6390,6 +6406,7 @@ def _product_export_filters(values):
         "category_id": category_id or None,
         "stock_state": stock_state,
         "check_state": check_state,
+        "site_issue": site_issue,
     }
 
 
@@ -20682,6 +20699,7 @@ def api_products_collection():
         include_cell_item_names=not request.path.startswith("/api/v1/"),
         stock_state=(request.args.get("stock_state") or "all").strip(),
         check_state=(request.args.get("check_state") or "all").strip(),
+        site_issue=normalize_product_site_issue(request.args.get("site_issue")),
     )
     items = [serialize_api_product(item) for item in listing.get("items", [])]
     if request.args.get("include_component_inventory") == "1":
