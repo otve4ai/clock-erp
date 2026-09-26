@@ -37,7 +37,7 @@ class ActiveFilterChipsTest(unittest.TestCase):
 
     def test_reset_all_is_only_rendered_for_two_or_more_filters(self):
         self.assertIn(
-            "{% if warehouse_active_filter_count >= 2 %}",
+            "{% if warehouse_table_filter_count >= 2 %}",
             self.warehouse,
         )
         self.assertIn("if (filters.length)", self.sales)

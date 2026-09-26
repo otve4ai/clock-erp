@@ -119,8 +119,20 @@
                 id="warehouseActiveFilters"
                 class="erp-active-filters"
                 aria-label="Активные фильтры товаров"
-                {% if not warehouse_active_filter_count %}hidden{% endif %}
+                {% if not warehouse_table_filter_count %}hidden{% endif %}
             >
+                {% if site_issue %}
+                    <button
+                        class="erp-filter-chip"
+                        type="button"
+                        data-warehouse-filter="site_issue"
+                        onclick="clearWarehouseFilter('site_issue')"
+                        aria-label="Снять фильтр Статус сайта: {{ site_issue_label }}"
+                    >
+                        <span class="erp-filter-chip-label">Статус сайта: {{ site_issue_label }}</span>
+                        <span class="erp-filter-chip-remove" aria-hidden="true">×</span>
+                    </button>
+                {% endif %}
                 {% if selected_brand_id or selected_brand %}
                     <button
                         class="erp-filter-chip"
@@ -201,7 +213,7 @@
                         <span class="erp-filter-chip-remove" aria-hidden="true">×</span>
                     </button>
                 {% endif %}
-                {% if warehouse_active_filter_count >= 2 %}
+                {% if warehouse_table_filter_count >= 2 %}
                     <button
                         class="erp-active-filters-reset"
                         type="button"
@@ -217,6 +229,9 @@
                     <input type="hidden" name="per_page" value="{{ per_page }}">
                     {% if stock_state != 'all' %}
                         <input type="hidden" name="stock_state" value="{{ stock_state }}">
+                    {% endif %}
+                    {% if site_issue %}
+                        <input type="hidden" name="site_issue" value="{{ site_issue }}">
                     {% endif %}
                     {% if out_of_stock and check_state != 'all' %}
                         <input type="hidden" name="check_state" value="{{ check_state }}">
@@ -749,6 +764,8 @@
                 data-date-from="{{ created_date_from|e }}"
                 data-date-to="{{ created_date_to|e }}"
                 data-check-state="{{ check_state|e }}"
+                data-site-issue="{{ site_issue|e }}"
+                data-site-issue-label="{{ site_issue_label|e }}"
                 data-metric-positions="{{ product_metrics.positions }}"
                 data-metric-in-stock="{{ product_metrics.in_stock }}"
                 data-metric-out-of-stock="{{ product_metrics.out_of_stock }}"
@@ -1087,7 +1104,7 @@
                         </tbody>
                     </table>
                 {% if not items %}
-                    {% if query or warehouse_active_filter_count %}
+                    {% if query or warehouse_table_filter_count %}
                         <div class="empty erp-no-results-state" role="status">
                             <strong>По текущим условиям товары не найдены</strong>
                             <span>Товары не удалены — измените поиск или фильтры.</span>
@@ -1267,6 +1284,7 @@
         >
             <input type="hidden" name="per_page" value="{{ per_page }}">
             {% if stock_state != 'all' %}<input type="hidden" name="stock_state" value="{{ stock_state }}">{% endif %}
+            {% if site_issue %}<input type="hidden" name="site_issue" value="{{ site_issue }}">{% endif %}
             {% if config.TESTING and request.args.get("products_workflow_e2e") == "1" %}
                 <input type="hidden" name="products_workflow_e2e" value="1">
             {% endif %}
@@ -1415,6 +1433,7 @@
                         sort_dir=sort_dir if sort_dir != 'asc' else None,
                         per_page=per_page,
                         stock_state=stock_state if stock_state != 'all' else None,
+                        site_issue=site_issue or None,
                         products_workflow_e2e='1' if config.TESTING and request.args.get('products_workflow_e2e') == '1' else None
                     ) }}"
                 >Сбросить фильтры</a>
@@ -3201,7 +3220,9 @@
                     : ""],
                 ["check_state", state.stock_state === "out" && state.check_state !== "all"
                     ? "Статус проверки: " + state.check_state
-                    : ""]
+                    : ""],
+                ["site_issue", state.site_issue ? "Статус сайта: "
+                    + state.site_issue_label : ""]
             ].filter(function(item) { return Boolean(item[1]); });
             container.replaceChildren();
             definitions.forEach(function(item) {
@@ -3234,14 +3255,17 @@
             container.hidden = definitions.length === 0;
             const trigger = document.getElementById("warehouseFilterTrigger");
             if (trigger) {
-                trigger.classList.toggle("is-active", definitions.length > 0);
+                const drawerFilterCount = definitions.filter(function(item) {
+                    return item[0] !== "site_issue";
+                }).length;
+                trigger.classList.toggle("is-active", drawerFilterCount > 0);
                 const count = trigger.querySelector(".erp-filter-count");
                 if (count) count.remove();
-                if (definitions.length) {
+                if (drawerFilterCount) {
                     const badge = document.createElement("span");
                     badge.className = "erp-filter-count";
                     badge.setAttribute("aria-hidden", "true");
-                    badge.textContent = definitions.length > 9 ? "9+" : String(definitions.length);
+                    badge.textContent = drawerFilterCount > 9 ? "9+" : String(drawerFilterCount);
                     trigger.appendChild(badge);
                 }
             }
@@ -3308,7 +3332,9 @@
                     cell: nextResults.dataset.cell || "",
                     date_from: nextResults.dataset.dateFrom || "",
                     date_to: nextResults.dataset.dateTo || "",
-                    check_state: nextResults.dataset.checkState || "all"
+                    check_state: nextResults.dataset.checkState || "all",
+                    site_issue: nextResults.dataset.siteIssue || "",
+                    site_issue_label: nextResults.dataset.siteIssueLabel || ""
                 };
                 const metrics = {
                     positions: nextResults.dataset.metricPositions || "0",
@@ -3379,6 +3405,7 @@
             if (stockState !== "out") {
                 url.searchParams.delete("check_state");
             }
+            url.searchParams.delete("site_issue");
             url.searchParams.delete("page");
             navigateWithWarehouseParams(url);
         }
@@ -3401,6 +3428,7 @@
                 "date_from",
                 "date_to",
                 "check_state",
+                "site_issue",
                 "view",
                 "page"
             ].forEach(name => url.searchParams.delete(name));
@@ -3419,6 +3447,7 @@
                 cell: ["cell"],
                 date: ["date_from", "date_to"],
                 check_state: ["check_state"],
+                site_issue: ["site_issue"],
             }[filterName] || [];
 
             parameterNames.forEach((name) => {
