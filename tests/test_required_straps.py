@@ -294,11 +294,11 @@ class RequiredStrapOrderTest(unittest.TestCase):
                     self.watch["id"]
                 )
 
-        self.assertTrue(enabled.get_json()["data"]["requires_strap"])
+        self.assertTrue(enabled[0].get_json()["data"]["requires_strap"])
         self.assertTrue(
             reopened_enabled.get_json()["data"]["requires_strap"]
         )
-        self.assertFalse(disabled.get_json()["data"]["requires_strap"])
+        self.assertFalse(disabled[0].get_json()["data"]["requires_strap"])
         self.assertFalse(
             reopened_disabled.get_json()["data"]["requires_strap"]
         )

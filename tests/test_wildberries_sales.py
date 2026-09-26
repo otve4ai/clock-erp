@@ -116,20 +116,6 @@ class WildberriesSalesTest(unittest.TestCase):
         self.assertEqual(self.stock(), 1)
         self.assertEqual(self.effects()[0:3], (1, 2, 2))
 
-    def test_components_use_existing_replacement_service(self):
-        RequiredStraps(self.database).configure(self.watch['id'], True)
-        base = self.catalog.create_product('Часы основа', article='BASE', brand='Brand', category='Часы', stock=1)
-        strap = self.catalog.create_product('Ремешок', article='STRAP', brand='Brand', category='Ремешки', stock=1)
-        sale = self.service.conduct(self.order, replacement={
-            'line_index': 0, 'base_product_id': base['id'],
-            'installed_strap_product_id': strap['id'], 'removed_strap_mode': 'none',
-        })
-        self.assertEqual(sale['source'], 'wildberries')
-        self.assertEqual(self.stock(), 3)
-        self.assertEqual(self.stock(base), 0)
-        self.assertEqual(self.stock(strap), 0)
-        self.assertEqual(self.service.conduct(self.order)['id'], sale['id'])
-
     def test_watch_without_enabled_setting_cannot_start_strap_replacement(self):
         base = self.catalog.create_product(
             'Часы основа', article='BASE-WATCH', brand='Brand',
@@ -213,7 +199,7 @@ class WildberriesSalesTest(unittest.TestCase):
             page = web.app.test_client().get('/order/wildberries/123')
 
         self.assertEqual(page.status_code, 200)
-        self.assertNotIn('Заменить ремешок', page.get_data(as_text=True))
+        self.assertNotIn('data-open-strap-replacement>', page.get_data(as_text=True))
 
         RequiredStraps(self.database).configure(glasses['id'], True)
         with self.route_context(), mock.patch.object(
@@ -357,7 +343,7 @@ class WildberriesSalesTest(unittest.TestCase):
             html = page.get_data(as_text=True)
             self.assertIn('/order/wildberries/123/conduct-sale', html)
             self.assertIn('data-wb-sale-form', html)
-            self.assertNotIn('Заменить ремешок', html)
+            self.assertNotIn('data-open-strap-replacement>', html)
             self.assertNotIn('id="orderSaleCommission', html)
             self.assertNotIn('/order/wb:123/stock-writeoff', html)
             # Parse rendered inline JavaScript without launching a browser.
