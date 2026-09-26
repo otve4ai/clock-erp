@@ -45,14 +45,14 @@ class TasksRuntimeCompatibilityTest(unittest.TestCase):
             EVIDENCE["sqlite_source_id"] = connection.execute("SELECT sqlite_source_id()").fetchone()[0]
             self.assertEqual(connection.execute("SELECT version FROM tasks_module_migrations").fetchone(), (1,))
             with self.assertRaises(sqlite3.OperationalError):
-                connection.execute("INSERT INTO tasks_module_migrations VALUES(2,'bad','now','test')")
+                connection.execute("INSERT INTO tasks_module_migrations VALUES(99,'bad','now','test')")
             with self.assertRaises(sqlite3.OperationalError):
                 connection.execute("CREATE TABLE forbidden(value TEXT)")
             self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone()[0].lower(), "delete")
         finally:
             connection.close()
-        self.assertEqual(TasksRepository(path).status()["schema_version"], 1)
-        self.assertEqual(_count(path, "SELECT COUNT(*) FROM tasks_module_migrations", ()), 1)
+        self.assertEqual(TasksRepository(path).status()["schema_version"], 2)
+        self.assertEqual(_count(path, "SELECT COUNT(*) FROM tasks_module_migrations", ()), 2)
         self.assertEqual(path.read_bytes(), before)
         EVIDENCE["uri_percent_encoding_readonly_dml_ddl"] = "passed"
 
@@ -85,8 +85,8 @@ runpy.run_path(sys.argv[0], run_name='__main__')
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=10,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(json.loads(completed.stdout), {"schema_version": 1, "stage": "foundation"})
-        self.assertEqual(TasksRepository(path).status()["schema_version"], 1)
+        self.assertEqual(json.loads(completed.stdout), {"schema_version": 2, "stage": "core"})
+        self.assertEqual(TasksRepository(path).status()["schema_version"], 2)
         EVIDENCE["offline_cli_without_erp_import"] = "passed"
 
     def test_migration_exception_rolls_back_ddl_and_can_be_retried(self):

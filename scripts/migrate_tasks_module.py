@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit local/offline Tasks foundation bootstrap; does not import Flask ERP."""
+"""Explicit offline new Tasks schema migration; never imports ERP or legacy tasks."""
 
 import argparse
 import json

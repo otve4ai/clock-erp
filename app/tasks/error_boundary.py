@@ -4,6 +4,8 @@ from functools import wraps
 
 from flask import current_app, jsonify
 
+from .domain import TaskError
+
 
 def unavailable():
     response = jsonify(code="TASKS_MODULE_UNAVAILABLE", message="Модуль задач недоступен.")
@@ -22,6 +24,14 @@ def module_boundary(view):
             return unavailable()
         try:
             return view(*args, **kwargs)
+        except TaskError as error:
+            body = {"code": error.code, "message": error.message}
+            if error.fields:
+                body["fields"] = error.fields
+            response = jsonify(body)
+            response.status_code = error.status
+            response.headers["Cache-Control"] = "no-store"
+            return response
         except Exception:
             current_app.logger.exception("Tasks module request failed")
             return unavailable()

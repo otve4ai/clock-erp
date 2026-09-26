@@ -130,3 +130,12 @@ WB через общий сервис продаж; код `app/services/wildber
 SQLite 3.7.17, только временная копия и синтетические данные. Production-код
 этапа A не изменён, добавлены воспроизводимые проверки и исправлен legacy
 test trace callback. Merge, push и deploy не выполнялись.
+
+2026-09-26: `docs/architecture/tasks-core-stage-b.md` — `current` для
+`codex/tasks-core-stage-b` от принятого `6d06b8f`: новый normal Task core,
+единые permissions, локальные activity/transactions, version, soft delete,
+API и schema v2 новой tasks-module.db. По умолчанию OFF, UI и legacy не
+переключены. `tasks-boundary.md` уточнён: legacy data migration не предусмотрена.
+`docs/validation/tasks-core-b-runtime.json` и `tasks-core-b-ddl.json` фиксируют
+134 успешных теста на Linux / Python 3.6.8 / SQLite 3.7.17 и runtime DDL gate.
+Только временные fixtures; merge, push, deploy не выполнялись.

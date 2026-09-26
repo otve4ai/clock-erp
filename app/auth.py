@@ -199,6 +199,15 @@ class AuthStore:
             ).fetchone()
         return self._row_dict(row)
 
+    def get_active_user_identity(self, user_id):
+        """Narrow read-only identity lookup for optional independent modules."""
+        connection = sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.1)
+        try:
+            row = connection.execute("SELECT id,active FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+            return {"id": row[0], "active": row[1]} if row else None
+        finally:
+            connection.close()
+
     def get_navigation_preferences(self, user_id):
         if not user_id:
             return None

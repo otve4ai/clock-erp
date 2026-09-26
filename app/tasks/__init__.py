@@ -1,1 +1,1 @@
-"""Optional Tasks foundation. Importing this package has no side effects."""
+"""Independent new Tasks core. Importing this package has no side effects."""

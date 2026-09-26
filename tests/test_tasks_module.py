@@ -99,7 +99,7 @@ class TasksModuleTest(unittest.TestCase):
             app = self.application()
             response = app.test_client().get("/api/v1/tasks-module/status")
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.get_json()["data"], {"schema_version": 1, "stage": "foundation"})
+            self.assertEqual(response.get_json()["data"], {"schema_version": 2, "stage": "core"})
             self.assertEqual(self.path.read_bytes(), before)
         self.assertTrue(opened)
         self.assertEqual(denied, [])

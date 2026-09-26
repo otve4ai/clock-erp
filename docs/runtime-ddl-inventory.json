@@ -23,7 +23,7 @@
   "migration_modules": [
     {
       "file": "app/tasks/migrations.py",
-      "sha256": "df174daf493bbfc96364c5744433b1470709b9eea0ba9d297ef34ad53b3e3b8a",
+      "sha256": "c88d189b9fda663710d046f4ea472002500e1591dc44668a68d34aa9d7e78cf3",
       "owner": "tasks-module-offline"
     },
     {
