@@ -1,15 +1,22 @@
-<section class="orders-sync" data-orders-sync data-csrf="{{ csrf_token() }}" aria-label="Синхронизация заказов">
-    <header><strong>Синхронизация заказов</strong><button class="button button-primary" type="button" data-sync-source="all">↻ Обновить всё</button><button class="button button-secondary" type="button" data-sync-details aria-label="Диагностика и период" aria-expanded="false">⋯</button></header>
+<div class="product-site-sync-control orders-sync-control" data-orders-sync data-sync-state="unknown" data-csrf="{{ csrf_token() }}">
+    <button class="products-workspace-button product-site-sync-indicator" type="button" data-orders-sync-toggle aria-haspopup="dialog" aria-expanded="false" aria-controls="ordersSyncPanel">
+        <span class="product-site-sync-indicator__dot" aria-hidden="true"></span>
+        <span data-orders-sync-label aria-live="polite">Синхронизация · Нет данных</span>
+        <span class="product-site-sync-indicator__chevron" aria-hidden="true">⌄</span>
+    </button>
+<section class="product-site-sync-panel" id="ordersSyncPanel" data-orders-sync-panel role="dialog" aria-modal="false" aria-labelledby="ordersSyncTitle" hidden>
+    <header class="product-site-sync-panel__header"><strong id="ordersSyncTitle">Синхронизация заказов</strong><div class="product-site-sync-panel__actions"><button class="product-site-sync-update" type="button" data-sync-source="all">↻ Обновить всё</button><button class="product-site-sync-source-refresh" type="button" data-sync-details aria-label="Диагностика и период" aria-expanded="false" aria-controls="ordersSyncDiagnostics">⋯</button></div></header>
     {% for key,label in [('tictactoy','TicTacToy'),('wildberries','Wildberries')] %}
-    <div class="orders-sync-row" data-sync-row="{{ key }}" data-state="attention">
-        <span class="sync-dot" aria-hidden="true"></span><span>{{ label }}</span><button type="button" class="sync-state-label" data-sync-state data-sync-details aria-label="Диагностика {{ label }}">Проверяем…</button><time data-orders-sync-time>—</time><button class="button button-secondary" type="button" data-sync-source="{{ key }}" aria-label="Обновить {{ label }}">↻</button>
+    <div class="product-site-sync-panel__source orders-sync-row" data-sync-row="{{ key }}" data-state="unknown">
+        <span class="sync-dot" aria-hidden="true"></span><span>{{ label }}</span><button type="button" class="sync-state-label product-site-sync-source-state" data-sync-state data-sync-details aria-expanded="false" aria-controls="ordersSyncDiagnostics" aria-label="Диагностика {{ label }}">Проверяем…</button><time class="product-site-sync-source-time" data-orders-sync-time>—</time><button class="product-site-sync-source-refresh" type="button" data-sync-source="{{ key }}" aria-label="Обновить {{ label }}">↻</button>
     </div>
     {% endfor %}
-    <footer>Последнее обновление: <span data-sync-latest>—</span></footer>
-    <div class="orders-sync-details" data-sync-diagnostics hidden>
+    <footer class="product-site-sync-panel__footer"><span>Последнее обновление: <span data-sync-latest>—</span></span></footer>
+    <div class="orders-sync-details" id="ordersSyncDiagnostics" data-sync-diagnostics hidden>
         <label>Период <select class="field" name="period" form="ordersFilters" aria-label="Период" data-auto-submit-filter>{% for value,label in [('all','Всё время'),('today','Сегодня'),('7d','7 дней'),('30d','30 дней')] %}<option value="{{ value }}"{% if request.args.get('period','all') == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
         <p data-ttt-diagnostic role="status"></p>
         {% with unified_orders_sync=true %}{% include "_wb_recovery.html" %}{% endwith %}
     </div>
 </section>
+</div>
 <script defer src="{{ static_asset_url('js/orders-sync.js') }}"></script>

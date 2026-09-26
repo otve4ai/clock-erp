@@ -32,6 +32,7 @@ test('a late list response cannot replace a newer selected order', async ({ page
     await new Promise((resolve) => setTimeout(resolve, 400));
     await route.fulfill({ response });
   });
+  await page.locator('[data-status-more] > summary').click();
   await page.locator('[data-status-filter="all"]').click();
   await expect.poll(() => started).toBe(true);
   await page.locator('.orders-split-table a.order-number').first().click();
@@ -83,8 +84,10 @@ test('history restores list filters without reloading the unchanged card', async
   page.on('request', (request) => {
     if (request.headers()['x-order-detail']) requests++;
   });
+  await page.locator('[data-status-more] > summary').click();
   await page.locator('[data-status-filter="N"]').click();
   await expect(page).toHaveURL(/status=N/);
+  await page.locator('[data-status-more] > summary').click();
   await page.locator('[data-status-filter="all"]').click();
   await expect(page).not.toHaveURL(/status=N/);
   await page.goBack();
