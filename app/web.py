@@ -193,7 +193,6 @@ from app.services.shared_catalog import (
     product_strap_flow_enabled,
 )
 from app.services.tasks import (
-    ENTITY_TYPES as TASK_ENTITY_TYPES,
     TaskNotFoundError,
     TaskStore,
     TaskConflictError,
@@ -24755,9 +24754,10 @@ def _task_user_exists(user_id):
     return any(int(user["id"]) == int(user_id) for user in _task_users())
 
 
-def _task_entity(entity_type, entity_id):
+def _erp_entity_reference(entity_type, entity_id):
+    """Resolve shared ERP references for mail and responsibility assignment."""
     entity_id = str(entity_id or "").strip()
-    if entity_type not in TASK_ENTITY_TYPES or not entity_id:
+    if entity_type not in {"customer", "order", "sale", "repair", "product", "purchase"} or not entity_id:
         return None
     if entity_type == "customer":
         customer = customer_store().get(int(entity_id)) if entity_id.isdigit() else None
@@ -24825,9 +24825,6 @@ def _serialize_tasks(rows):
         item["assignee_name"] = full_name or user.get("email") or "Сотрудник"
         author = users.get(int(item["author_id"])) or {}
         item["author_name"] = " ".join(str(author.get(key) or "").strip() for key in ("first_name", "last_name")).strip() or author.get("email") or "Сотрудник"
-        item.pop("links", None)
-        for key in ("entity_type", "entity_id", "entity_label", "entity_href"):
-            item.pop(key, None)
         item["can_delete"] = bool(
             not item.get("deleted_at") and (
                 is_admin or current_id in {
@@ -24839,14 +24836,6 @@ def _serialize_tasks(rows):
             actor = users.get(int(event["actor_id"])) or {}
             event["actor_name"] = " ".join(str(actor.get(key) or "").strip() for key in ("first_name", "last_name")).strip() or actor.get("email") or "Сотрудник"
         result.append(item)
-    return result
-
-
-def _standalone_task_payload(payload):
-    """Remove legacy entity-link fields from task writes."""
-    result = dict(payload)
-    for key in ("links", "entity_type", "entity_id"):
-        result.pop(key, None)
     return result
 
 
@@ -24937,7 +24926,7 @@ def api_tasks_calendar_get():
 def api_task_calendar_reschedule(task_id):
     user = current_auth_user() or {}
     try:
-        payload = _standalone_task_payload(api_json_payload())
+        payload = api_json_payload()
         task = _tasks_store().calendar_reschedule(
             task_id, payload.get("due_date"), payload.get("due_time"), user.get("id"),
             actor_role=user.get("role", "employee"), section=payload.get("section", "inbox"),
@@ -24954,11 +24943,11 @@ def api_task_calendar_reschedule(task_id):
 def api_tasks_collection_post():
     user = current_auth_user() or {}
     try:
-        payload = _standalone_task_payload(api_json_payload())
+        payload = api_json_payload()
         payload.setdefault("assignee_id", user.get("id"))
         payload.setdefault("idempotency_key", request.headers.get("Idempotency-Key"))
         task, created = _tasks_store().create(
-            payload, user.get("id"), _task_user_exists, _task_entity,
+            payload, user.get("id"), _task_user_exists,
             collaboration=_collaboration_store(), actor=user,
         )
     except (TaskValidationError, TaskNotFoundError, TaskConflictError) as error:
@@ -24979,10 +24968,10 @@ def api_task_resource(task_id):
             task = _tasks_store().get(task_id)
         else:
             previous_assignee_id = _tasks_store().get(task_id).get("assignee_id")
-            payload = _standalone_task_payload(api_json_payload())
+            payload = api_json_payload()
             payload.setdefault("assignment_operation_key", request.headers.get("Idempotency-Key"))
             task = _tasks_store().update(
-                task_id, payload, user.get("id"), _task_user_exists, _task_entity,
+                task_id, payload, user.get("id"), _task_user_exists,
                 collaboration=_collaboration_store(), actor=user,
             )
     except (TaskValidationError, TaskNotFoundError, TaskConflictError) as error:
@@ -25074,7 +25063,6 @@ def api_task_counts():
         counts = _tasks_store().counts(
             assignee_id=request.args.get("assignee_id") or None,
             priority=request.args.get("priority", ""),
-            entity_type=request.args.get("entity_type", ""),
             status=request.args.get("status", ""), due=request.args.get("due", ""),
             only_mine=user.get("id") if request.args.get("only_mine") == "1" else None,
             scope=request.args.get("scope", "all"), current_user_id=user.get("id"),
@@ -25155,7 +25143,7 @@ def _collaboration_entity(entity_type, entity_id):
             return None
         return {"id": str(task["id"]), "label": task["title"],
                 "href": "/app/tasks?task={}".format(task["id"])}
-    return _task_entity(entity_type, entity_id)
+    return _erp_entity_reference(entity_type, entity_id)
 
 
 def _inbox_actor_names(rows):
@@ -25189,7 +25177,7 @@ def api_responsibility(entity_type, entity_id):
                     "assignment_comment": payload.get("comment", ""),
                     "assignment_operation_key": request.headers.get("Idempotency-Key") or
                                                 payload.get("operation_key"),
-                }, actor["id"], _task_user_exists, _task_entity,
+                }, actor["id"], _task_user_exists,
                 collaboration=store, actor=actor,
             )
             return api_success(_serialize_tasks([task])[0])
@@ -25805,7 +25793,7 @@ def api_mail_thread_link(thread_id):
     try:
         entity_type = str(payload.get("entity_type") or "")
         entity_id = str(payload.get("entity_id") or "")
-        entity = _task_entity(entity_type, entity_id)
+        entity = _erp_entity_reference(entity_type, entity_id)
         if not entity:
             raise MailValidationError("Связанный объект ERP не найден.")
         _mail_store().replace_link(thread_id, payload["entity_type"], payload["entity_id"], entity["label"], _mail_actor_id())

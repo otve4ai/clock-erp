@@ -228,6 +228,26 @@ class MailWebTest(unittest.TestCase):
         self.assertEqual(first.status_code, 202)
         self.assertEqual(second.status_code, 422)
 
+    def test_erp_links_still_work_but_task_links_are_rejected(self):
+        account = self.store.save_account(self.account_payload(), self.owner_id, SecretBox(KEY))
+        thread_id, unused = self.store.ingest(account["id"], "inbox", "INBOX", "1", 1,
+                                             parse_message(raw_message()))
+        self.login(self.employee_id)
+        url = "/api/v1/mail/threads/{}/links".format(thread_id)
+        with patch.object(web, "OrdersSnapshotStore") as orders:
+            orders.return_value.get.return_value = {"id": "42", "number": "42"}
+            linked = self.client.post(url, json={"entity_type": "order", "entity_id": "42"},
+                                      headers=self.headers)
+        self.assertEqual(linked.status_code, 200)
+        links = self.store.get_thread(thread_id)["links"]
+        self.assertTrue(any(link["entity_type"] == "order" and link["entity_id"] == "42" for link in links))
+        rejected = self.client.post(url, json={"entity_type": "task", "entity_id": "42"},
+                                    headers=self.headers)
+        self.assertEqual(rejected.status_code, 422)
+        with self.assertRaises(web.MailValidationError):
+            self.store.replace_link(thread_id, "task", "42", "Task", self.employee_id)
+        self.assertEqual(self.store.get_thread(thread_id)["links"], links)
+
 
 if __name__ == "__main__":
     unittest.main()

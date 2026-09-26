@@ -102,7 +102,7 @@ class CollaborationStoreTest(unittest.TestCase):
         tasks = TaskStore(self.tasks)
         task, created = tasks.create(
             {"title": "Проверить остаток", "assignee_id": 2, "idempotency_key": "task-one"},
-            1, lambda value: int(value) in {1, 2}, lambda kind, value: None,
+            1, lambda value: int(value) in {1, 2},
             collaboration=self.store, actor=self.maxim,
         )
         self.assertTrue(created)
@@ -111,7 +111,7 @@ class CollaborationStoreTest(unittest.TestCase):
         self.assertEqual(tasks.list("inbox", scope="created", current_user_id=1)["total"], 1)
         tasks.update(
             task["id"], {"assignee_id": 1, "assignment_operation_key": "task-back"}, 2,
-            lambda value: int(value) in {1, 2}, lambda kind, value: None,
+            lambda value: int(value) in {1, 2},
             collaboration=self.store,
             actor={"id": 2, "first_name": "MRV", "last_name": "", "email": "2@example.test"},
         )
@@ -123,20 +123,20 @@ class CollaborationStoreTest(unittest.TestCase):
         tasks = TaskStore(self.tasks)
         task, unused = tasks.create(
             {"title": "Исходная", "assignee_id": 1}, 1,
-            lambda value: int(value) in {1, 2}, lambda kind, value: None,
+            lambda value: int(value) in {1, 2},
             collaboration=self.store, actor=self.maxim,
         )
         version = task["version"]
         saved = tasks.update(
             task["id"], {"title": "Изменение A", "version": version}, 1,
-            lambda value: int(value) in {1, 2}, lambda kind, value: None,
+            lambda value: int(value) in {1, 2},
             collaboration=self.store, actor=self.maxim,
         )
         self.assertEqual(saved["version"], version + 1)
         with self.assertRaises(TaskConflictError):
             tasks.update(
                 task["id"], {"title": "Изменение B", "version": version}, 2,
-                lambda value: int(value) in {1, 2}, lambda kind, value: None,
+                lambda value: int(value) in {1, 2},
                 collaboration=self.store,
                 actor={"id": 2, "first_name": "MRV", "last_name": ""},
             )

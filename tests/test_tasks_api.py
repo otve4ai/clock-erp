@@ -1,13 +1,89 @@
+import sqlite3
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app import auth, web
+from app.catalog_db import CatalogDatabase
 from app.domain_schema_migrations import apply_domain_migrations
 
 
 class TasksApiTest(unittest.TestCase):
+    def test_task_lifecycle_never_writes_catalog_business_tables(self):
+        self.login()
+        catalog = CatalogDatabase()
+        catalog.initialize()
+        with catalog.connect() as connection:
+            tables = {
+                row[0] for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            } - {"erp_audit_events", "sqlite_sequence"}
+
+        def snapshot():
+            with catalog.connect() as connection:
+                return {
+                    table: sorted(repr(tuple(row)) for row in connection.execute(
+                        'SELECT * FROM "{}"'.format(table.replace('"', '""'))
+                    )) for table in tables
+                }
+
+        before = snapshot()
+        blocked = []
+        original_connect = sqlite3.connect
+
+        def authorize(action, table, column, database, trigger):
+            if action in {sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE,
+                          sqlite3.SQLITE_DELETE} and table in tables:
+                blocked.append((action, table, database))
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+
+        def guarded_connect(*args, **kwargs):
+            connection = original_connect(*args, **kwargs)
+            connection.set_authorizer(authorize)
+            return connection
+
+        headers = {"X-CSRF-Token": "tasks-csrf"}
+        with patch("sqlite3.connect", side_effect=guarded_connect):
+            # Prove the guard catches writes even when they match no rows.
+            with catalog.connect() as connection:
+                with self.assertRaises(sqlite3.DatabaseError):
+                    connection.execute("UPDATE catalog_excel_products SET id=id WHERE 0")
+            self.assertTrue(blocked)
+            blocked.clear()
+            created = self.client.post("/api/v1/tasks", json={
+                "title": "Warehouse boundary probe", "assignee_id": self.user_id,
+                "entity_type": "product", "entity_id": "123",
+                "links": [{"entity_type": "order", "entity_id": "456"}],
+            }, headers=headers)
+            self.assertEqual(created.status_code, 201, created.get_data(as_text=True))
+            task_id = created.get_json()["data"]["id"]
+            base = "/api/v1/tasks/{}".format(task_id)
+            requests = [
+                ("patch", base, {"title": "Edited probe", "assignee_id": self.owner_id}),
+                ("post", base + "/reschedule", {"due_date": "2026-10-01"}),
+                ("post", base + "/move", {"section": "anytime"}),
+                ("post", base + "/complete", {"result": "Checked"}),
+                ("post", base + "/reopen", {}),
+                ("post", base + "/status", {"status": "cancelled"}),
+                ("post", base + "/reopen", {}),
+                ("delete", base, {}),
+            ]
+            for method, url, payload in requests:
+                with self.subTest(method=method, url=url):
+                    response = getattr(self.client, method)(url, json=payload, headers=headers)
+                    self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+            self.assertEqual(blocked, [], "Task operation attempted a catalog business write")
+        self.assertEqual(snapshot(), before)
+        with catalog.connect() as connection:
+            self.assertGreater(connection.execute(
+                "SELECT COUNT(*) FROM erp_audit_events WHERE entity_type='task' AND entity_id=?",
+                (str(task_id),),
+            ).fetchone()[0], 0)
+
     def setUp(self):
         self.original_config = dict(web.app.config)
         self.temporary = tempfile.TemporaryDirectory()
@@ -158,6 +234,17 @@ class TasksApiTest(unittest.TestCase):
         self.assertNotIn("entity_type", data)
         self.assertEqual(self.client.get("/api/v1/tasks/by-entity/order/42").status_code, 404)
         self.assertEqual(self.client.get("/api/v1/tasks/entities?type=order&q=42").status_code, 404)
+        with patch.object(web, "_erp_entity_reference", side_effect=AssertionError("Task resolved an ERP object")):
+            updated = self.client.patch("/api/v1/tasks/{}".format(data["id"]), json={
+                "title": "Updated standalone task", "entity_type": "product", "entity_id": "404",
+                "links": [{"entity_type": "product", "entity_id": "404"}],
+            }, headers={"X-CSRF-Token": "tasks-csrf"})
+            self.assertEqual(updated.status_code, 200)
+            self.assertNotIn("links", updated.get_json()["data"])
+            for endpoint in ("/api/v1/tasks?view=inbox", "/api/v1/tasks/counts?view=inbox",
+                             "/api/v1/tasks/calendar?start=2026-08-24&end=2026-08-30"):
+                self.assertEqual(self.client.get(endpoint + "&entity_type=order").get_json()["data"],
+                                 self.client.get(endpoint).get_json()["data"])
 
     def test_calendar_api_range_reschedule_and_permission(self):
         self.login()
@@ -187,7 +274,7 @@ class TasksApiTest(unittest.TestCase):
         store = web.TaskStore(self.tasks_path)
         create = lambda title, assignee: store.create(
             {"title": title, "assignee_id": assignee}, self.user_id,
-            lambda value: True, lambda kind, value: None,
+            lambda value: True,
         )[0]
         headers = {"X-CSRF-Token": "tasks-csrf"}
 

@@ -17,6 +17,8 @@ class TasksStandaloneUiTest(unittest.TestCase):
         )
         forbidden = (
             "Создать задачу",
+            "Поставить задачу",
+            "Связанные задачи",
             "data-entity-tasks",
             "VechasuEntityTasksInit",
             "/api/v1/tasks/by-entity",
