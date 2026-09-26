@@ -23,12 +23,12 @@
   "migration_modules": [
     {
       "file": "app/tasks/migrations.py",
-      "sha256": "0e0822d3daa03815c5c55183b66261d15521082d4e0c3d9d84d4d94f85adf065",
+      "sha256": "5960ab82e3bd5982515ebe23bd440d0afc0827ec4b38a241975d92a9b1c717d7",
       "owner": "tasks-module-offline"
     },
     {
       "file": "app/tasks/schema.py",
-      "sha256": "e20f8bd91b2e76d63256f20f8e33741da9a20178c2400b9948f263373e12c0f6",
+      "sha256": "f41a935dcd357b3a71e4824881824c7244a364b250f23b5bb7370c838ce0b461",
       "owner": "tasks-module-passive-schema-contract"
     },
     {

@@ -8,7 +8,8 @@ STATUSES = ("new", "in_progress", "waiting", "done")
 PRIORITIES = ("low", "normal", "high")
 EDIT_FIELDS = frozenset(("title", "description", "status", "priority", "assigned_to",
                          "deadline_date", "related_entity_type", "related_entity_id",
-                         "related_entity_label"))
+                         "related_entity_label", "project_id"))
+BUSINESS_TIMEZONE = timezone(timedelta(hours=3))
 
 
 class TaskError(Exception):
@@ -78,6 +79,8 @@ def task_values(payload, creating=False):
                 raise invalid(field)
         elif field == "assigned_to":
             value = positive_integer(value, field)
+        elif field == "project_id":
+            value = None if value is None else positive_integer(value, field)
         elif field == "deadline_date":
             value = date_value(value)
         else:
@@ -101,15 +104,42 @@ def utc_now():
 def business_today():
     # Date-only deadlines never become timestamps; only the business day's
     # boundary follows the ERP Moscow calendar, not the host's timezone.
-    return datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+    return datetime.now(BUSINESS_TIMEZONE).date().isoformat()
 
 
 def list_options(options):
     allowed = {"scope", "status", "priority", "deadline_date", "overdue", "today",
-               "search", "limit", "offset"}
+               "search", "limit", "offset", "view", "project_id", "project",
+               "assigned_to", "created_by", "date_from", "date_to"}
     if set(options) - allowed:
         raise invalid(sorted(set(options) - allowed)[0], "Неизвестный фильтр.")
     result = dict(options)
+    if "view" in result and result["view"] not in ("today", "overdue", "delegated_waiting", "archive"):
+        raise invalid("view")
+    if "project" in result and (result["project"] != "none" or "project_id" in result):
+        raise invalid("project")
+    for field in ("project_id", "assigned_to", "created_by"):
+        if field in result:
+            raw = str(result[field])
+            if not re.fullmatch(r"[0-9]{1,19}", raw):
+                raise invalid(field)
+            result[field] = positive_integer(int(raw), field)
+    for field in ("date_from", "date_to"):
+        if field in result:
+            if result.get("view") != "archive" or result[field] is None:
+                raise invalid(field, "Период применим только к архиву.")
+            date_value(result[field], field)
+    if result.get("date_from", "0001-01-01") > result.get("date_to", "9999-12-31"):
+        raise invalid("date_to")
+    for field in ("date_from", "date_to"):
+        if field in result:
+            try:
+                instant = datetime.strptime(result[field], "%Y-%m-%d").replace(tzinfo=BUSINESS_TIMEZONE)
+                if field == "date_to":
+                    instant += timedelta(days=1)
+                result[field] = instant.astimezone(timezone.utc).isoformat()
+            except (ValueError, OverflowError):
+                raise invalid(field)
     for field, choices in (("status", STATUSES), ("priority", PRIORITIES)):
         if field in result and result[field] not in choices:
             raise invalid(field)
@@ -130,4 +160,22 @@ def list_options(options):
         if number > maximum or number < (1 if field == "limit" else 0):
             raise invalid(field)
         result[field] = number
+    return result
+
+
+def project_name(value):
+    value = text_value(value, "name", 200).strip()
+    if not value:
+        raise invalid("name", "Название обязательно.")
+    return value
+
+
+def project_options(options):
+    if set(options) - {"archived", "search", "limit", "offset"}:
+        raise invalid("query")
+    result = list_options({key: value for key, value in options.items() if key != "archived"})
+    archived = options.get("archived", "false")
+    if archived not in ("true", "false", "1", "0"):
+        raise invalid("archived")
+    result["archived"] = archived in ("true", "1")
     return result

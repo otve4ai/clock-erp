@@ -3,6 +3,11 @@
 Статус: `current` для ветки `codex/tasks-core-stage-b`, 2026-09-26.
 Реализация выключена по умолчанию. Документ не подтверждает merge, push или deploy.
 
+Для ветки Stage C schema v3, scopes, visibility, active lists и summary уточнены
+в [контракте Projects/Views](tasks-projects-stage-c.md). Настоящий документ
+сохраняет историю принятого Stage B; его ограничения «без Projects» и «all только
+admin» не описывают Stage C.
+
 Уточнения validation/error handling и повторная runtime-проверка:
 [этап B.1](tasks-core-review-fixes-b1.md). Модель, права и schema version 2 сохранены.
 

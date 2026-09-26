@@ -157,7 +157,8 @@ class TasksIsolationTest(unittest.TestCase):
             for statement in CORE_DDL:
                 connection.execute(statement.replace("status TEXT NOT NULL", "status TEXT"))
             connection.executemany("INSERT INTO tasks_module_migrations VALUES(?,?,'now','fixture')",
-                                   ((1, "tasks-module-foundation-v1"), (2, "tasks-module-core-v2")))
+                                   ((1, "tasks-module-foundation-v1"), (2, "tasks-module-core-v2"),
+                                    (3, "tasks-module-projects-v3")))
             connection.commit()
         finally:
             connection.close()

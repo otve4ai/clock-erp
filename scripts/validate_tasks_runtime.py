@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stages A/B.1: exact-runtime tests in an isolated source copy, never live ERP."""
+"""Stages A-C: exact-runtime tests in an isolated source copy, never live ERP."""
 
 import argparse
 import hashlib
@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STAGE_A = "a806ef287792524e730ff2074d3137eb7aee8664"
 STAGE_B_BASE = "6d06b8f34381665aed37deeacb643ae18ab12d49"
 STAGE_B1_BASE = "c5c1762785d0ce0f840da05f37456e0c3004e941"
+STAGE_C_BASE = "beb68e820572c223729671953f41a0cc203d15b3"
 STAGE_A_PYTHON = (
     "app/collaboration_schema.py", "app/navigation_badges.py", "app/schema_migrations.py",
     "app/services/collaboration.py", "app/services/tasks.py", "app/task_errors.py",
@@ -31,10 +32,12 @@ STAGE_A_PYTHON = (
     "tests/test_tasks_isolation.py", "tests/test_tasks_module.py",
     "app/auth.py", "app/tasks/domain.py", "tests/test_tasks_core.py", "tests/test_tasks_core_api.py",
     "app/tasks/schema.py", "tests/test_tasks_core_schema.py",
+    "app/tasks/project_repository.py", "app/tasks/project_services.py", "tests/test_tasks_projects.py",
 )
 PATTERNS = (
     "test_tasks_isolation.py", "test_tasks_module.py", "test_tasks_runtime_compat.py",
     "test_tasks_core*.py",
+    "test_tasks_projects.py",
     "test_tasks.py", "test_tasks_api.py", "test_collaboration*.py",
     "test_navigation_preferences.py", "test_orders_navigation_performance.py",
     "test_sidebar_visual_contract.py", "test_user_notifications.py",
@@ -74,8 +77,9 @@ def main():
         parser.error("ERP_TASKS_MODULE_DATABASE must be unset before the isolated runner")
 
     report = {
-        "stage": "B.1", "stage_a_commit": STAGE_A, "stage_b_base": STAGE_B_BASE,
+        "stage": "C", "stage_a_commit": STAGE_A, "stage_b_base": STAGE_B_BASE,
         "stage_b1_base": STAGE_B1_BASE,
+        "stage_c_base": STAGE_C_BASE,
         "python": platform.python_version(),
         "sqlite": sqlite3.sqlite_version, "platform": platform.platform(),
         "euid": os.geteuid(), "source_root": str(ROOT),
@@ -191,6 +195,7 @@ def main():
             report["status"] = "passed" if exit_code == 0 and not stats["denied_paths"] else "failed"
             runtime_tests = sys.modules.get("test_tasks_runtime_compat")
             report["runtime_evidence"] = getattr(runtime_tests, "EVIDENCE", {})
+            report["project_evidence"] = getattr(sys.modules.get("test_tasks_projects"), "EVIDENCE", {})
         finally:
             sqlite3.connect = original_connect
             tempfile.tempdir = original_tempdir

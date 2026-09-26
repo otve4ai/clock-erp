@@ -3,9 +3,9 @@
 import sqlite3
 from datetime import datetime, timezone
 
-from .repository import (FOUNDATION_SIGNATURE, SCHEMA_SIGNATURE, SCHEMA_VERSION,
+from .repository import (FOUNDATION_SIGNATURE, CORE_SIGNATURE, SCHEMA_SIGNATURE, SCHEMA_VERSION,
                          database_path, validate_connection)
-from .schema import CORE_DDL, LEDGER_DDL
+from .schema import CORE_DDL, LEDGER_DDL, V2_CORE_DDL
 
 
 def migrate_database(path, app_commit=""):
@@ -33,8 +33,28 @@ def migrate_database(path, app_commit=""):
         versions = connection.execute("SELECT version FROM tasks_module_migrations ORDER BY version").fetchall()
         if versions == [(1,)]:
             validate_connection(connection, version=1)
+            for statement in V2_CORE_DDL:
+                connection.execute(statement)
+            connection.execute(
+                "INSERT INTO tasks_module_migrations(version,signature,applied_at,app_commit) VALUES(?,?,?,?)",
+                (2, CORE_SIGNATURE, datetime.now(timezone.utc).isoformat(), str(app_commit)))
+            versions.append((2,))
+        if versions == [(1,), (2,)]:
+            validate_connection(connection, version=2)
+            # Rebuild only this module's v2 tables, inside the same transaction.
+            # FK remains ON. Children are copied/dropped first; no rename quirks,
+            # writable_schema, external database or legacy records are involved.
+            connection.execute("CREATE TEMP TABLE tasks_v2_copy AS SELECT * FROM tasks")
+            connection.execute("CREATE TEMP TABLE activity_v2_copy AS SELECT * FROM task_activity")
+            connection.execute("DROP TABLE task_activity")
+            connection.execute("DROP TABLE tasks")
             for statement in CORE_DDL:
                 connection.execute(statement)
+            fields = ",".join(row[1] for row in connection.execute("PRAGMA table_info(tasks_v2_copy)"))
+            connection.execute("INSERT INTO tasks (" + fields + ") SELECT " + fields + " FROM tasks_v2_copy")
+            connection.execute("INSERT INTO task_activity SELECT * FROM activity_v2_copy")
+            connection.execute("DROP TABLE activity_v2_copy")
+            connection.execute("DROP TABLE tasks_v2_copy")
             connection.execute(
                 "INSERT INTO tasks_module_migrations(version,signature,applied_at,app_commit) VALUES(?,?,?,?)",
                 (SCHEMA_VERSION, SCHEMA_SIGNATURE, datetime.now(timezone.utc).isoformat(), str(app_commit)))
@@ -45,4 +65,4 @@ def migrate_database(path, app_commit=""):
         raise
     finally:
         connection.close()
-    return {"schema_version": SCHEMA_VERSION, "stage": "core"}
+    return {"schema_version": SCHEMA_VERSION, "stage": "projects"}

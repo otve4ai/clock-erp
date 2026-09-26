@@ -124,8 +124,8 @@ class TasksCoreTest(unittest.TestCase):
         for options in ({}, {"scope": "created"}, {"search": "Secret"}, {"search": "hidden phrase"}):
             self.assertEqual(self.service.list(self.stranger, options)["total"], 0)
             self.assertEqual(self.service.list(self.stranger, options, summary=True)["total"], 0)
-        self.error(403, self.service.list, self.stranger, {"scope": "all"})
-        self.error(403, self.service.list, self.stranger, {"scope": "all"}, summary=True)
+        self.assertEqual(self.service.list(self.stranger, {"scope": "all"})["total"], 0)
+        self.assertEqual(self.service.list(self.stranger, {"scope": "all"}, summary=True)["total"], 0)
         self.assertEqual(self.service.list(self.creator, {"scope": "created"})["total"], 1)
         self.assertEqual(self.service.list(self.creator)["total"], 0)
         self.assertEqual(self.service.list(self.assignee)["total"], 1)
@@ -225,9 +225,9 @@ class TasksCoreTest(unittest.TestCase):
         self.create(deadline_date="2026-09-27")
         self.create()
         for filters, expected in (({"overdue": "true"}, [past["id"]]), ({"today": "1"}, [today["id"]]),
-                                  ({"deadline_date": "2026-09-25"}, [past["id"], done["id"]])):
+                                  ({"deadline_date": "2026-09-25"}, [past["id"]])):
             self.assertEqual([task["id"] for task in self.service.list(self.assignee, filters)["items"]], expected)
-        self.assertEqual(self.service.list(self.assignee, {"overdue": "false"})["total"], 4)
+        self.assertEqual(self.service.list(self.assignee, {"overdue": "false"})["total"], 3)
         summary = self.service.list(self.assignee, summary=True)
         self.assertEqual((summary["total"], summary["overdue"], summary["today"], summary["done"]), (5, 1, 1, 1))
 
@@ -324,7 +324,7 @@ class TasksCoreTest(unittest.TestCase):
         self.error(422, self.update, task)
 
     def test_invalid_filters_and_no_team_scope(self):
-        for options in ({"scope": "team"}, {"assigned_to": "3"}, {"created_by": "3"}, {"status": "overdue"},
+        for options in ({"scope": "unknown"}, {"assigned_to": "bad"}, {"created_by": "bad"}, {"status": "overdue"},
                         {"today": "yes"}, {"limit": "101"}, {"offset": "-1"}, {"search": "x" * 501},
                         {"deadline_date": "wrong"}, {"deleted": "true"}):
             self.error(422, self.service.list, self.creator, options)
@@ -403,7 +403,7 @@ class TasksCoreTest(unittest.TestCase):
             with self.assertRaises(sqlite3.OperationalError):
                 migrations.migrate_database(path)
         self.assertEqual(path.read_bytes(), before)
-        self.assertEqual(migrations.migrate_database(path)["schema_version"], 2)
+        self.assertEqual(migrations.migrate_database(path)["schema_version"], 3)
         self.assertEqual(TasksService(TasksRepository(path)).list(self.admin, {"scope": "all"})["total"], 0)
 
     def test_mixed_patch_cannot_partially_save_content_before_forbidden_reassign(self):

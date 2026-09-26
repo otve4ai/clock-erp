@@ -62,7 +62,8 @@ class TasksCoreApiTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.get_json())
             self.assertEqual(response.get_json()["data"]["version"], version + 1)
         self.assertEqual(self.client.get(url + "/activity").status_code, 200)
-        self.assertEqual(self.client.get(BASE + "?scope=created").get_json()["data"]["total"], 1)
+        self.assertEqual(self.client.get(BASE + "?scope=created").get_json()["data"]["total"], 0)
+        self.assertEqual(self.client.get(BASE + "?scope=created&view=archive").get_json()["data"]["total"], 1)
         self.assertEqual(self.client.get(BASE + "/summary?scope=created").get_json()["data"]["done"], 1)
         self.assertEqual(self.client.delete(url, headers=self.headers).status_code, 405)
 
@@ -103,8 +104,8 @@ class TasksCoreApiTest(unittest.TestCase):
         self.actor = self.users[3]
         for suffix in ("?search=Hidden", "?scope=created", "/summary", "/summary?search=Hidden"):
             self.assertEqual(self.client.get(BASE + suffix).get_json()["data"]["total"], 0)
-        self.assertEqual(self.client.get(BASE + "?scope=all").status_code, 403)
-        self.assertEqual(self.client.get(BASE + "/summary?scope=all").status_code, 403)
+        self.assertEqual(self.client.get(BASE + "?scope=all").get_json()["data"]["total"], 0)
+        self.assertEqual(self.client.get(BASE + "/summary?scope=all").get_json()["data"]["total"], 0)
         self.actor = self.users[4]
         self.assertEqual(self.client.get(BASE + "?scope=all").get_json()["data"]["total"], 1)
 
@@ -123,7 +124,7 @@ class TasksCoreApiTest(unittest.TestCase):
         for content in ("[]", "null", '"string"'):
             response = self.client.post(BASE, data=content, content_type="application/json", headers=self.headers)
             self.assertEqual(response.status_code, 422)
-        for suffix in ("?status=bad", "?scope=team", "?today=yes", "?status=new&status=done", "?include_deleted=true"):
+        for suffix in ("?status=bad", "?scope=unknown", "?today=yes", "?status=new&status=done", "?include_deleted=true"):
             self.assertEqual(self.client.get(BASE + suffix).status_code, 422)
         for operation in ("status", "delete", "restore"):
             self.assertEqual(self.client.post(url + "/" + operation, json={}, headers=self.headers).status_code, 422)
@@ -388,6 +389,16 @@ class TasksCoreApiTest(unittest.TestCase):
             self.assertEqual(client.patch(url, json={"version": 1, "title": "Real edit"}, headers=self.headers).status_code, 200)
             for operation, version, fields in (("status", 2, {"status": "done"}), ("delete", 3, {}), ("restore", 4, {})):
                 self.assertEqual(client.post(url + "/" + operation, json=dict(version=version, **fields), headers=self.headers).status_code, 200)
+            projects_url = "/api/v1/tasks-module/projects"
+            response = client.post(projects_url, json={"name": "Real ERP project"}, headers=self.headers)
+            self.assertEqual(response.status_code, 201, response.get_json())
+            project = response.get_json()["data"]
+            project_url = projects_url + "/" + str(project["id"])
+            self.assertEqual(client.post(project_url + "/members", json={"version": 1, "user_id": 2}, headers=self.headers).status_code, 200)
+            self.assertEqual(client.patch(url, json={"version": 5, "project_id": project["id"]}, headers=self.headers).status_code, 200)
+            for path in (projects_url, project_url, project_url + "/summary", project_url + "/members", project_url + "/activity"):
+                self.assertEqual(client.get(path).status_code, 200)
+            self.assertEqual(client.delete(project_url + "/members/2", json={"version": 2}, headers=self.headers).status_code, 200)
         self.assertTrue(any("auth.db?mode=ro" in name for name in opened))
         self.assertTrue(any("tasks-module.db?mode=rw" in name for name in opened))
         # The existing ERP session middleware still maintains auth sessions;

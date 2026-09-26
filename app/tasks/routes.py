@@ -8,6 +8,7 @@ from .error_boundary import module_boundary
 from .permissions import can_inspect_module
 from .repository import TasksRepository
 from .services import TasksService
+from .project_services import ProjectsService
 
 
 def create_blueprint(current_user, user_lookup=None, csrf_check=None):
@@ -15,6 +16,9 @@ def create_blueprint(current_user, user_lookup=None, csrf_check=None):
 
     def service():
         return TasksService(TasksRepository(current_app.config["TASKS_MODULE_DATABASE"]), user_lookup)
+
+    def projects_service():
+        return ProjectsService(TasksRepository(current_app.config["TASKS_MODULE_DATABASE"]), user_lookup)
 
     def data_response(data, status=200):
         response = jsonify(data=data)
@@ -103,5 +107,44 @@ def create_blueprint(current_user, user_lookup=None, csrf_check=None):
     @module_boundary
     def activity(task_id):
         return data_response(service().activity(current_user(), task_id, query()))
+
+    @blueprint.route("/projects", methods=["GET", "POST"])
+    @module_boundary
+    def projects():
+        user = current_user()
+        if request.method == "POST":
+            return data_response(projects_service().create(user, payload()), 201)
+        return data_response(projects_service().list(user, query()))
+
+    @blueprint.route("/projects/<int:project_id>", methods=["GET", "PATCH"])
+    @module_boundary
+    def project(project_id):
+        if request.method == "PATCH":
+            return data_response(projects_service().mutate(current_user(), project_id, payload()))
+        return data_response(projects_service().get(current_user(), project_id))
+
+    @blueprint.route("/projects/<int:project_id>/archive", methods=["POST"])
+    @blueprint.route("/projects/<int:project_id>/restore", methods=["POST"])
+    @module_boundary
+    def project_state(project_id):
+        return data_response(projects_service().mutate(current_user(), project_id, payload(), request.path.rsplit("/", 1)[-1]))
+
+    @blueprint.route("/projects/<int:project_id>/members", methods=["GET", "POST"])
+    @module_boundary
+    def project_members(project_id):
+        if request.method == "POST":
+            return data_response(projects_service().mutate(current_user(), project_id, payload(), "member_add"))
+        return data_response(projects_service().details(current_user(), project_id, "members", query()))
+
+    @blueprint.route("/projects/<int:project_id>/members/<int:user_id>", methods=["DELETE"])
+    @module_boundary
+    def project_member_remove(project_id, user_id):
+        return data_response(projects_service().mutate(current_user(), project_id, payload(), "member_remove", user_id))
+
+    @blueprint.route("/projects/<int:project_id>/summary", methods=["GET"])
+    @blueprint.route("/projects/<int:project_id>/activity", methods=["GET"])
+    @module_boundary
+    def project_details(project_id):
+        return data_response(projects_service().details(current_user(), project_id, request.path.rsplit("/", 1)[-1], query()))
 
     return blueprint

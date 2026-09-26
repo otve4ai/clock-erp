@@ -149,3 +149,12 @@ SQLite 3.7.17. Результаты: `docs/validation/tasks-core-b1-runtime.json
 `docs/technical-debt/tasks-query-performance.md` — `deferred`, TD-TASKS-001:
 оптимизация SQL/индексов отложена до измерений перед performance acceptance.
 Auth sessions не переделаны, legacy не переносится; push, merge, deploy запрещены.
+
+2026-09-26: `docs/architecture/tasks-projects-stage-c.md` — `current` для
+`codex/tasks-projects-stage-c` от принятого B.2 `beb68e8`: schema v3 Projects,
+members, visibility, scopes/views, archive, counters и персональный dashboard.
+Уточняет контракты Stage B для этой ветки; flag OFF, без UI и legacy migration.
+`docs/validation/tasks-projects-c-runtime.json` и `tasks-projects-c-ddl.json`:
+208 успешных tests на Linux / Python 3.6.8 / SQLite 3.7.17 / Flask 2.0.3 /
+Werkzeug 2.0.3, DDL gate, SHA31 sources и query plans. Только synthetic fixtures,
+без сети, от UID99. TD-TASKS-001 остаётся отложенным; production не переключён.

@@ -91,6 +91,71 @@ FOREIGN_KEY_CONTRACTS = {
     "task_activity": ((0, 0, "tasks", "task_id", "id", "NO ACTION", "NO ACTION", "NONE"),),
 }
 
+# Immutable v2 contracts are used only by the explicit offline upgrade.
+V2_CORE_DDL = CORE_DDL
+V2_TABLE_DDL = TABLE_DDL
+V2_COLUMN_CONTRACTS = COLUMN_CONTRACTS
+V2_FOREIGN_KEY_CONTRACTS = FOREIGN_KEY_CONTRACTS
+
+PROJECT_DDL = (
+    """CREATE TABLE task_projects (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 200),
+        owner_id INTEGER NOT NULL CHECK(owner_id>0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        archived_at TEXT,
+        version INTEGER NOT NULL DEFAULT 1 CHECK(version>0)
+    )""",
+    """CREATE TABLE task_project_members (
+        project_id INTEGER NOT NULL REFERENCES task_projects(id),
+        user_id INTEGER NOT NULL CHECK(user_id>0),
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(project_id,user_id)
+    )""",
+    """CREATE TABLE task_project_activity (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES task_projects(id),
+        actor INTEGER NOT NULL CHECK(actor>0),
+        event_type TEXT NOT NULL CHECK(event_type IN
+            ('created','renamed','archived','restored','member_added','member_removed')),
+        timestamp TEXT NOT NULL,
+        project_version INTEGER NOT NULL CHECK(project_version>0),
+        payload TEXT NOT NULL
+    )""",
+)
+CORE_DDL = (
+    V2_CORE_DDL[0].replace("related_entity_label TEXT,", "related_entity_label TEXT,\n        project_id INTEGER REFERENCES task_projects(id),"),
+    V2_CORE_DDL[1].replace("'deleted','restored'", "'deleted','restored','project_changed'"),
+) + PROJECT_DDL + V2_CORE_DDL[2:] + (
+    "CREATE INDEX task_projects_owner_active ON task_projects(owner_id,archived_at,id)",
+    "CREATE INDEX task_project_members_user ON task_project_members(user_id,project_id)",
+    "CREATE INDEX tasks_project_active ON tasks(project_id,deleted_at,status,deadline_date,id)",
+    "CREATE INDEX tasks_completed ON tasks(deleted_at,status,completed_at,id)",
+    "CREATE INDEX task_project_activity_order ON task_project_activity(project_id,id)",
+)
+TABLE_DDL = dict(V2_TABLE_DDL, tasks=CORE_DDL[0], task_activity=CORE_DDL[1],
+                 task_projects=PROJECT_DDL[0], task_project_members=PROJECT_DDL[1],
+                 task_project_activity=PROJECT_DDL[2])
+COLUMN_CONTRACTS = dict(V2_COLUMN_CONTRACTS)
+COLUMN_CONTRACTS.update({
+    "tasks": V2_COLUMN_CONTRACTS["tasks"] + (("project_id", "INTEGER", 0, None, 0),),
+    "task_projects": (("id", "INTEGER", 0, None, 1), ("name", "TEXT", 1, None, 0),
+                      ("owner_id", "INTEGER", 1, None, 0), ("created_at", "TEXT", 1, None, 0),
+                      ("updated_at", "TEXT", 1, None, 0), ("archived_at", "TEXT", 0, None, 0),
+                      ("version", "INTEGER", 1, "1", 0)),
+    "task_project_members": (("project_id", "INTEGER", 1, None, 1), ("user_id", "INTEGER", 1, None, 2),
+                             ("created_at", "TEXT", 1, None, 0)),
+    "task_project_activity": (("id", "INTEGER", 0, None, 1), ("project_id", "INTEGER", 1, None, 0),
+                              ("actor", "INTEGER", 1, None, 0), ("event_type", "TEXT", 1, None, 0),
+                              ("timestamp", "TEXT", 1, None, 0), ("project_version", "INTEGER", 1, None, 0),
+                              ("payload", "TEXT", 1, None, 0)),
+})
+FOREIGN_KEY_CONTRACTS = dict(V2_FOREIGN_KEY_CONTRACTS)
+FOREIGN_KEY_CONTRACTS["task_projects"] = ()
+for _table in ("tasks", "task_project_members", "task_project_activity"):
+    FOREIGN_KEY_CONTRACTS[_table] = ((0, 0, "task_projects", "project_id", "id", "NO ACTION", "NO ACTION", "NONE"),)
+
 
 def sql_tokens(sql):
     # Compare the full table definition, not CHECK substrings (which an OR or
