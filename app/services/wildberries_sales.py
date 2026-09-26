@@ -5,6 +5,7 @@ No external clients or order synchronization belong in this adapter.
 
 from app.services.sales_inventory import SalesInventoryError, sale_now_iso
 from app.services.sale_pricing import decimal_money
+from app.services.shared_catalog import product_strap_flow_enabled
 
 
 class WildberriesSales:
@@ -35,6 +36,25 @@ class WildberriesSales:
             raise SalesInventoryError("Цена заказа Wildberries указана не в рублях")
         products = order.get("products") or []
         mappings = self.resolve_products(order)
+        if replacement:
+            try:
+                replacement_line_index = int(replacement.get("line_index"))
+                if replacement_line_index < 0:
+                    raise IndexError
+                replacement_mapping = mappings[replacement_line_index]
+            except (IndexError, TypeError, ValueError):
+                raise SalesInventoryError(
+                    "Выберите позицию часов для замены ремешка."
+                )
+            if (
+                replacement_mapping.get("state") != "mapped"
+                or not product_strap_flow_enabled(
+                    replacement_mapping.get("product")
+                )
+            ):
+                raise SalesInventoryError(
+                    "Для этого товара ремешок не включён в настройках."
+                )
         items = []
         for index, (product, mapping) in enumerate(zip(products, mappings)):
             catalog_product = mapping.get("product")

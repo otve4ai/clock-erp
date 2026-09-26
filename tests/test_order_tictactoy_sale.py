@@ -98,7 +98,7 @@ class OrderTictactoySaleTest(unittest.TestCase):
         )
         self.assertIn(str(created["id"]), [item["id"] for item in self.shared.list_products(query="BRADLEY-NEW")])
 
-    def test_order_route_conducts_strap_replacement_without_selling_base_sku(self):
+    def test_order_route_rejects_legacy_replacement_when_setting_is_off(self):
         catalog = ExcelProductCatalog(self.database)
         base = catalog.create_product(
             name="Bradley Blue", article="BRADLEY-BLUE", brand="Bradley",
@@ -124,12 +124,8 @@ class OrderTictactoySaleTest(unittest.TestCase):
             original_price_1="2400",
         )
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(response.location.startswith("/sales?"))
-        sales = self.inventory.list_sales()
-        self.assertEqual(len({sale["id"] for sale in sales}), 1)
-        sold_product_ids = {sale["product_id"] for sale in sales}
-        self.assertIn(str(self.watch["id"]), sold_product_ids)
-        self.assertNotIn(str(base["id"]), sold_product_ids)
+        self.assertIn("notice=error", response.location)
+        self.assertEqual(self.inventory.list_sales(), [])
         with self.database.connect() as connection:
             stock = {
                 row["id"]: row["stock"] for row in connection.execute(
@@ -138,8 +134,39 @@ class OrderTictactoySaleTest(unittest.TestCase):
                 )
             }
         self.assertEqual(stock, {
-            base["id"]: 0, removed["id"]: 2, installed["id"]: 0,
+            base["id"]: 2, removed["id"]: 0, installed["id"]: 2,
         })
+
+    def test_order_route_rejects_strap_replacement_for_non_watch_line(self):
+        catalog = ExcelProductCatalog(self.database)
+        glasses = catalog.create_product(
+            name="Очки дизайнерские", article="GLASSES-1", brand="Noir",
+            category="Очки", stock=1,
+        )
+        base = catalog.create_product(
+            name="Часы основа", article="BASE-1", brand="Bradley",
+            category="Часы", stock=1,
+        )
+        mappings = dict(self.mappings)
+        mappings["line:line-1"] = {"product_id": str(glasses["id"])}
+
+        response = self.conduct(
+            mappings=mappings,
+            operation_mode="strap_replacement",
+            strap_line_index="0",
+            strap_base_product_id=str(base["id"]),
+            removed_strap_mode="none",
+            installed_strap_product_id=str(self.strap["id"]),
+            original_price_0="7500",
+            original_price_1="2400",
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("notice=error", response.location)
+        self.assertEqual(self.inventory.list_sales(), [])
+        self.assertEqual(catalog.get_product(glasses["id"])["stock"], 1)
+        self.assertEqual(catalog.get_product(base["id"])["stock"], 1)
+        self.assertEqual(catalog.get_product(self.strap["id"])["stock"], 3)
 
     def test_unique_bitrix_product_id_maps_automatically_without_persisting(self):
         with self.database.transaction() as connection:

@@ -89,6 +89,11 @@ def product_matches_kind(product, kind):
     )
 
 
+def product_strap_flow_enabled(product):
+    """The explicit product setting is the only strap-flow authority."""
+    return bool(dict(product or {}).get("requires_strap"))
+
+
 def product_kind_sql(category_alias="c", kind=""):
     """Return a constant SQL predicate compatible with production SQLite."""
     kind = normalize_product_kind(kind)

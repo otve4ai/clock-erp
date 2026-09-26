@@ -14,6 +14,7 @@ from app.services.audit_journal import AuditJournal
 from app.services.excel_product_catalog import ExcelProductCatalog
 from app.services.sales_inventory import SalesInventory, SalesInventoryError
 from app.services.shared_catalog import SharedCatalog
+from app.services.required_straps import RequiredStraps
 from app.services.wildberries_orders import normalize_wildberries_order
 from app.services.wildberries_sales import WildberriesSales
 
@@ -115,18 +116,104 @@ class WildberriesSalesTest(unittest.TestCase):
         self.assertEqual(self.stock(), 1)
         self.assertEqual(self.effects()[0:3], (1, 2, 2))
 
-    def test_components_use_existing_replacement_service(self):
-        base = self.catalog.create_product('Часы основа', article='BASE', brand='Brand', category='Часы', stock=1)
-        strap = self.catalog.create_product('Ремешок', article='STRAP', brand='Brand', category='Ремешки', stock=1)
-        sale = self.service.conduct(self.order, replacement={
-            'line_index': 0, 'base_product_id': base['id'],
-            'installed_strap_product_id': strap['id'], 'removed_strap_mode': 'none',
-        })
-        self.assertEqual(sale['source'], 'wildberries')
+    def test_watch_without_enabled_setting_cannot_start_strap_replacement(self):
+        base = self.catalog.create_product(
+            'Часы основа', article='BASE-WATCH', brand='Brand',
+            category='Часы', stock=1,
+        )
+        strap = self.catalog.create_product(
+            'Ремешок', article='STRAP-WATCH', brand='Brand',
+            category='Ремешки', stock=1,
+        )
+
+        with self.assertRaisesRegex(
+            SalesInventoryError,
+            'ремешок не включён в настройках',
+        ):
+            self.service.conduct(self.order, replacement={
+                'line_index': 0,
+                'base_product_id': base['id'],
+                'installed_strap_product_id': strap['id'],
+                'removed_strap_mode': 'none',
+            })
+
         self.assertEqual(self.stock(), 3)
-        self.assertEqual(self.stock(base), 0)
-        self.assertEqual(self.stock(strap), 0)
-        self.assertEqual(self.service.conduct(self.order)['id'], sale['id'])
+        self.assertEqual(self.stock(base), 1)
+        self.assertEqual(self.stock(strap), 1)
+        self.assertEqual(self.effects()[0:3], (0, 0, 0))
+
+    def test_non_watch_order_cannot_start_strap_replacement(self):
+        glasses = self.catalog.create_product(
+            'Очки дизайнерские', article='GLASSES-1', brand='Brand',
+            category='Очки', stock=1,
+        )
+        self.order['products'][0]['article'] = 'GLASSES-1'
+        base = self.catalog.create_product(
+            'Часы основа', article='BASE-GLASSES', brand='Brand',
+            category='Часы', stock=1,
+        )
+        strap = self.catalog.create_product(
+            'Ремешок', article='STRAP-GLASSES', brand='Brand',
+            category='Ремешки', stock=1,
+        )
+
+        with self.assertRaisesRegex(
+            SalesInventoryError,
+            'ремешок не включён в настройках',
+        ):
+            self.service.conduct(self.order, replacement={
+                'line_index': 0,
+                'base_product_id': base['id'],
+                'installed_strap_product_id': strap['id'],
+                'removed_strap_mode': 'none',
+            })
+
+        self.assertEqual(self.stock(glasses), 1)
+        self.assertEqual(self.stock(base), 1)
+        self.assertEqual(self.stock(strap), 1)
+        self.assertEqual(self.effects()[0:3], (0, 0, 0))
+
+    def test_sale_dialog_hides_strap_replacement_for_non_watch(self):
+        glasses = self.catalog.create_product(
+            'Очки дизайнерские', article='GLASSES-UI', brand='Brand',
+            category='Очки', stock=1,
+        )
+        self.order['products'][0]['article'] = 'GLASSES-UI'
+        context = web.build_order_product_mapping_context(
+            self.order['products'], catalog=self.shared,
+        )
+
+        summary = web.build_order_sale_dialog_summary(
+            self.order['products'], mapping_context=context,
+        )
+
+        self.assertFalse(summary['lines'][0]['requires_strap'])
+        self.assertFalse(summary['lines'][0]['strap_flow_enabled'])
+        with self.route_context(), mock.patch.object(
+            web, 'get_orders', return_value=[self.order]
+        ), mock.patch.object(
+            web, 'SharedCatalog', return_value=self.shared
+        ), mock.patch.object(
+            web, 'load_order_product_mappings', return_value={}
+        ), mock.patch.object(web, 'load_stock_operations', return_value=[]):
+            page = web.app.test_client().get('/order/wildberries/123')
+
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn('data-open-strap-replacement>', page.get_data(as_text=True))
+
+        RequiredStraps(self.database).configure(glasses['id'], True)
+        with self.route_context(), mock.patch.object(
+            web, 'get_orders', return_value=[self.order]
+        ), mock.patch.object(
+            web, 'SharedCatalog', return_value=self.shared
+        ), mock.patch.object(
+            web, 'load_order_product_mappings', return_value={}
+        ), mock.patch.object(web, 'load_stock_operations', return_value=[]):
+            reopened = web.app.test_client().get('/order/wildberries/123')
+
+        enabled_html = reopened.get_data(as_text=True)
+        self.assertIn('name="required_strap_0_product_id"', enabled_html)
+        self.assertNotIn('data-open-strap-replacement>', enabled_html)
 
     def test_invalid_price_or_currency_does_not_create_sale(self):
         for price, currency in ((None, 643), (-1, 643), (123, 840)):
@@ -256,6 +343,7 @@ class WildberriesSalesTest(unittest.TestCase):
             html = page.get_data(as_text=True)
             self.assertIn('/order/wildberries/123/conduct-sale', html)
             self.assertIn('data-wb-sale-form', html)
+            self.assertNotIn('data-open-strap-replacement>', html)
             self.assertNotIn('id="orderSaleCommission', html)
             self.assertNotIn('/order/wb:123/stock-writeoff', html)
             # Parse rendered inline JavaScript without launching a browser.
