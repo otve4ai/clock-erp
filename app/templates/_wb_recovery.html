@@ -16,4 +16,5 @@
     <button class="button button-primary" type="button" data-wb-import hidden>Импортировать недостающие заказы</button>
     <input type="hidden" data-wb-recovery-csrf value="{{ csrf_token() }}">
 </details>
+<script src="{{ static_asset_url('js/wb-sync-status.js') }}" defer></script>
 <script src="{{ static_asset_url('js/wb-recovery.js') }}" defer></script>

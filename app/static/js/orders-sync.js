@@ -30,10 +30,11 @@
         const valid = date && !Number.isNaN(date.getTime());
         if (valid) timestamps.set(source, date);
         const stale = !valid || Date.now() - date.getTime() > 15 * 60000;
+        const wb = source === 'wildberries' ? window.wbSyncStatus(data) : null;
         const state = pending.has(source) || data.outcome === 'running' ? 'running'
             : failures.has(source) || data.outcome === 'error' ? 'error'
-            : stale || data.attention || data.pending?.length || data.outcome === 'partial' || ['partial', 'error'].includes(data.full_outcome) ? 'attention' : 'success';
-        row.dataset.noData = String(!valid && !data.attention && !data.pending?.length && data.outcome !== 'partial' && !['partial', 'error'].includes(data.full_outcome));
+            : wb ? wb.state : stale || data.attention || data.pending?.length || data.outcome === 'partial' || ['partial', 'error'].includes(data.full_outcome) ? 'attention' : 'success';
+        row.dataset.noData = String(wb ? wb.noData : !valid && !data.attention && !data.pending?.length && data.outcome !== 'partial' && !['partial', 'error'].includes(data.full_outcome));
         row.dataset.state = state;
         renderAggregate();
         row.querySelector('[data-sync-state]').textContent = labels[state];
@@ -76,7 +77,7 @@
             if (source === 'wildberries') root.querySelector('[data-wb-recovery-message]').textContent = error.message;
         } finally {
             pending.delete(source); updateButtons();
-            render(source, result || {outcome: 'error', last_success_at: timestamps.get(source)?.toISOString()});
+            render(source, result?.recovery || result || {outcome: 'error', last_success_at: timestamps.get(source)?.toISOString()});
             if (source === 'wildberries') document.dispatchEvent(new Event('orders:wb-refresh'));
         }
     }

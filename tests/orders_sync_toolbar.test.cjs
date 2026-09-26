@@ -36,9 +36,9 @@ async function fixture(initial = {outcome: 'success', last_success_at: Date.now(
         const payload = await responder(url, options);
         return {ok: payload.ok, status: payload.ok ? 200 : 503, json: async () => payload};
     };
-    runInNewContext(readFileSync(require.resolve('../app/static/js/orders-sync.js'), 'utf8'), {
-        document, window: {setInterval() {}}, fetch, Intl, Date, Event,
-    });
+    const context = {document, window: {setInterval() {}}, fetch, Intl, Date, Event};
+    runInNewContext(readFileSync(require.resolve('../app/static/js/wb-sync-status.js'), 'utf8'), context);
+    runInNewContext(readFileSync(require.resolve('../app/static/js/orders-sync.js'), 'utf8'), context);
     await new Promise(setImmediate);
     return {root, rows, fields, buttons, document, requests,
         respond(callback) {responder = callback;},
@@ -62,6 +62,31 @@ test('aggregate covers unknown, success, stale, partial, running and error witho
     g.wb({outcome: 'error'});
     assert.equal(g.root.dataset.syncState, 'error');
     assert.match(g.fields['orders-sync-label'].textContent, /Ошибка/);
+});
+
+test('WB product remarks are separate from sync failures and clear on next diagnostics', async () => {
+    const f = await fixture();
+    const healthy = {outcome: 'success', full_outcome: 'success', last_success_at: Date.now() / 1000, attention: 63};
+    f.wb(healthy);
+    assert.equal(f.root.dataset.syncState, 'success');
+    for (const problem of [{pending: [{error: 'details unavailable'}]}, {errors: [{error: 'API'}]},
+        {full_errors: [{error: 'API'}]}, {error_count: 1}, {full_outcome: 'partial'}, {full_outcome: 'error'}]) {
+        f.wb({...healthy, ...problem});
+        assert.equal(f.root.dataset.syncState, 'attention', JSON.stringify(problem));
+    }
+    f.wb({...healthy, attention: 0, missing: ['imported-now'], supplies: [{missing: 1}]});
+    assert.equal(f.root.dataset.syncState, 'success');
+    f.wb({attention: 63});
+    assert.equal(f.root.dataset.syncState, 'unknown');
+});
+
+test('manual WB refresh renders nested diagnostics immediately after success', async () => {
+    const f = await fixture();
+    f.respond(async () => ({ok: true, result: {outcome: 'success', recovery: {
+        outcome: 'success', full_outcome: 'success', last_success_at: new Date().toISOString(), attention: 63,
+    }}}));
+    await f.buttons[2].listeners.click();
+    assert.equal(f.root.dataset.syncState, 'success');
 });
 
 test('open/close never starts sync; Escape returns focus and outside click closes', async () => {
