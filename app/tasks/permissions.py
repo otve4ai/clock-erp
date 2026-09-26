@@ -94,5 +94,15 @@ def require_project(user, project, manage=False):
     require_actor(user)
     if project is None:
         raise TaskError("PROJECT_NOT_FOUND", "Проект не найден.", 404)
-    if manage and not (can_inspect_module(user) or project["owner_id"] == user["id"]):
+    if manage and not can_manage_project(user, project):
         raise TaskError("FORBIDDEN", "Недостаточно прав для этого действия.", 403)
+
+
+def can_manage_project(user, project):
+    return can_inspect_module(user) or project["owner_id"] == user["id"]
+
+
+def task_capabilities(user, task):
+    return {"edit": can_edit(user, task), "change_status": can_change_status(user, task),
+            "reassign": can_reassign(user, task), "delete": can_delete(user, task),
+            "restore": can_restore(user, task)}

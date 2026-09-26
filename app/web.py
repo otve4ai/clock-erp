@@ -19227,6 +19227,8 @@ def inject_sidebar_navigation():
             "title": "TTT",
             "subtitle": "Внутренняя система",
         },
+        "tasks_module_ready": bool(app.extensions.get("tasks_module", {}).get("registered"))
+            and str(app.config.get("TASKS_MODULE_ENABLED", False)).lower() in {"1", "true", "yes", "on"},
         "presence_summary": {
             "online_count": sum(1 for user in team if user["online"]),
             "users": [user for user in team if user["online"]],

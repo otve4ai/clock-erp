@@ -3,16 +3,18 @@
 from flask import Blueprint, current_app, json, jsonify, request
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
 
-from .domain import TaskError, invalid
+from .domain import TaskError, invalid, business_today, utc_now
 from .error_boundary import module_boundary
 from .permissions import can_inspect_module
 from .repository import TasksRepository
 from .services import TasksService
 from .project_services import ProjectsService
 from .inbox_services import InboxService
+from .permissions import require_actor
+from .presentation import present
 
 
-def create_blueprint(current_user, user_lookup=None, csrf_check=None):
+def create_blueprint(current_user, user_lookup=None, csrf_check=None, user_directory=None):
     blueprint = Blueprint("tasks_module", __name__, url_prefix="/api/v1/tasks-module")
 
     def service():
@@ -25,7 +27,7 @@ def create_blueprint(current_user, user_lookup=None, csrf_check=None):
         return InboxService(TasksRepository(current_app.config["TASKS_MODULE_DATABASE"]))
 
     def data_response(data, status=200):
-        response = jsonify(data=data)
+        response = jsonify(data=present(data, current_user()))
         response.status_code = status
         response.headers["Cache-Control"] = "no-store"
         return response
@@ -77,6 +79,16 @@ def create_blueprint(current_user, user_lookup=None, csrf_check=None):
         if not can_inspect_module(user):
             return jsonify(code="FORBIDDEN", message="Недостаточно прав."), 403
         return data_response(service().status())
+
+    @blueprint.route("/directory", methods=["GET"])
+    @module_boundary
+    def directory():
+        require_actor(current_user())
+        if query():
+            raise invalid("query")
+        if user_directory is None:
+            raise TaskError("USER_LOOKUP_UNAVAILABLE", "Список сотрудников недоступен.", 503)
+        return data_response({"items": user_directory(), "business_date": business_today(), "server_now": utc_now()})
 
     @blueprint.route("/tasks", methods=["GET", "POST"])
     @module_boundary

@@ -360,6 +360,19 @@ class AuthStore:
             ).fetchone()
         return self._row_dict(row)
 
+    def list_active_task_identities(self):
+        """Minimal read-only directory for the optional Tasks user selector."""
+        connection = sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.1)
+        try:
+            rows = connection.execute(
+                "SELECT id,first_name,last_name,login FROM users WHERE active=1 ORDER BY id LIMIT 1001").fetchall()
+            if len(rows) > 1000:
+                raise ValueError("Tasks directory needs pagination")
+            return [{"id": row[0], "name": (str(row[1] or "") + " " + str(row[2] or "")).strip()
+                     or str(row[3] or "Сотрудник #{}".format(row[0]))} for row in rows]
+        finally:
+            connection.close()
+
     def list_team_users(self, query=""):
         query = str(query or "").strip().casefold()
         users = self.list_team_presence()

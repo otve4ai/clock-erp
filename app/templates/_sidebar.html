@@ -98,6 +98,7 @@ window.ERP_NOTIFICATION_CONTEXT={
     <nav class="sidebar-nav" aria-label="Основная навигация">
         {% set navigation_group = namespace(current="") %}
         {% for item in sidebar_navigation_items %}
+            {% set item_active = item.active and not (tasks_module_ready and item.key == 'tasks' and request.path == '/app/tasks-module') %}
             {% if item.group != navigation_group.current %}
                 <div class="sidebar-nav-group-title">
                     {{ "Система" if item.group == "system" else "Основное" }}
@@ -106,13 +107,13 @@ window.ERP_NOTIFICATION_CONTEXT={
             {% endif %}
 
             <a
-                class="sidebar-link{% if item.active %} active{% endif %}"
+                class="sidebar-link{% if item_active %} active{% endif %}"
                 href="{{ item.href }}"
                 data-navigation-key="{{ item.key }}"
                 aria-label="{{ item.label }}"
                 data-tooltip="{{ item.label }}"
                 {% if not item.enabled %}hidden{% endif %}
-                {% if item.active %}aria-current="page"{% endif %}
+                {% if item_active %}aria-current="page"{% endif %}
             >
                 <span class="sidebar-icon">
                     {{ navigation_icon(item.icon) }}
@@ -120,6 +121,12 @@ window.ERP_NOTIFICATION_CONTEXT={
                 <span class="sidebar-label">{{ item.label }}</span>
                 {% if item.key in ('tasks', 'inbox') and current_user %}<span class="sidebar-count" data-sidebar-badge="{{ item.key }}" hidden></span>{% elif item.badge %}<span class="sidebar-count" aria-label="Новых писем, требующих внимания: {{ item.badge }}">{{ item.badge }}</span>{% endif %}
             </a>
+            {% if item.key == 'tasks' and tasks_module_ready and current_user %}
+            <a class="sidebar-link{% if request.path == '/app/tasks-module' %} active{% endif %}" href="/app/tasks-module" aria-label="Новые задачи" data-tooltip="Новые задачи"{% if request.path == '/app/tasks-module' %} aria-current="page"{% endif %}>
+                <span class="sidebar-icon">{{ navigation_icon(item.icon) }}</span>
+                <span class="sidebar-label">Новые задачи</span><span class="sidebar-count" data-tasks-module-badge hidden></span>
+            </a>
+            {% endif %}
         {% endfor %}
     </nav>
 
@@ -316,6 +323,21 @@ window.ERP_EVENT_NOTIFICATIONS={csrf:{{ csrf_token()|tojson }}};
 {% if current_user %}<script async src="{{ static_asset_url('js/event-notifications.js') }}"></script>{% endif %}
 <script async src="{{ static_asset_url('js/sidebar.js') }}"></script>
 {% if current_user %}<script async src="{{ static_asset_url('js/sidebar-badges.js') }}"></script>{% endif %}
+{% if current_user and tasks_module_ready %}
+<script>
+(() => {
+    window.ERP_TASKS_OPTIONAL = {csrf: {{ csrf_token()|tojson }}};
+    const load = () => {
+        const script = document.createElement("script");
+        script.src = {{ static_asset_url('js/tasks-module-notifications.js')|tojson }};
+        script.async = true;
+        document.head.appendChild(script);
+    };
+    if (document.readyState === "complete") window.setTimeout(load, 0);
+    else window.addEventListener("load", load, {once: true});
+})();
+</script>
+{% endif %}
 {% if current_user %}
 <script>
 (() => {

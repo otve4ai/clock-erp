@@ -167,3 +167,10 @@ Werkzeug 2.0.3, DDL gate, SHA31 sources и query plans. Только synthetic f
 `docs/validation/tasks-microtasks-d-runtime.json` и `tasks-microtasks-d-ddl.json`:
 248/248 PASS на Linux/Python3.6.8/SQLite3.7.17/Flask2.0.3/Werkzeug2.0.3,
 35 source hashes, DDL gate, synthetic fixtures UID99 без сети. Flag OFF.
+
+2026-09-27: `docs/architecture/tasks-ui-stage-e.md` — `current`, final review PASS.
+Отдельный UI entry `/app/tasks-module`, main/micro/Inbox/Projects/board/archive;
+legacy не переключён. Три MEDIUM JS races/read dependency исправлены с 4 regression
+checks; ещё 15 adapter checks PASS. `docs/validation/tasks-ui-e-runtime.json` и
+`tasks-ui-e-ddl.json`: 257/257 PASS на exact production runtime, 38 source hashes,
+DDL gate PASS. Feature OFF, без push/merge/deploy. LOW polish относится к Stage F.

@@ -264,7 +264,11 @@ class TasksCoreApiTest(unittest.TestCase):
         self.actor = self.users[2]
         response = self.client.patch(url, json={"version": 1, "title": "Not saved", "assigned_to": 3}, headers=self.headers)
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(self.client.get(url).get_json()["data"], task)
+        after = self.client.get(url).get_json()["data"]
+        # UI capabilities intentionally vary by actor; persisted Task data does not.
+        self.assertFalse(after["permissions"]["reassign"])
+        self.assertEqual({key: value for key, value in after.items() if key != "permissions"},
+                         {key: value for key, value in task.items() if key != "permissions"})
         self.assertEqual(self.client.get(url + "/activity").get_json(), history)
 
     def test_activity_failure_returns_safe_error_and_no_partial_task(self):
