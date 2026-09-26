@@ -179,6 +179,63 @@ class TasksCoreApiTest(unittest.TestCase):
             "wsgi.input_terminated": True})
         self.assertEqual(response.status_code, 201, response.get_json())
 
+    def cache_body_before_request(self):
+        @self.app.before_request
+        def cache_body():
+            # Modern Werkzeug enforces the limit itself. Temporarily disable it
+            # only for the test middleware, so Tasks must check the cached bytes
+            # just as it must with the production Werkzeug 2.0 reader.
+            with mock.patch.dict(self.app.config, {"MAX_CONTENT_LENGTH": None}):
+                request.get_data(cache=True)
+            for method in ("read", "readinto"):
+                patcher = mock.patch.object(request.input_stream, method,
+                                            side_effect=AssertionError("cached body read twice"))
+                patcher.start()
+                self.addCleanup(patcher.stop)
+
+    def post_body_without_content_length(self, raw):
+        return self.client.open(BASE, method="POST", headers=self.headers, environ_overrides={
+            "CONTENT_TYPE": "application/json", "CONTENT_LENGTH": "", "wsgi.input": io.BytesIO(raw),
+            "wsgi.input_terminated": True})
+
+    def test_cached_json_body_creates_task_without_reading_stream_again(self):
+        self.app.config["MAX_CONTENT_LENGTH"] = 1000
+        self.cache_body_before_request()
+        task = self.create(title="Cached body")
+        self.assertEqual(self.client.get(BASE + "/" + str(task["id"])).get_json()["data"], task)
+
+    def test_cached_body_actual_size_over_limit_is_413(self):
+        self.app.config["MAX_CONTENT_LENGTH"] = 10
+        self.cache_body_before_request()
+        with mock.patch.object(TasksRepository, "transaction", side_effect=AssertionError("body opened storage")) as transaction:
+            response = self.post_body_without_content_length(b'{"title":"cached oversized body"}')
+        self.assertEqual((response.status_code, response.get_json()["code"]), (413, "HTTP_ERROR"))
+        transaction.assert_not_called()
+
+    def test_cached_body_exactly_at_limit_is_accepted(self):
+        raw = '{"title":"Задача 日本語 🚀"}'.encode("utf-8")
+        self.app.config["MAX_CONTENT_LENGTH"] = len(raw)
+        self.cache_body_before_request()
+        response = self.post_body_without_content_length(raw)
+        self.assertEqual(response.status_code, 201, response.get_json())
+        self.assertEqual(response.get_json()["data"]["title"], "Задача 日本語 🚀")
+
+    def test_cached_malformed_json_is_400_without_storage_access(self):
+        self.app.config["MAX_CONTENT_LENGTH"] = 1000
+        self.cache_body_before_request()
+        with mock.patch.object(TasksRepository, "transaction", side_effect=AssertionError("body opened storage")) as transaction:
+            response = self.post_body_without_content_length(b'{broken')
+        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "HTTP_ERROR"))
+        transaction.assert_not_called()
+
+    def test_cached_empty_body_is_400_without_reading_stream_again(self):
+        self.app.config["MAX_CONTENT_LENGTH"] = 1000
+        self.cache_body_before_request()
+        with mock.patch.object(TasksRepository, "transaction", side_effect=AssertionError("body opened storage")) as transaction:
+            response = self.post_body_without_content_length(b'')
+        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "HTTP_ERROR"))
+        transaction.assert_not_called()
+
     def test_http_exception_statuses_are_preserved_and_details_are_hidden(self):
         for exception, status in ((BadRequest, 400), (Unauthorized, 401), (Forbidden, 403),
                                   (NotFound, 404), (RequestEntityTooLarge, 413)):

@@ -35,11 +35,15 @@ def create_blueprint(current_user, user_lookup=None, csrf_check=None):
             # Bound even a terminated WSGI stream without Content-Length.
             if request.content_length is not None and request.content_length > maximum:
                 raise RequestEntityTooLarge()
-            # New Werkzeug may clamp request.stream at exactly the maximum,
-            # hiding the extra byte. A terminated WSGI stream is safe to read
-            # directly with our own explicit bound, including at exact limit.
-            stream = request.input_stream if request.environ.get("wsgi.input_terminated") else request.stream
-            raw = stream.read(maximum + 1)
+            # get_data(cache=True) stores bytes here in Werkzeug 2.0 and 3.x.
+            # An empty cached body is still cached; do not reread its stream.
+            raw = getattr(request, "_cached_data", None)
+            if raw is None:
+                # New Werkzeug may clamp request.stream at exactly the maximum,
+                # hiding the extra byte. A terminated WSGI stream is safe to read
+                # directly with our own explicit bound, including at exact limit.
+                stream = request.input_stream if request.environ.get("wsgi.input_terminated") else request.stream
+                raw = stream.read(maximum + 1)
             if len(raw) > maximum:
                 raise RequestEntityTooLarge()
             try:
