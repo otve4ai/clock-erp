@@ -28,7 +28,7 @@ class RuntimeDDLGateTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         report = json.loads(completed.stdout)
         self.assertTrue(report["ok"])
-        self.assertEqual(report["tracked_runtime_containers"], 1)
+        self.assertEqual(report["tracked_runtime_containers"], 2)
         self.assertEqual(report["tracked_ensure_functions"], 0)
         self.assertEqual(report["tracked_legacy_scripts"], 6)
         self.assertEqual(report["tracked_migration_modules"], 19)

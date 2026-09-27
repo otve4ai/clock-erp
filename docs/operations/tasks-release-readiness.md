@@ -34,6 +34,12 @@ SHA, но не содержимое. Иной base требует нового �
 
 ## R2: optional DB и восстановление
 
+CI inventory отдельно фиксирует `_validate_optional_connection` как read-only
+inspection с точной контрольной суммой функции: статический scanner считает
+любое упоминание `PRAGMA user_version` DDL, включая чтение без присваивания.
+Scanner не ослаблен; изменение этой функции или новый DDL container по-прежнему
+останавливает проверку. Исполняемый код recovery для этого не менялся.
+
 Recovery contract содержит отдельную `optional_databases` только для новой
 `tasks-module.db`. Прежние обязательные ERP DB остаются обязательными.
 

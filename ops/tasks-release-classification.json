@@ -1,7 +1,7 @@
 {
   "version": 1,
   "base_commit": "a0e53422c023bfaa8bdc40759b2f4587ea650d1c",
-  "candidate_tree_sha256": "47f9ab1b3ef1027d163ba52ba3e75d9002b460cc6dbfc6d22391d7496af879e5",
+  "candidate_tree_sha256": "c58ed613dc535d7f4449f6ec3d694ae8a6ac58ce404ae6e1f4dec71b5f527deb",
   "non_schema_paths": [
     "app/auth.py",
     "app/schema_migrations.py"

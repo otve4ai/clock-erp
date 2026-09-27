@@ -8,6 +8,18 @@
   },
   "runtime_containers": [
     {
+      "id": "READONLY-OPTIONAL-RECOVERY-CONTRACT",
+      "file": "app/services/recovery_v2.py",
+      "node_type": "function",
+      "symbol": "_validate_optional_connection",
+      "sha256": "045f9a0448bede868a09bcd8e03fe9828c424e18cd011c8ac45200acd391577f",
+      "owner": "recovery-platform",
+      "planned_pr": "keep",
+      "category": "read-only-inspection",
+      "risk": "read-only",
+      "production_reachable": "Backup/recovery inspection on mode=ro connections; PRAGMA user_version reads only, no assignment or DDL"
+    },
+    {
       "id": "DDL-LEDGER-RUNNER",
       "file": "app/schema_migrations.py",
       "node_type": "assignment",
