@@ -16,6 +16,9 @@ test('one Tasks entry on desktop and mobile; old links discard legacy IDs', asyn
   expect(retired.status()).toBe(410);
   const active = await page.request.get('/api/v1/tasks-module/tasks');
   expect(active.status()).toBe(200);
+  const sharedInboxBadge = await page.request.get('/api/v1/inbox/badge');
+  expect(sharedInboxBadge.status()).toBe(200);
+  expect((await sharedInboxBadge.json()).data.count).toBeGreaterThanOrEqual(0);
   await expect(page.locator('#tm-list')).toHaveAttribute('aria-busy', 'false');
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   expect(overflow).toBe(false);

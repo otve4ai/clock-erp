@@ -544,7 +544,8 @@ web.current_auth_user = lambda: preview_actor
 @web.app.before_request
 def preview_tasks_identity():
     # Synthetic identity for the isolated fixture only; production auth unchanged.
-    if request.path.startswith(("/app/tasks-module", "/api/v1/tasks-module")):
+    if (request.path.startswith(("/app/tasks-module", "/api/v1/tasks-module"))
+            or request.path == "/api/v1/inbox/badge"):
         g.current_user = preview_actor
 
 
