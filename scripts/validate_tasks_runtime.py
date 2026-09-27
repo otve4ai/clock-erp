@@ -28,7 +28,7 @@ STAGE_E_BASE = "c4fb1d02596a722e7d314e3c8b537c617bcb1234"
 STAGE_F_BASE = "b56e3b061c0f983288781793ce580ad775867852"
 STAGE_A_PYTHON = (
     "app/collaboration_schema.py", "app/navigation_badges.py", "app/schema_migrations.py",
-    "app/services/collaboration.py", "app/services/tasks.py", "app/task_errors.py",
+    "app/services/collaboration.py", "app/services/user_notifications.py", "tests/test_tasks_api.py", "tests/test_collaboration.py", "tests/test_user_notifications.py",
     "app/tasks/__init__.py", "app/tasks/error_boundary.py", "app/tasks/migrations.py",
     "app/tasks/permissions.py", "app/tasks/repository.py", "app/tasks/routes.py",
     "app/tasks/services.py", "app/tasks_boundary.py", "app/web.py",
@@ -41,6 +41,7 @@ STAGE_A_PYTHON = (
     "tests/test_tasks_microtasks.py",
     "app/tasks/presentation.py", "app/tasks/ui_routes.py", "tests/test_tasks_ui.py",
     "tests/test_tasks_acceptance.py", "scripts/benchmark_tasks_module.py",
+    "tests/stage2_preview_server.py", "tests/test_tasks_standalone.py",
 )
 PATTERNS = (
     "test_tasks_isolation.py", "test_tasks_module.py", "test_tasks_runtime_compat.py",
@@ -49,7 +50,7 @@ PATTERNS = (
     "test_tasks_microtasks.py",
     "test_tasks_ui.py",
     "test_tasks_acceptance.py",
-    "test_tasks.py", "test_tasks_api.py", "test_collaboration*.py",
+    "test_tasks_api.py", "test_tasks_standalone.py", "test_collaboration*.py",
     "test_navigation_preferences.py", "test_orders_navigation_performance.py",
     "test_sidebar_visual_contract.py", "test_user_notifications.py",
 )
@@ -112,7 +113,7 @@ def main():
     compiled = []
     source_hashes = {}
     for relative in STAGE_A_PYTHON + extra_python + (
-            "scripts/validate_tasks_runtime.py", "tests/test_tasks_runtime_compat.py", "tests/test_tasks.py"):
+            "scripts/validate_tasks_runtime.py", "tests/test_tasks_runtime_compat.py"):
         path = ROOT / relative
         # Compile with the actual 3.6.8 interpreter, without writing pyc.
         # Missing files are an error, never a silently reduced validation.

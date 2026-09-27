@@ -188,3 +188,13 @@ workflows/fault injection/themes/responsive, 32000-task synthetic benchmark.
 368/368 exact-runtime PASS (Python 3.6.8, SQLite 3.7.17, Git 1.8.3.1), 0 skips,
 0 обращений за пределы fixtures. Финальный manifest/diff review — перед commit;
 production rehearsal/R3/merge/deploy/ON этим документом не разрешаются.
+
+2026-09-27: `docs/architecture/tasks-boundary.md` — актуализирован для
+`codex/tasks-legacy-retirement`: один новый раздел «Задачи», удаление legacy
+UI/API/business implementation, 410 tombstones и safe redirect, сохранение
+shared collaboration и всех старых данных. Прежние описания параллельного
+старого/нового UI в отчётах A–F и R1/R2 являются историческим состоянием.
+Одноразовый release manifest предыдущего выпуска удалён, schema gates сохранены.
+
+`docs/validation/tasks-retirement-runtime.json` — exact Linux evidence retirement:
+349/349 PASS, 0 skips, 50 source hashes, отсутствие внешних database paths.

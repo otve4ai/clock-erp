@@ -8,8 +8,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 class TasksStandaloneUiTest(unittest.TestCase):
     def test_task_creation_is_available_only_inside_tasks_module(self):
         allowed = {
-            PROJECT_ROOT / "app" / "templates" / "tasks.html",
-            PROJECT_ROOT / "app" / "static" / "js" / "tasks.js",
+            PROJECT_ROOT / "app" / "templates" / "tasks-module.html",
+            PROJECT_ROOT / "app" / "static" / "js" / "tasks-module-dialogs.js",
         }
         roots = (
             PROJECT_ROOT / "app" / "templates",

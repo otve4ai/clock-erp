@@ -195,17 +195,6 @@ from app.services.shared_catalog import (
     normalized_name,
     product_strap_flow_enabled,
 )
-try:
-    from app.task_errors import (
-        TaskNotFoundError, TaskConflictError, TaskPermissionError, TaskValidationError,
-    )
-except Exception:
-    logging.getLogger(__name__).exception("Legacy Tasks error types unavailable")
-
-    class _UnavailableTaskError(Exception):
-        pass
-
-    TaskNotFoundError = TaskConflictError = TaskPermissionError = TaskValidationError = _UnavailableTaskError
 from app.services.sms import (
     MAX_TEXT_LENGTH as SMS_MAX_TEXT_LENGTH,
     PAGE_SIZES as SMS_PAGE_SIZES,
@@ -18761,15 +18750,15 @@ NAVIGATION_DEFINITIONS = [
     {
         "key": "tasks",
         "label": "Задачи",
-        "description": "Внутренние задачи и обещания клиентам.",
+        "description": "Задачи, микрозадачи и проекты команды.",
         "icon": "tasks",
-        "href": "/app/tasks",
-        "mobile_href": "/app/tasks",
+        "href": "/app/tasks-module",
+        "mobile_href": "/app/tasks-module",
         "position": 2,
         "group": "main",
         "mobile_primary": False,
         "active_exact": [],
-        "active_prefixes": ["/app/tasks"],
+        "active_prefixes": ["/app/tasks-module"],
     },
     {
         "key": "mail",
@@ -19780,7 +19769,6 @@ def team_user_page(user_id):
         "repair": "/app/repairs?repair_id={}",
         "customer": "/app/customers/{}",
         "purchase": "/app/purchases?purchase_id={}",
-        "task": "/app/tasks?task_id={}",
         "inventory": "/app/inventory/{}",
     }
     for event in events:
@@ -24717,16 +24705,6 @@ def api_repair_attachments(case_id):
     return api_success(serialize_api_repair(find_api_repair(case_id)), 201)
 
 
-def TaskStore(*args, **kwargs):
-    # Legacy Tasks is optional to ERP startup and ordinary page rendering.
-    from app.services.tasks import TaskStore as LegacyTaskStore
-    return LegacyTaskStore(*args, **kwargs)
-
-
-def _tasks_store():
-    return TaskStore(app.config["TASKS_DATABASE"])
-
-
 def _collaboration_store():
     return CollaborationStore(
         app.config["TASKS_DATABASE"], app.config["AUTH_DATABASE"],
@@ -24745,32 +24723,6 @@ def _task_users():
     finally:
         connection.close()
     return [dict(row) for row in rows]
-
-
-def _task_user_name(user_id):
-    user = next((row for row in _task_users() if int(row["id"]) == int(user_id)), {})
-    return " ".join(
-        str(user.get(key) or "").strip() for key in ("first_name", "last_name")
-    ).strip() or str(user.get("email") or "Сотрудник")
-
-
-def _publish_task_assignment(task, actor_id):
-    assignee_id = int(task.get("assignee_id") or 0)
-    if not assignee_id or assignee_id == int(actor_id or 0):
-        return False
-    if app.testing and not app.config.get("NOTIFICATIONS_TESTING"):
-        return False
-    try:
-        return _notification_store().publish_task(
-            task, assignee_id, _task_user_name(actor_id)
-        )
-    except Exception:
-        app.logger.exception("Task notification could not be persisted task_id=%s", task.get("id"))
-        return False
-
-
-def _task_user_exists(user_id):
-    return any(int(user["id"]) == int(user_id) for user in _task_users())
 
 
 def _erp_entity_reference(entity_type, entity_id):
@@ -24831,276 +24783,21 @@ def _erp_entity_reference(entity_type, entity_id):
     return None
 
 
-def _serialize_tasks(rows):
-    users = {int(user["id"]): user for user in _task_users()}
-    current = current_auth_user() or {}
-    current_id = int(current.get("id") or 0)
-    is_admin = current.get("role") == "admin"
-    result = []
-    for task in rows:
-        item = dict(task)
-        user = users.get(int(item["assignee_id"])) or {}
-        full_name = " ".join(str(user.get(key) or "").strip() for key in ("first_name", "last_name")).strip()
-        item["assignee_name"] = full_name or user.get("email") or "Сотрудник"
-        author = users.get(int(item["author_id"])) or {}
-        item["author_name"] = " ".join(str(author.get(key) or "").strip() for key in ("first_name", "last_name")).strip() or author.get("email") or "Сотрудник"
-        item["can_delete"] = bool(
-            not item.get("deleted_at") and (
-                is_admin or current_id in {
-                    int(item["author_id"]), int(item["assignee_id"])
-                }
-            )
-        )
-        for event in item.get("history", []):
-            actor = users.get(int(event["actor_id"])) or {}
-            event["actor_name"] = " ".join(str(actor.get(key) or "").strip() for key in ("first_name", "last_name")).strip() or actor.get("email") or "Сотрудник"
-        result.append(item)
-    return result
-
-
-def _task_api_error(error):
-    if isinstance(error, TaskValidationError):
-        return api_error("TASK_VALIDATION_FAILED", str(error), 422,
-                         {error.field: str(error)} if error.field else None)
-    if isinstance(error, TaskNotFoundError):
-        return api_error("TASK_NOT_FOUND", str(error), 404)
-    if isinstance(error, TaskConflictError):
-        return api_error("TASK_VERSION_CONFLICT", str(error), 409)
-    if isinstance(error, TaskPermissionError):
-        return api_error("TASK_PERMISSION_DENIED", str(error), 403)
-    raise error
-
-
-def _record_task_audit(task, action="updated"):
-    try:
-        AuditJournal().record(
-            "task", str(task["id"]), action,
-            str(task.get("title") or "Задача №{}".format(task["id"])),
-            after={
-                "title": task.get("title"), "status": task.get("status"),
-                "assignee_id": task.get("assignee_id"),
-                "due_date": task.get("due_date"), "priority": task.get("priority"),
-                "deleted_at": task.get("deleted_at"),
-                "deleted_by": task.get("deleted_by"),
-            },
-            metadata={"section": task.get("section")},
-            **current_audit_actor()
-        )
-    except Exception:
-        app.logger.exception("Task audit failed task_id=%s action=%s", task.get("id"), action)
-
-
 @app.get("/app/tasks")
-def tasks_page():
-    return render_template("tasks.html", task_users=_task_users(), csrf=csrf_token())
+def retired_tasks_page():
+    # Legacy IDs and query parameters never belong to the new namespace.
+    return redirect("/app/tasks-module", code=302)
 
 
-@app.get("/api/v1/tasks")
-def api_tasks_collection_get():
-    user = current_auth_user() or {}
-    try:
-        listing = _tasks_store().list(
-            view=request.args.get("view", "today"), query=request.args.get("q", ""),
-            assignee_id=request.args.get("assignee_id") or None,
-            priority=request.args.get("priority", ""),
-            status=request.args.get("status", ""), due=request.args.get("due", ""),
-            only_mine=user.get("id") if request.args.get("only_mine") == "1" else None,
-            scope=request.args.get("scope", "all"), current_user_id=user.get("id"),
-            page=request.args.get("page", 1), per_page=request.args.get("per_page", 50),
-        )
-    except TaskValidationError as error:
-        return _task_api_error(error)
-    listing["rows"] = _serialize_tasks(listing["rows"])
-    return api_success(listing)
-
-
-@app.get("/api/v1/tasks/calendar")
-def api_tasks_calendar_get():
-    user = current_auth_user() or {}
-    try:
-        listing = _tasks_store().calendar(
-            start=request.args.get("start"), end=request.args.get("end"),
-            query=request.args.get("q", ""),
-            assignee_id=request.args.get("assignee_id") or None,
-            priority=request.args.get("priority", ""),
-            status=request.args.get("status", ""), due=request.args.get("due", ""),
-            only_mine=user.get("id") if request.args.get("only_mine") == "1" else None,
-            scope=request.args.get("scope", "all"), current_user_id=user.get("id"),
-            include_completed=request.args.get("include_completed") == "1",
-        )
-    except TaskValidationError as error:
-        return _task_api_error(error)
-    for key in ("rows", "undated"):
-        listing[key] = _serialize_tasks(listing[key])
-        for task in listing[key]:
-            task["can_edit"] = bool(
-                user.get("role") == "admin" or int(user.get("id") or 0) in {
-                    int(task["author_id"]), int(task["assignee_id"])
-                }
-            )
-    return api_success(listing)
-
-
-@app.post("/api/v1/tasks/<int:task_id>/calendar-reschedule")
-def api_task_calendar_reschedule(task_id):
-    user = current_auth_user() or {}
-    try:
-        payload = api_json_payload()
-        task = _tasks_store().calendar_reschedule(
-            task_id, payload.get("due_date"), payload.get("due_time"), user.get("id"),
-            actor_role=user.get("role", "employee"), section=payload.get("section", "inbox"),
-            expected_version=payload.get("version"),
-        )
-    except (TaskValidationError, TaskPermissionError, TaskNotFoundError,
-            TaskConflictError) as error:
-        return _task_api_error(error)
-    _record_task_audit(task)
-    return api_success(_serialize_tasks([task])[0])
-
-
-@app.post("/api/v1/tasks")
-def api_tasks_collection_post():
-    user = current_auth_user() or {}
-    try:
-        payload = api_json_payload()
-        payload.setdefault("assignee_id", user.get("id"))
-        payload.setdefault("idempotency_key", request.headers.get("Idempotency-Key"))
-        task, created = _tasks_store().create(
-            payload, user.get("id"), _task_user_exists,
-            collaboration=_collaboration_store(), actor=user,
-        )
-    except (TaskValidationError, TaskNotFoundError, TaskConflictError) as error:
-        return _task_api_error(error)
-    if created:
-        _record_task_audit(task, "created")
-        _publish_task_assignment(task, user.get("id"))
-    return api_success(_serialize_tasks([task])[0], 201 if created else 200,
-                       duplicate=not created)
-
-
-@app.route("/api/v1/tasks/<int:task_id>", methods=["GET", "PATCH"])
-def api_task_resource(task_id):
-    user = current_auth_user() or {}
-    previous_assignee_id = None
-    try:
-        if request.method == "GET":
-            task = _tasks_store().get(task_id)
-        else:
-            previous_assignee_id = _tasks_store().get(task_id).get("assignee_id")
-            payload = api_json_payload()
-            payload.setdefault("assignment_operation_key", request.headers.get("Idempotency-Key"))
-            task = _tasks_store().update(
-                task_id, payload, user.get("id"), _task_user_exists,
-                collaboration=_collaboration_store(), actor=user,
-            )
-    except (TaskValidationError, TaskNotFoundError, TaskConflictError) as error:
-        return _task_api_error(error)
-    if request.method != "GET":
-        _record_task_audit(task)
-        if int(previous_assignee_id or 0) != int(task.get("assignee_id") or 0):
-            _publish_task_assignment(task, user.get("id"))
-    return api_success(_serialize_tasks([task])[0])
-
-
-@app.delete("/api/v1/tasks/<int:task_id>")
-def api_task_delete(task_id):
-    user = current_auth_user() or {}
-    try:
-        task = _tasks_store().soft_delete(
-            task_id, user.get("id"), user.get("role", "employee")
-        )
-    except (TaskNotFoundError, TaskConflictError, TaskPermissionError) as error:
-        return _task_api_error(error)
-    _record_task_audit(task, "deleted")
-    return api_success(_serialize_tasks([task])[0])
-
-
-@app.post("/api/v1/tasks/<int:task_id>/complete")
-def api_task_complete(task_id):
-    try:
-        payload = api_json_payload()
-        task = _tasks_store().set_status(
-            task_id, "completed", current_auth_user()["id"], payload.get("result", "")
-        )
-    except (TaskValidationError, TaskNotFoundError) as error:
-        return _task_api_error(error)
-    _record_task_audit(task, "completed")
-    return api_success(_serialize_tasks([task])[0])
-
-
-@app.post("/api/v1/tasks/<int:task_id>/reopen")
-def api_task_reopen(task_id):
-    try:
-        task = _tasks_store().set_status(task_id, "new", current_auth_user()["id"])
-    except (TaskValidationError, TaskNotFoundError) as error:
-        return _task_api_error(error)
-    _record_task_audit(task, "status_changed")
-    return api_success(_serialize_tasks([task])[0])
-
-
-@app.post("/api/v1/tasks/<int:task_id>/move")
-def api_task_move(task_id):
-    try:
-        payload = api_json_payload()
-        task = _tasks_store().move(task_id, str(payload.get("section") or ""), current_auth_user()["id"])
-    except (TaskValidationError, TaskNotFoundError) as error:
-        return _task_api_error(error)
-    _record_task_audit(task)
-    return api_success(_serialize_tasks([task])[0])
-
-
-@app.post("/api/v1/tasks/<int:task_id>/status")
-def api_task_status(task_id):
-    try:
-        payload = api_json_payload()
-        task = _tasks_store().set_status(
-            task_id, str(payload.get("status") or ""), current_auth_user()["id"],
-            payload.get("result", ""), bool(payload.get("continue_series")),
-        )
-    except (TaskValidationError, TaskNotFoundError) as error:
-        return _task_api_error(error)
-    _record_task_audit(task, "status_changed")
-    return api_success(_serialize_tasks([task])[0])
-
-
-@app.post("/api/v1/tasks/<int:task_id>/reschedule")
-def api_task_reschedule(task_id):
-    try:
-        task = _tasks_store().reschedule(
-            task_id, api_json_payload().get("due_date"), current_auth_user()["id"]
-        )
-    except (TaskValidationError, TaskNotFoundError) as error:
-        return _task_api_error(error)
-    _record_task_audit(task)
-    return api_success(_serialize_tasks([task])[0])
-
-
-@app.get("/api/v1/tasks/counts")
-def api_task_counts():
-    user = current_auth_user() or {}
-    try:
-        counts = _tasks_store().counts(
-            assignee_id=request.args.get("assignee_id") or None,
-            priority=request.args.get("priority", ""),
-            status=request.args.get("status", ""), due=request.args.get("due", ""),
-            only_mine=user.get("id") if request.args.get("only_mine") == "1" else None,
-            scope=request.args.get("scope", "all"), current_user_id=user.get("id"),
-            selected_view=request.args.get("view") or None,
-            query=request.args.get("q", ""),
-        )
-    except TaskValidationError as error:
-        return _task_api_error(error)
-    return api_success(counts)
-
-
-@app.get("/api/v1/tasks/notifications")
-def api_task_notifications():
-    user = current_auth_user() or {}
-    if not user.get("id"):
-        return api_success([])
-    store = _tasks_store()
-    store.generate_notifications(user.get("id"))
-    return api_success(store.notifications(user.get("id"), request.args.get("mark_seen") == "1"))
+@app.route("/api/v1/tasks", defaults={"legacy_path": ""},
+           methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+@app.route("/api/v1/tasks/<path:legacy_path>",
+           methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+def retired_tasks_api(legacy_path):
+    # A tombstone only: no legacy import, storage, lookup, or ID mapping.
+    response, status = api_error("LEGACY_TASKS_RETIRED", "Старый раздел задач отключён.", 410)
+    response.headers["Cache-Control"] = "no-store"
+    return response, status
 
 
 @app.get("/api/v1/notifications")
@@ -25147,21 +24844,9 @@ def api_user_notification_preferences():
     return api_success(_notification_store().save_preferences(user["id"], payload))
 
 
-@app.get("/api/v1/tasks/assignees")
-def api_task_assignees():
-    return api_success(_task_users())
-
-
 def _collaboration_entity(entity_type, entity_id):
-    if entity_type not in {"order", "customer", "purchase", "repair", "task"}:
+    if entity_type not in {"order", "customer", "purchase", "repair"}:
         return None
-    if entity_type == "task":
-        try:
-            task = _tasks_store().get(int(entity_id))
-        except (TaskNotFoundError, ValueError):
-            return None
-        return {"id": str(task["id"]), "label": task["title"],
-                "href": "/app/tasks?task={}".format(task["id"])}
     return _erp_entity_reference(entity_type, entity_id)
 
 
@@ -25189,26 +24874,12 @@ def api_responsibility(entity_type, entity_id):
     actor = current_auth_user() or {}
     payload = api_json_payload()
     try:
-        if entity_type == "task":
-            task = _tasks_store().update(
-                int(entity_id), {
-                    "assignee_id": payload.get("responsible_user_id"),
-                    "assignment_comment": payload.get("comment", ""),
-                    "assignment_operation_key": request.headers.get("Idempotency-Key") or
-                                                payload.get("operation_key"),
-                }, actor["id"], _task_user_exists,
-                collaboration=store, actor=actor,
-            )
-            return api_success(_serialize_tasks([task])[0])
         assignment, created = store.assign(
             entity_type, entity_id, payload.get("responsible_user_id"), actor,
             entity["label"], entity.get("href", ""), payload.get("comment", ""),
             request.headers.get("Idempotency-Key") or payload.get("operation_key", ""),
         )
-    except (CollaborationValidationError, TaskValidationError,
-            TaskNotFoundError, TaskConflictError) as error:
-        if isinstance(error, (TaskValidationError, TaskNotFoundError, TaskConflictError)):
-            return _task_api_error(error)
+    except CollaborationValidationError as error:
         return api_error("ASSIGNMENT_INVALID", str(error), 422)
     return api_success(assignment, duplicate=not created)
 

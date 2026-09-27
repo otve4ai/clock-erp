@@ -15,7 +15,7 @@
     let items = [];
     let filter = "all";
     let preferences = {
-        order_sound: true, task_sound: true, browser_notifications: false,
+        order_sound: true, browser_notifications: false,
         system_errors: true, operation_completions: true,
     };
     let audioContext = null;
@@ -37,15 +37,14 @@
     document.addEventListener("keydown", unlockAudio, {once: true});
 
     function playSound(kind) {
-        if (kind === "system") return;
-        if (!preferences[kind === "order" ? "order_sound" : "task_sound"]) return;
+        if (kind !== "order" || !preferences.order_sound) return;
         if (!audioContext || audioContext.state !== "running") return;
         const oscillator = audioContext.createOscillator();
         const gain = audioContext.createGain();
         const now = audioContext.currentTime;
         oscillator.type = "sine";
-        oscillator.frequency.setValueAtTime(kind === "order" ? 660 : 520, now);
-        oscillator.frequency.exponentialRampToValueAtTime(kind === "order" ? 880 : 700, now + .12);
+        oscillator.frequency.setValueAtTime(660, now);
+        oscillator.frequency.exponentialRampToValueAtTime(880, now + .12);
         gain.gain.setValueAtTime(.0001, now);
         gain.gain.exponentialRampToValueAtTime(.07, now + .02);
         gain.gain.exponentialRampToValueAtTime(.0001, now + .2);
@@ -57,26 +56,6 @@
     function localTime(value) {
         const date = new Date(value);
         return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"});
-    }
-
-    function dueText(value) {
-        if (!value) return "";
-        const match = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}:\d{2}))?$/.exec(value);
-        if (!match) return value;
-        const date = new Date(`${match[1]}-${match[2]}-${match[3]}T12:00:00`);
-        const today = new Date();
-        const tomorrow = new Date(); tomorrow.setDate(today.getDate() + 1);
-        const key = (candidate) => `${candidate.getFullYear()}-${String(candidate.getMonth() + 1).padStart(2, "0")}-${String(candidate.getDate()).padStart(2, "0")}`;
-        const dateKey = `${match[1]}-${match[2]}-${match[3]}`;
-        const label = dateKey === key(today) ? "Сегодня" : dateKey === key(tomorrow) ? "Завтра" : date.toLocaleDateString("ru-RU", {day: "numeric", month: "short"});
-        return match[4] ? `${label}, ${match[4]}` : label;
-    }
-
-    function metaText(item) {
-        if (item.type === "task") {
-            return [item.metadata.author, dueText(item.metadata.due)].filter(Boolean).join(" • ");
-        }
-        return localTime(item.created_at);
     }
 
     function systemAlertEnabled(item) {
@@ -107,12 +86,12 @@
             button.className = `notification-item${item.read_at ? "" : " unread"}`;
             const icon = document.createElement("span");
             icon.className = "notification-item-icon";
-            icon.textContent = item.type === "order" ? "🛒" : item.type === "task" ? "☑" : "⚙";
+            icon.textContent = item.type === "order" ? "🛒" : "⚙";
             const copy = document.createElement("span");
             const title = document.createElement("strong"); title.textContent = item.title;
             const message = document.createElement("p"); message.textContent = item.message;
             const meta = document.createElement("small");
-            meta.textContent = [metaText(item), item.type === "task" ? localTime(item.created_at) : ""].filter(Boolean).join(" · ");
+            meta.textContent = localTime(item.created_at);
             copy.append(title, message, meta);
             button.append(icon, copy);
             button.addEventListener("click", async () => {
@@ -151,7 +130,6 @@
             detail: item.message,
             duration: 6500,
             operationId: `event-notification-${item.id}`,
-            actor: item.type === "task" ? item.metadata.author : "",
             occurredAt: item.created_at,
             action: {label: "Открыть", href: item.target_url, onClick: async (event) => {
                 event.preventDefault(); await markRead(item.id); window.location.assign(item.target_url);

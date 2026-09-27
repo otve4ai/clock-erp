@@ -1,4 +1,4 @@
-"""Flag-gated new UI shell, separate from legacy /app/tasks. No Tasks DB reads."""
+"""Flag-gated Tasks UI shell. No Tasks DB reads during HTML rendering."""
 
 from flask import Blueprint, make_response, render_template
 

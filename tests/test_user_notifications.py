@@ -82,7 +82,7 @@ class UserNotificationStoreTest(unittest.TestCase):
         self.assertIsNotNone(auth.AuthStore(path).get_user(1))
 
     def test_v2_migration_preserves_existing_notification(self):
-        self.store.publish_task({"id": 501, "title": "Сохранить меня"}, 1, "Иван")
+        self.store.publish_saved_orders("tictactoy", {"500"}, [order(501)], [1])
         path = self.store.path
         connection = sqlite3.connect(str(path))
         try:
@@ -111,7 +111,7 @@ class UserNotificationStoreTest(unittest.TestCase):
         apply_domain_migrations(path, "auth", "upgrade-preservation-test")
         item = UserNotificationStore(path).feed(1)["items"][0]
         self.assertEqual((item["entity_id"], item["title"], item["severity"]),
-                         ("501", "Новая задача", "info"))
+                         ("501", "Новый заказ #501", "info"))
 
     def test_wb_notification_exists_only_after_saved_batch(self):
         self.store.publish_saved_orders("wildberries", set(), [order(200, "wildberries")], [1])
@@ -128,22 +128,38 @@ class UserNotificationStoreTest(unittest.TestCase):
         self.assertEqual(self.store.publish_saved_orders("wildberries", {"wb:200"}, [saved], [1]), 1)
         self.assertEqual(self.store.feed(1)["items"][0]["target_url"], "/order/wildberries/201")
 
-    def test_task_is_personal_read_state_and_preferences_persist(self):
-        task = {"id": 77, "title": "Собрать заказ #21134", "due_date": "2026-09-01", "due_time": "15:00"}
-        self.assertTrue(self.store.publish_task(task, 2, "Иван"))
-        self.assertFalse(self.store.publish_task(task, 2, "Иван"))
+    def test_system_is_personal_read_state_and_preferences_persist(self):
+        event = ("77", "Проверка", "Система", [2])
+        self.assertTrue(self.store.publish_system(*event))
+        self.assertFalse(self.store.publish_system(*event))
         self.assertEqual(self.store.feed(1)["items"], [])
         item = self.store.feed(2)["items"][0]
-        self.assertEqual(item["metadata"], {"author": "Иван", "due": "2026-09-01 15:00"})
+        self.assertEqual(item["metadata"], {})
         self.assertTrue(self.store.mark_read(2, item["id"]))
         self.assertEqual(self.store.feed(2)["unread"], 0)
-        self.store.publish_task({"id": 78, "title": "Вторая"}, 2, "Иван")
+        self.store.publish_system("78", "Вторая", "Система", [2])
         self.assertEqual(self.store.mark_all_read(2), 1)
         saved = self.store.save_preferences(2, {
             "order_sound": False, "task_sound": False, "browser_notifications": True,
         })
         self.assertEqual(saved, self.store.preferences(2))
         self.assertTrue(saved["browser_notifications"])
+
+    def test_historical_task_notifications_remain_stored_but_never_reappear(self):
+        with self.store.connect() as connection:
+            legacy_id = connection.execute(
+                "INSERT INTO user_notifications(user_id,type,entity_type,entity_id,title,message,"
+                "metadata_json,target_url,created_at,dedupe_key,severity) "
+                "VALUES(1,'task','task','1','Old','Old','{}','/app/tasks?task=1','now','old','info')").lastrowid
+        self.store.publish_system("active", "Visible", "System", [1])
+        feed = self.store.feed(1)
+        self.assertEqual(feed["unread"], 1)
+        self.assertEqual([item["type"] for item in feed["items"]], ["system"])
+        self.assertFalse(self.store.mark_read(1, legacy_id))
+        self.assertEqual(self.store.mark_all_read(1), 1)
+        with self.store.connect() as connection:
+            row = connection.execute("SELECT read_at,delivered_at FROM user_notifications WHERE id=?", (legacy_id,)).fetchone()
+            self.assertEqual(tuple(row), (None, None))
 
     def test_system_event_is_deduplicated_and_read_state_is_per_user(self):
         created = self.store.publish_system(
@@ -215,12 +231,9 @@ class UserNotificationApiTest(unittest.TestCase):
             session["session_version"] = 1
             session["_csrf_token"] = "notification-csrf"
 
-    def test_task_assignment_poll_read_and_preferences(self):
-        created = self.client.post("/api/v1/tasks", json={
-            "title": "Собрать заказ #21134", "assignee_id": self.assignee_id,
-            "due_date": "2026-09-01", "due_time": "15:00",
-        }, headers={"X-CSRF-Token": "notification-csrf", "Idempotency-Key": "notify-task"})
-        self.assertEqual(created.status_code, 201)
+    def test_system_poll_read_and_preferences(self):
+        web._notification_store().publish_system("notify-system", "Сообщение", "Готово",
+                                                [self.assignee_id], metadata={"author": "Иван"})
         self.login(self.assignee_id)
         first = self.client.get("/api/v1/notifications").get_json()["data"]
         self.assertEqual((first["unread"], first["items"][0]["fresh"]), (1, True))
@@ -240,7 +253,7 @@ class UserNotificationApiTest(unittest.TestCase):
         self.assertFalse(preferences.get_json()["data"]["task_sound"])
 
     def test_sidebar_contains_bell_center_and_browser_controls(self):
-        page = self.client.get("/app/tasks").get_data(as_text=True)
+        page = self.client.get("/app/products").get_data(as_text=True)
         for marker in (
             "data-notification-bell", "notificationCenter", "Все", "Заказы", "Задачи",
             "Система", "Уведомлять об ошибках системы",

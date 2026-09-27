@@ -1,4 +1,4 @@
-"""Separate API namespace; never replaces /app/tasks or /api/v1/tasks."""
+"""Tasks module API in its own namespace; no legacy task access."""
 
 from flask import Blueprint, current_app, json, jsonify, request
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge

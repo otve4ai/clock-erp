@@ -28,7 +28,7 @@ class BaseLayoutRegressionTest(unittest.TestCase):
             ],
             [
                 ("orders", "Заказы", "/app/orders"),
-                ("tasks", "Задачи", "/app/tasks"),
+                ("tasks", "Задачи", "/app/tasks-module"),
                 ("mail", "Почта", "/app/mail"),
                 ("products", "Товары", "/app/products"),
                 ("sales", "Продажи", "/app/sales"),

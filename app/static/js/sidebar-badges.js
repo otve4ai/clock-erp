@@ -4,7 +4,6 @@
     window.__erpSidebarBadgesInitialized = true;
 
     const labels = {
-        tasks: "Активных задач на сегодня и просроченных",
         inbox: "Непрочитанных входящих",
     };
     const refresh = async (kind, nodes) => {

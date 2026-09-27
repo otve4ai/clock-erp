@@ -6,7 +6,7 @@ const {runInNewContext} = require('node:vm');
 const source = readFileSync(require.resolve('../app/static/js/sidebar-badges.js'), 'utf8');
 const flush = () => new Promise(setImmediate);
 
-function fixture(respond, readyState = 'loading', kinds = ['tasks', 'inbox']) {
+function fixture(respond, readyState = 'loading', kinds = ['inbox']) {
     const nodes = kinds.map(kind => ({
         dataset: {sidebarBadge: kind}, hidden: true, textContent: '', attributes: {},
         setAttribute(key, value) { this.attributes[key] = value; },
@@ -33,12 +33,13 @@ function fixture(respond, readyState = 'loading', kinds = ['tasks', 'inbox']) {
     return {nodes, requests, listeners, timers, context};
 }
 
-test('E: badge HTTP failure stays local while the other badge renders', async () => {
+test('retired task badge is ignored while shared inbox renders', async () => {
     const f = fixture(async url => url.includes('/tasks/') ? {ok: false} : {
         ok: true, json: async () => ({data: {count: 3}}),
-    });
+    }, 'loading', ['tasks', 'inbox']);
     f.listeners.load();
     await flush();
+    assert.equal(f.requests.length, 1);
     assert.equal(f.nodes[0].hidden, true);
     assert.equal(f.nodes[1].textContent, '3');
     assert.equal(f.nodes[1].hidden, false);
@@ -47,10 +48,10 @@ test('E: badge HTTP failure stays local while the other badge renders', async ()
 
 test('desktop and mobile copies share one request per badge', async () => {
     const f = fixture(async () => ({ok: true, json: async () => ({data: {count: 2}})}),
-        'loading', ['tasks', 'inbox', 'tasks', 'inbox']);
+        'loading', ['inbox', 'inbox']);
     f.listeners.load();
     await flush();
-    assert.equal(f.requests.length, 2);
+    assert.equal(f.requests.length, 1);
     assert.ok(f.nodes.every(node => !node.hidden && node.textContent === '2'));
 });
 
@@ -71,7 +72,7 @@ test('requests only start after window load and never repeat on duplicate script
     runInNewContext(source, f.context);
     f.listeners.load();
     await flush();
-    assert.equal(f.requests.length, 2);
+    assert.equal(f.requests.length, 1);
     assert.equal(f.requests[0].options.headers['X-Vechasu-Notify'], 'off');
     assert.equal(f.requests[0].options.credentials, 'same-origin');
 });
@@ -82,7 +83,7 @@ test('hanging request is aborted without changing its badge or producing an unha
     }));
     f.listeners.load();
     const timeouts = [...f.timers.values()];
-    assert.equal(timeouts.length, 2);
+    assert.equal(timeouts.length, 1);
     timeouts.forEach(timer => { assert.equal(timer.delay, 1500); timer.callback(); });
     await flush();
     assert.ok(f.nodes.every(node => node.hidden));
@@ -111,5 +112,5 @@ test('script loaded after window load starts asynchronously', async () => {
     assert.equal(startup[1].delay, 0);
     startup[1].callback();
     await flush();
-    assert.equal(f.requests.length, 2);
+    assert.equal(f.requests.length, 1);
 });

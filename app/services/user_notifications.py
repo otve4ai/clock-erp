@@ -8,7 +8,7 @@ from pathlib import Path
 from app.domain_schema_migrations import validate_auth_database
 
 
-NOTIFICATION_TYPES = {"order", "task", "system"}
+NOTIFICATION_TYPES = {"order", "system"}
 SEVERITIES = {"info", "success", "warning", "error"}
 DEFAULT_PREFERENCES = {
     "order_sound": True,
@@ -138,28 +138,6 @@ class UserNotificationStore:
             connection.commit()
         return created
 
-    def publish_task(self, task, user_id, author_name=""):
-        task_id = int(task["id"])
-        due = ""
-        if task.get("due_date"):
-            due = str(task["due_date"])
-            if task.get("due_time"):
-                due += " " + str(task["due_time"])
-        with self.connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                "INSERT OR IGNORE INTO notification_entities(entity_type,entity_id,first_seen_at) VALUES('task',?,?)",
-                (str(task_id), utc_now()),
-            )
-            created = self._insert(
-                connection, user_id, "task", "task", str(task_id), "Новая задача",
-                _text(task.get("title"), 1000), "/app/tasks?task={}".format(task_id),
-                {"author": _text(author_name, 240), "due": due},
-                event_key="task:new:{}".format(task_id),
-            )
-            connection.commit()
-        return created
-
     def publish_system(self, event_key, title, message, recipient_ids,
                        severity="info", entity_type="system", entity_id="",
                        target_url="/app/settings", metadata=None):
@@ -187,7 +165,7 @@ class UserNotificationStore:
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             rows = connection.execute(
-                "SELECT * FROM user_notifications WHERE user_id=? ORDER BY id DESC LIMIT ?",
+                "SELECT * FROM user_notifications WHERE user_id=? AND type!='task' ORDER BY id DESC LIMIT ?",
                 (int(user_id), limit),
             ).fetchall()
             fresh_ids = [int(row["id"]) for row in rows if row["delivered_at"] is None]
@@ -198,7 +176,7 @@ class UserNotificationStore:
                     [now, int(user_id)] + fresh_ids,
                 )
             unread = int(connection.execute(
-                "SELECT COUNT(*) FROM user_notifications WHERE user_id=? AND read_at IS NULL",
+                "SELECT COUNT(*) FROM user_notifications WHERE user_id=? AND read_at IS NULL AND type!='task'",
                 (int(user_id),),
             ).fetchone()[0])
             connection.commit()
@@ -217,7 +195,7 @@ class UserNotificationStore:
     def mark_read(self, user_id, notification_id):
         with self.connect() as connection:
             cursor = connection.execute(
-                "UPDATE user_notifications SET read_at=COALESCE(read_at,?) WHERE id=? AND user_id=?",
+                "UPDATE user_notifications SET read_at=COALESCE(read_at,?) WHERE id=? AND user_id=? AND type!='task'",
                 (utc_now(), int(notification_id), int(user_id)),
             )
             connection.commit()
@@ -226,7 +204,7 @@ class UserNotificationStore:
     def mark_all_read(self, user_id):
         with self.connect() as connection:
             cursor = connection.execute(
-                "UPDATE user_notifications SET read_at=? WHERE user_id=? AND read_at IS NULL",
+                "UPDATE user_notifications SET read_at=? WHERE user_id=? AND read_at IS NULL AND type!='task'",
                 (utc_now(), int(user_id)),
             )
             connection.commit()

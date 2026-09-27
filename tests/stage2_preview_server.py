@@ -11,7 +11,6 @@ import time
 import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 
 if os.name == "nt":
@@ -34,6 +33,8 @@ os.environ["CATALOG_DATABASE_PATH"] = str(PREVIEW_ROOT / "catalog.db")
 os.environ["ERP_AUTH_DATABASE"] = str(PREVIEW_ROOT / "auth.db")
 os.environ["ORDERS_DATABASE_PATH"] = str(PREVIEW_ROOT / "orders.db")
 os.environ["ERP_TASKS_DATABASE"] = str(PREVIEW_ROOT / "tasks.db")
+os.environ["ERP_TASKS_MODULE_DATABASE"] = str(PREVIEW_ROOT / "tasks-module.db")
+os.environ["ERP_TASKS_MODULE_ENABLED"] = "1"
 os.environ["ERP_PURCHASES_DATABASE"] = str(PREVIEW_ROOT / "purchases.db")
 os.environ["CUSTOMERS_DATABASE_PATH"] = str(PREVIEW_ROOT / "customers.db")
 os.environ["ERP_SMS_DATABASE"] = str(PREVIEW_ROOT / "sms.db")
@@ -506,7 +507,7 @@ web.api_sales_records = lambda: tuple(
 web.app.config.update(TESTING=True, AUTH_TESTING=False)
 
 # Stable local-only task fixtures make responsive and accessibility checks
-# exercise real list, grouping and relation-link states without production data.
+# exercise the new module without production data or legacy task records.
 with sqlite3.connect(str(PREVIEW_ROOT / "auth.db")) as task_auth_connection:
     now = int(time.time())
     task_auth_connection.executemany(
@@ -518,54 +519,34 @@ with sqlite3.connect(str(PREVIEW_ROOT / "auth.db")) as task_auth_connection:
         ],
     )
 
-from app.services.tasks import TaskStore  # noqa: E402
+from flask import g, request  # noqa: E402
+from app.tasks.migrations import migrate_database as migrate_tasks_module  # noqa: E402
+from app.tasks.repository import TasksRepository  # noqa: E402
+from app.tasks.services import TasksService  # noqa: E402
+from app.tasks.project_services import ProjectsService  # noqa: E402
 
-preview_task_store = TaskStore(PREVIEW_ROOT / "tasks.db")
-try:
-    preview_timezone = ZoneInfo("Europe/Moscow")
-except Exception:
-    # Windows test runtimes may not ship the optional IANA tzdata package.
-    preview_timezone = timezone(timedelta(hours=3))
-preview_today = datetime.now(preview_timezone).date()
-
-
-def add_preview_task(title, **values):
-    payload = {
-        "title": title,
-        "description": values.pop("description", ""),
-        "assignee_id": values.pop("assignee_id", 1),
-        "idempotency_key": "preview-{}".format(title),
-    }
-    payload.update(values)
-    task, _ = preview_task_store.create(payload, 1, lambda user_id: int(user_id) in {1, 2})
-    return task
-
-
-add_preview_task(
-    "Подтвердить наличие часов для клиента",
-    description="Проверить резерв и написать клиенту до конца рабочего дня.",
-    priority="urgent", due_date=preview_today.isoformat(), due_time="12:30",
-)
-add_preview_task(
-    "Согласовать условия доставки заказа",
-    description="Клиент просит перенести доставку на вечер.",
-    priority="important", due_date=preview_today.isoformat(), assignee_id=2,
-)
-add_preview_task("Проверить новые обращения", due_date=preview_today.isoformat())
-add_preview_task("Разобрать входящие документы", section="inbox")
-add_preview_task("Обновить памятку по возвратам", section="anytime", priority="important")
-add_preview_task("Подготовить витрину к осенней коллекции", due_date=(preview_today + timedelta(days=2)).isoformat(), priority="urgent")
-add_preview_task("Сверить план закупок", due_date=(preview_today + timedelta(days=7)).isoformat(), assignee_id=2)
-waiting_task = add_preview_task(
-    "Получить ответ поставщика", status="waiting", waiting_for="Подтверждение цены",
-    check_date=(preview_today - timedelta(days=1)).isoformat(),
-)
-completed_task = add_preview_task("Отправить клиенту фотографии", due_date=(preview_today - timedelta(days=1)).isoformat())
-preview_task_store.set_status(completed_task["id"], "completed", 1, "Фотографии отправлены")
-cancelled_task = add_preview_task("Уточнить старый запрос", assignee_id=2)
-preview_task_store.set_status(cancelled_task["id"], "cancelled", 1)
+migrate_tasks_module(PREVIEW_ROOT / "tasks-module.db")
 preview_role = "admin" if os.environ.get("ERP_PREVIEW_OWNER") == "1" else "employee"
-web.current_auth_user = lambda: {"id": 1, "role": preview_role, "name": "Максим Орлов"}
+preview_actor = {"id": 1, "role": preview_role, "name": "Максим Орлов", "first_name": "Максим", "last_name": "Орлов", "email": "maxim@preview.test", "active": True}
+preview_users = {1: preview_actor, 2: {"id": 2, "role": "employee", "name": "Анна Лебедева", "active": True}}
+preview_task_store = TasksRepository(PREVIEW_ROOT / "tasks-module.db")
+preview_tasks = TasksService(preview_task_store, preview_users.get)
+preview_projects = ProjectsService(preview_task_store, preview_users.get)
+preview_project = preview_projects.create(preview_actor, {"name": "Команда сайта"})
+preview_today = datetime.now(timezone(timedelta(hours=3))).date()
+for title, priority in (("Подтвердить наличие часов для клиента", "high"), ("Проверить новые обращения", "normal")):
+    preview_tasks.create(preview_actor, {"title": title, "assigned_to": 1,
+        "priority": priority, "deadline_date": preview_today.isoformat(), "project_id": preview_project["id"]})
+preview_tasks.create_micro(preview_actor, {"title": "Ответить клиенту", "assigned_to": 1})
+web.current_auth_user = lambda: preview_actor
+
+
+@web.app.before_request
+def preview_tasks_identity():
+    # Synthetic identity for the isolated fixture only; production auth unchanged.
+    if (request.path.startswith(("/app/tasks-module", "/api/v1/tasks-module"))
+            or request.path == "/api/v1/inbox/badge"):
+        g.current_user = preview_actor
 
 
 class WarmCacheReleaseMiddleware:
