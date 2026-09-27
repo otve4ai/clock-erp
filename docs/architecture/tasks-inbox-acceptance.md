@@ -97,3 +97,12 @@ production trial изменение смысла waiting и результаты
 молния без числа, normal badge красный. Повторная целевая проверка: 22 JS checks,
 4 Playwright scenarios (1440/320 px) PASS, TypeScript/Prettier PASS.
 Проверено завершение через рабочий раздел и последующее исчезновение из Inbox.
+
+## Проверка перед разрешённым выпуском
+
+Linux / Python 3.6.8 / SQLite 3.7.17 / Flask и Werkzeug 2.0.3: 371/371 PASS,
+0 skips, nobody без сети, временные БД. Первый прогон выявил CRLF упаковку
+неизменённого deploy.sh; архив пересобран с core.autocrlf=false. Повтор PASS.
+CI выявил недостаточный контраст загрузочного текста из-за opacity .65 всего
+списка. При загрузке оставлен cursor:progress без снижения контраста; отдельный
+browser regression удерживает API response и проверяет Axe до окончания загрузки.

@@ -1,6 +1,27 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
+test('loading list preserves readable contrast', async ({ page }) => {
+  let release = () => {};
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(/\/api\/v1\/tasks-module\/tasks\?/, async (route) => {
+    await pending;
+    await route.continue();
+  });
+  try {
+    await page.goto('/app/tasks-module');
+    await expect(page.locator('#tm-list')).toHaveAttribute('aria-busy', 'true');
+    await expect(page.locator('#tm-list .tm-loading')).toBeVisible();
+    const result = await new AxeBuilder({ page }).include('#tm-list').analyze();
+    expect(result.violations).toEqual([]);
+  } finally {
+    release();
+  }
+  await expect(page.locator('#tm-list')).toHaveAttribute('aria-busy', 'false');
+});
+
 test('read-only acquaintance, normal acceptance, persistent micro timer and split badges', async ({
   page,
 }, testInfo) => {

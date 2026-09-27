@@ -54,7 +54,7 @@
 .tm-list-heading { display:flex; align-items:center; gap:8px; padding:12px 13px 7px; border:1px solid var(--erp-border); border-bottom:0; border-radius:var(--erp-radius) var(--erp-radius) 0 0; background:var(--erp-surface); }
 #tm-sort-label { margin-left:auto; font-size:11px; }
 .tm-list { background:var(--erp-surface); border:1px solid var(--erp-border); border-top:0; border-radius:0 0 var(--erp-radius) var(--erp-radius); padding:0 12px 10px; min-height:120px; overflow-wrap:anywhere; }
-.tm-list[aria-busy=true] { opacity:.65; }
+.tm-list[aria-busy=true] { cursor:progress; }
 .tm-group { margin:0; }
 .tm-group > summary { cursor:pointer; padding:9px 0 5px; font-weight:750; font-size:13px; }
 .tm-group > summary span { margin-left:7px; font-size:11px; font-weight:500; color:var(--erp-muted); }
