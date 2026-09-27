@@ -198,3 +198,10 @@ shared collaboration и всех старых данных. Прежние оп�
 
 `docs/validation/tasks-retirement-runtime.json` — exact Linux evidence retirement:
 349/349 PASS, 0 skips, 50 source hashes, отсутствие внешних database paths.
+
+2026-09-27: `docs/architecture/tasks-inbox-acceptance.md` — `current` для отдельной
+preview-ветки: ознакомление без read, атомарное принятие normal, micro до выполнения,
+раздельные badge и явная offline подготовка прежнего смысла waiting. Schema v4
+не меняется. Это локальный owner trial, не утверждение production deployment.
+Уточнение владельца: micro во входящих/preview только для ознакомления;
+завершение в рабочем разделе. Индикаторы: красное число normal и ⚡ без числа.

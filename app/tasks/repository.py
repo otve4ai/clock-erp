@@ -215,14 +215,18 @@ class TaskSession(ProjectQueries, InboxQueries, MicroQueries):
             parameters.extend(("%" + escaped + "%", "%" + escaped + "%"))
         return " AND ".join(clauses), parameters
 
-    def list(self, scope, options, today):
+    def list(self, scope, options, today, include_inbox=False):
         where, parameters = self._where(scope, options, today)
         if "status" not in options and options.get("view") != "archive":
             where += " AND status!='done'"
         total = self.connection.execute("SELECT COUNT(*) FROM tasks WHERE " + where, parameters).fetchone()[0]
         order = "completed_at DESC,id DESC" if options.get("view") == "archive" else "deadline_date IS NULL,deadline_date,id"
+        columns = "tasks.*"
+        if include_inbox:
+            columns += (",EXISTS(SELECT 1 FROM task_inbox_events e WHERE e.task_id=tasks.id "
+                        "AND e.recipient_id=tasks.assigned_to AND e.handled_at IS NULL) AS inbox_pending")
         rows = self.connection.execute(
-            "SELECT * FROM tasks WHERE " + where +
+            "SELECT " + columns + " FROM tasks WHERE " + where +
             " ORDER BY " + order + " LIMIT ? OFFSET ?",
             parameters + [options["limit"], options["offset"]]).fetchall()
         return {"items": [dict(row) for row in rows], "total": total,
@@ -251,5 +255,6 @@ class TaskSession(ProjectQueries, InboxQueries, MicroQueries):
             "FROM tasks WHERE " + where,
             [today, today, scope["actor_id"], scope["actor_id"]] + parameters).fetchone()
         result = dict(row)
-        result["inbox"] = self.inbox_badge(scope["actor_id"])
+        result["inbox_counts"] = self.inbox_counts(scope["actor_id"])
+        result["inbox"] = result["inbox_counts"]["count"]
         return result

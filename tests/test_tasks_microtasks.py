@@ -314,20 +314,24 @@ class InboxDomainTest(MicroFixture):
         self.assertEqual(self.path.read_bytes(), before)
         self.assertIsNone(self.events()[0]["handled_at"])
 
-    def test_read_idempotent_and_independent_of_claim(self):
-        self.micro(assigned_to=2)
+    def test_read_of_finished_event_is_idempotent_and_never_notifies(self):
+        task = self.micro(assigned_to=2)
         event = self.events()[0]
+        self.error(409, self.inbox.read, self.users[2], event["id"], {})
+        self.change(task, status="done")
         handled = self.inbox.read(self.users[2], event["id"], {})
         self.now = "2026-09-28T00:00:00+00:00"
         self.assertEqual(self.inbox.read(self.users[2], event["id"], {}), handled)
-        self.assertEqual(self.inbox.list(self.users[2], badge=True), {"count": 0})
-        self.assertEqual(len(self.inbox.claim(self.users[2], {})["items"]), 1)
+        self.assertEqual(self.inbox.list(self.users[2], badge=True), {"count": 0, "normal": 0, "micro": 0})
+        self.assertEqual(len(self.inbox.claim(self.users[2], {})["items"]), 0)
 
-    def test_completion_and_soft_delete_do_not_erase_pending_inbox(self):
+    def test_completion_and_soft_delete_hide_but_preserve_event(self):
         task = self.micro(assigned_to=2)
         task = self.change(task, status="done")
         self.change(task, operation="delete")
-        self.assertEqual(len(self.events()), 1)
+        self.assertEqual(len(self.events()), 0)
+        with self.repo.transaction() as session:
+            self.assertEqual(session.connection.execute("SELECT COUNT(*) FROM task_inbox_events").fetchone()[0], 1)
 
     def test_claim_once_preserves_inbox_and_task(self):
         task = self.micro(assigned_to=2)
@@ -453,7 +457,7 @@ class MicroStorageTest(MicroFixture):
             self.tasks.micros(self.users[3], summary=True)
             event = self.events(3)[0]
             self.inbox.claim(self.users[3], {})
-            self.inbox.read(self.users[3], event["id"], {})
+            self.error(409, self.inbox.read, self.users[3], event["id"], {})
             self.change(task, operation="convert")
         self.assertGreater(len(opened), 5)
 
@@ -504,9 +508,9 @@ class MicroApiTest(MicroFixture):
         self.assertEqual(self.client.get(BASE + "/microtasks").get_json()["data"]["total"], 1)
         self.assertEqual(self.client.get(BASE + "/microtasks/summary").get_json()["data"]["my_active"], 1)
         event = self.client.get(BASE + "/inbox").get_json()["data"]["items"][0]
-        self.assertEqual(self.client.get(BASE + "/inbox/badge").get_json()["data"], {"count": 1})
+        self.assertEqual(self.client.get(BASE + "/inbox/badge").get_json()["data"], {"count": 1, "normal": 0, "micro": 1})
         self.post("/notifications/claim", {})
-        self.post("/inbox/{}/read".format(event["id"]), {})
+        self.post("/inbox/{}/read".format(event["id"]), {}, 409)
         self.post("/microtasks/{}/complete".format(task["id"]), {"version": 1})
         self.post("/microtasks/{}/reopen".format(task["id"]), {"version": 2})
         converted = self.post("/microtasks/{}/convert".format(task["id"]), {"version": 3})

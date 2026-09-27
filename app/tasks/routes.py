@@ -96,7 +96,7 @@ def create_blueprint(current_user, user_lookup=None, csrf_check=None, user_direc
         user = current_user()
         if request.method == "POST":
             return data_response(service().create(user, payload()), 201)
-        return data_response(service().list(user, query()))
+        return data_response(service().list(user, query(), include_inbox=True))
 
     @blueprint.route("/tasks/summary", methods=["GET"])
     @module_boundary
@@ -109,11 +109,12 @@ def create_blueprint(current_user, user_lookup=None, csrf_check=None, user_direc
         user = current_user()
         if request.method == "PATCH":
             return data_response(service().mutate(user, task_id, payload()))
-        return data_response(service().get(user, task_id))
+        return data_response(service().get(user, task_id, include_inbox=True))
 
     @blueprint.route("/tasks/<int:task_id>/status", methods=["POST"])
     @blueprint.route("/tasks/<int:task_id>/delete", methods=["POST"])
     @blueprint.route("/tasks/<int:task_id>/restore", methods=["POST"])
+    @blueprint.route("/tasks/<int:task_id>/accept", methods=["POST"])
     @module_boundary
     def mutate(task_id):
         operation = request.path.rsplit("/", 1)[-1]

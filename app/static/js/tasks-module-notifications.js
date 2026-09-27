@@ -11,9 +11,12 @@
             credentials: 'same-origin', signal, headers: {'X-Vechasu-Notify': 'off'},
         });
         if (!response.ok) throw new Error('Badge unavailable');
-        const count = (await response.json()).data.count;
+        const counts = (await response.json()).data;
         document.querySelectorAll('[data-tasks-module-badge]').forEach(item => {
-            item.textContent = Number.isSafeInteger(count) && count > 0 ? String(count) : '';
+            const micro = item.dataset && item.dataset.tasksModuleBadge === 'micro';
+            const count = micro ? counts.micro : (counts.normal === undefined ? counts.count : counts.normal);
+            item.textContent = Number.isSafeInteger(count) && count > 0 ? (micro ? '⚡' : String(count)) : '';
+            if (item.setAttribute) item.setAttribute('aria-label', (micro ? 'Невыполненные микрозадачи: ' : 'Обычные входящие: ') + (count || 0));
             item.hidden = !item.textContent;
         });
     }
@@ -47,9 +50,9 @@
             items.forEach(item => {
                 if (!Number.isSafeInteger(item.task_id) || item.task_id <= 0) return;
                 const actor = directory.find(user => user.id === item.actor_id);
-                window.VechasuNotify.info("Новая задача", {
+                window.VechasuNotify.info(item.task_type === "micro" ? "⚡ Микрозадача · 24 часа" : "Новое поручение", {
                     detail: (actor ? "От " + actor.name + " · " : "") + String(item.title || ""),
-                    action: {label: "Открыть", href: "/app/tasks-module?task=" + item.task_id},
+                    action: {label: "Ознакомиться", href: "/app/tasks-module?view=inbox&preview=" + item.task_id},
                 });
             });
         } catch (_) { /* Optional Tasks must not emit an ERP-wide error. */ }

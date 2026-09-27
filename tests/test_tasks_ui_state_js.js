@@ -43,7 +43,7 @@ function harness() {
         localStorage: {getItem() {}, setItem() {}}, history: {pushState() {}}, location: {search: ''},
         setTimeout: fn => { timers.set(++timerId, fn); return timerId; }, clearTimeout: id => { if (timers.has(id)) cancelled.push(timers.get(id)); timers.delete(id); },
         setInterval: () => 1, clearInterval() {}, FormData: function() { return []; },
-        window: {TASKS_MODULE_BOOTSTRAP: {userId: 1}, addEventListener() {}, TasksModuleDialogs: {showTask: task => shown.push(task)},
+        window: {TASKS_MODULE_BOOTSTRAP: {userId: 1}, addEventListener() {}, TasksModuleDialogs: {preview: task => shown.push(task)},
             TasksModuleAPI: {query: values => '?' + new URLSearchParams(values), request: (...args) => { calls.push(args); return env.respond(...args); }}}};
     vm.runInNewContext(code, sandbox);
     env.ui = sandbox.window.TasksModuleUI;
@@ -53,11 +53,10 @@ function harness() {
 async function inboxFailure() {
     const h = harness(); await h.initialize(); h.ui.navigate('inbox'); await flush();
     const row = h.element('#tm-list').children[0];
-    await row.children.find(child => child.textContent === 'Открыть').listeners.click();
+    await row.children.find(child => child.textContent === 'Ознакомиться').listeners.click();
     assert.equal(h.shown.length, 1); assert.equal(h.shown[0].id, 8);
-    assert.equal(h.element('#tm-list').children[0], row, 'Failed read must leave pending event visible');
-    assert.match(h.element('#tm-notice').textContent, /осталось во входящих/);
-    assert.equal(h.calls.filter(call => call[0].startsWith('/inbox/7/read')).length, 1);
+    assert.equal(h.element('#tm-list').children[0], row, 'Preview must leave pending event visible');
+    assert.equal(h.calls.filter(call => call[0].startsWith('/inbox/7/read')).length, 0);
 }
 async function searchNavigation() {
     const h = harness(); await h.initialize();

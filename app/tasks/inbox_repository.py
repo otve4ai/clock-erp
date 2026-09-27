@@ -6,6 +6,11 @@ from .domain import TaskError
 
 
 class InboxQueries:
+    # Use the current task, never a stale event snapshot, for lifecycle/recipient
+    # checks. Reading a page cannot acknowledge a task or repair data.
+    PENDING = ("e.recipient_id=? AND e.handled_at IS NULL AND "
+               "t.assigned_to=e.recipient_id AND t.deleted_at IS NULL AND t.status!='done'")
+
     def assignment_event(self, task, actor, timestamp, previous_assignee=None):
         if previous_assignee is not None:
             # Retire old pending assignments and unsent toasts atomically with
@@ -34,22 +39,48 @@ class InboxQueries:
         return value
 
     def inbox_badge(self, recipient):
-        return self.connection.execute(
-            "SELECT COUNT(*) FROM task_inbox_events WHERE recipient_id=? AND handled_at IS NULL",
-            (recipient,)).fetchone()[0]
+        return self.inbox_counts(recipient)["count"]
+
+    def inbox_counts(self, recipient):
+        row = self.connection.execute(
+            "SELECT COUNT(*),COALESCE(SUM(t.task_type='normal'),0),COALESCE(SUM(t.task_type='micro'),0) "
+            "FROM task_inbox_events e JOIN tasks t ON t.id=e.task_id WHERE " + self.PENDING,
+            (recipient,)).fetchone()
+        return dict(zip(("count", "normal", "micro"), row))
 
     def inbox(self, recipient, limit, offset):
         rows = self.connection.execute(
-            "SELECT * FROM task_inbox_events WHERE recipient_id=? AND handled_at IS NULL "
-            "ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?", (recipient, limit, offset)).fetchall()
-        return {"items": [self._inbox_row(row) for row in rows], "total": self.inbox_badge(recipient),
-                "limit": limit, "offset": offset}
+            "SELECT e.*,t.title,t.task_type,t.status,t.version,t.micro_deadline_at "
+            "FROM task_inbox_events e JOIN tasks t ON t.id=e.task_id WHERE " + self.PENDING +
+            " ORDER BY e.created_at DESC,e.id DESC LIMIT ? OFFSET ?", (recipient, limit, offset)).fetchall()
+        counts = self.inbox_counts(recipient)
+        return {"items": [self._inbox_row(row) for row in rows], "total": counts["count"],
+                "counts": counts, "limit": limit, "offset": offset}
+
+    def pending_assignment(self, task_id, recipient):
+        return self.connection.execute(
+            "SELECT e.id FROM task_inbox_events e JOIN tasks t ON t.id=e.task_id WHERE " +
+            self.PENDING + " AND t.id=? ORDER BY e.id DESC LIMIT 1", (recipient, task_id)).fetchone()
+
+    def finish_inbox(self, task_id, timestamp):
+        self.connection.execute(
+            "UPDATE task_inbox_events SET handled_at=COALESCE(handled_at,?),"
+            "notified_at=COALESCE(notified_at,?) WHERE task_id=?", (timestamp, timestamp, task_id))
 
     def read_inbox(self, recipient, event_id, timestamp):
         row = self.connection.execute("SELECT * FROM task_inbox_events WHERE id=? AND recipient_id=?",
                                       (event_id, recipient)).fetchone()
         if row is None:
             raise TaskError("INBOX_EVENT_NOT_FOUND", "Событие не найдено.", 404)
+        # Old clients must not dismiss a live assignment using the old read API.
+        task = self.connection.execute("SELECT * FROM tasks WHERE id=?", (row["task_id"],)).fetchone()
+        if (row["handled_at"] is None and task is not None and task["assigned_to"] == recipient
+                and task["deleted_at"] is None and task["status"] != "done"):
+            raise TaskError("INBOX_ACTION_REQUIRED", "Микрозадачу нужно выполнить, обычную задачу — взять в работу.", 409)
+        if task is not None and task["task_type"] == "micro":
+            # Completion/deletion hides the event by current task state. A stale
+            # read must not prevent it returning after reopen/restore.
+            return self._inbox_row(row)
         self.connection.execute(
             "UPDATE task_inbox_events SET handled_at=COALESCE(handled_at,?) WHERE id=? AND recipient_id=?",
             (timestamp, event_id, recipient))
@@ -60,8 +91,8 @@ class InboxQueries:
     def claim_notifications(self, recipient, timestamp, limit):
         # BEGIN IMMEDIATE is held by the service: concurrent claims serialize.
         rows = self.connection.execute(
-            "SELECT * FROM task_inbox_events WHERE recipient_id=? AND notified_at IS NULL "
-            "ORDER BY id LIMIT ?", (recipient, limit)).fetchall()
+            "SELECT e.* FROM task_inbox_events e JOIN tasks t ON t.id=e.task_id WHERE " + self.PENDING +
+            " AND e.notified_at IS NULL ORDER BY e.id LIMIT ?", (recipient, limit)).fetchall()
         result = []
         for row in rows:
             self.connection.execute("UPDATE task_inbox_events SET notified_at=? WHERE id=? AND recipient_id=?",

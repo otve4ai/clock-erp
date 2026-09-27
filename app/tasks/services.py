@@ -69,6 +69,8 @@ class TasksService:
                 "deleted_at": None, "related_entity_type": None, "related_entity_id": None,
                 "related_entity_label": None, "project_id": None, "micro_deadline_at": micro_deadline}
         task.update(values)
+        if task_type == "normal" and assigned_to != user["id"] and task["status"] == "new":
+            task["status"] = "waiting"
         if task["status"] == "done":
             task["completed_at"] = now
         with self.repository.transaction(write=True) as session:
@@ -80,11 +82,14 @@ class TasksService:
             session.assignment_event(task, user["id"], now)
             return task
 
-    def get(self, user, task_id):
+    def get(self, user, task_id, include_inbox=False):
         permissions.require_actor(user)
         positive_integer(task_id, "id")
         with self.repository.transaction() as session:
-            return self._task(session, user, task_id)
+            task = self._task(session, user, task_id)
+            if include_inbox:
+                task["inbox_pending"] = session.pending_assignment(task_id, user["id"]) is not None
+            return task
 
     def activity(self, user, task_id, options=None):
         permissions.require_actor(user)
@@ -98,7 +103,7 @@ class TasksService:
             return {"items": session.activity(task_id, paging["limit"], paging["offset"]),
                     "limit": paging["limit"], "offset": paging["offset"]}
 
-    def list(self, user, options=None, summary=False):
+    def list(self, user, options=None, summary=False, include_inbox=False):
         permissions.require_actor(user)
         # Pagination does not select a different statistical population.
         dashboard = summary and not (set(options or {}) - {"limit", "offset"})
@@ -109,7 +114,7 @@ class TasksService:
         with self.repository.transaction() as session:
             if dashboard:
                 return session.dashboard_summary(scope, permissions.list_scope(user, "created"), today)
-            return session.filtered_summary(scope, options, today) if summary else session.list(scope, options, today)
+            return session.filtered_summary(scope, options, today) if summary else session.list(scope, options, today, include_inbox)
 
     @staticmethod
     def _authorize_mutation(user, task, version, operation, values):
@@ -130,14 +135,14 @@ class TasksService:
             if any(field.startswith("related_") for field in values):
                 permissions.require_action(user, task, "reassign", project_access=True)
         else:
-            permissions.require_action(user, task, {"status": "change_status",
+            permissions.require_action(user, task, {"status": "change_status", "accept": "accept",
                                                    "delete": "delete", "restore": "restore",
                                                    "convert": "edit"}[operation], project_access=True)
 
     def mutate(self, user, task_id, payload, operation="patch", expected_type=None):
         permissions.require_actor(user)
         positive_integer(task_id, "id")
-        if operation not in ("patch", "status", "delete", "restore", "convert"):
+        if operation not in ("patch", "status", "delete", "restore", "convert", "accept"):
             raise invalid("operation")
         if not isinstance(payload, dict):
             raise invalid("body")
@@ -163,6 +168,10 @@ class TasksService:
             if expected_type is not None and before["task_type"] != expected_type:
                 raise not_found()
             self._authorize_mutation(user, before, version, operation, values)
+            if operation == "accept":
+                if session.pending_assignment(task_id, user["id"]) is None:
+                    raise conflict()
+                values = {"status": "in_progress"}
             if operation == "convert":
                 if before["task_type"] != "micro":
                     raise invalid("task_type", "Это уже обычная задача.")
@@ -172,8 +181,12 @@ class TasksService:
             now = self.now()
             if operation in ("delete", "restore"):
                 values["deleted_at"] = now if operation == "delete" else None
+            if (before["task_type"] == "normal" and "assigned_to" in values
+                    and values["assigned_to"] != before["assigned_to"]
+                    and values.get("status", before["status"]) != "done"):
+                values["status"] = "new" if values["assigned_to"] == user["id"] else "waiting"
             changes = {field: value for field, value in values.items() if before[field] != value}
-            if not changes:
+            if not changes and operation != "accept":
                 raise invalid("body", "Задача уже содержит эти значения.")
             if "status" in changes:
                 changes["completed_at"] = now if changes["status"] == "done" else None
@@ -187,7 +200,15 @@ class TasksService:
             for event_type, fields in groups:
                 diff = {field: {"before": before[field], "after": task[field]} for field in fields if field in changes}
                 if diff:
+                    if operation == "accept":
+                        diff["action"] = "accepted"
                     session.add_activity(task, user["id"], event_type, now, diff)
+            if operation == "accept" and "status" not in changes:
+                session.add_activity(task, user["id"], "status_changed", now,
+                                     {"action": "accepted", "status": {"before": before["status"], "after": task["status"]}})
+            if (task["task_type"] == "normal" and (operation == "accept" or
+                    ("status" in changes and task["status"] in ("in_progress", "done")))):
+                session.finish_inbox(task_id, now)
             if "status" in changes and (before["status"] == "done" or task["status"] == "done"):
                 event = "completed" if task["status"] == "done" else "reopened"
                 session.add_activity(task, user["id"], event, now,

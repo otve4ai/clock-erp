@@ -388,6 +388,8 @@ body[class] {
     padding-top: 9px;
     border-top: 1px solid rgba(148, 184, 219, 0.12);
 }
+[data-tasks-module-badge="normal"] { background:#b91c1c; color:#fff; }
+[data-tasks-module-badge="micro"] { background:#fef3c7; color:#78350f; }
 
 .sidebar-system-status {
     min-width: 0;

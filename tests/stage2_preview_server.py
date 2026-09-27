@@ -538,7 +538,21 @@ for title, priority in (("Подтвердить наличие часов дл�
     preview_tasks.create(preview_actor, {"title": title, "assigned_to": 1,
         "priority": priority, "deadline_date": preview_today.isoformat(), "project_id": preview_project["id"]})
 preview_tasks.create_micro(preview_actor, {"title": "Ответить клиенту", "assigned_to": 1})
-web.current_auth_user = lambda: preview_actor
+preview_tasks.create(preview_users[2], {"title": "Ознакомиться с планом и взять задачу в работу", "assigned_to": 1})
+preview_tasks.create_micro(preview_users[2], {"title": "Проверить оплату — микрозадача во входящих", "assigned_to": 1})
+preview_past = TasksService(preview_task_store, preview_users.get,
+    now=lambda: (datetime.now(timezone.utc) - timedelta(hours=26)).isoformat(timespec="microseconds"))
+preview_past.create_micro(preview_users[2], {"title": "Просроченная микрозадача остаётся во входящих", "assigned_to": 1})
+
+
+def preview_tasks_actor():
+    # Only this disposable fixture supports switching a synthetic API actor.
+    if request.path.startswith("/api/v1/tasks-module") and request.headers.get("X-Preview-Actor") == "2":
+        return preview_users[2]
+    return preview_actor
+
+
+web.current_auth_user = preview_tasks_actor
 
 
 @web.app.before_request
@@ -546,7 +560,7 @@ def preview_tasks_identity():
     # Synthetic identity for the isolated fixture only; production auth unchanged.
     if (request.path.startswith(("/app/tasks-module", "/api/v1/tasks-module"))
             or request.path == "/api/v1/inbox/badge"):
-        g.current_user = preview_actor
+        g.current_user = preview_tasks_actor()
 
 
 class WarmCacheReleaseMiddleware:

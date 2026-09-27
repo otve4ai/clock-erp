@@ -16,7 +16,7 @@
         const result = node('button', cls, text); result.type = 'button';
         result.addEventListener('click', action); return result;
     };
-    const statusNames = {new: 'К выполнению', in_progress: 'В работе', waiting: 'Ожидает ответа', done: 'Готово'};
+    const statusNames = {new: 'К выполнению', in_progress: 'В работе', waiting: 'Ожидает принятия', done: 'Готово'};
     const scopeNames = {my: 'Задачи, порученные мне', created: 'Поставленные мной', team: 'Задачи команды', all: 'Все доступные задачи'};
     const viewNames = {main: 'Задачи', inbox: 'Входящие', today: 'Сегодня', overdue: 'Просрочено', micro: 'Микрозадачи', delegated_waiting: 'Ожидаю', projects: 'Проекты', project: 'Проект', archive: 'Архив задач'};
     const state = {view: 'main', scope: 'my', microScope: 'my', search: '', filters: {}, page: 0, limit: 30,
@@ -108,9 +108,13 @@
         const generation = ++state.summaryGeneration;
         const data = await request('/tasks/summary');
         if (generation !== state.summaryGeneration) return;
-        Object.keys(data).forEach(key => { const counter = $(`[data-count="${key}"]`); if (counter) counter.textContent = data[key]; });
-        $('#tm-inbox-nav-count').textContent = data.inbox; $('#tm-inbox-nav-count').hidden = !data.inbox;
-        $$('[data-tasks-module-badge]').forEach(item => { item.textContent = data.inbox; item.hidden = !data.inbox; });
+        Object.keys(data).forEach(key => { const counter = $(`[data-count="${key}"]`); if (counter && key !== 'inbox') counter.textContent = data[key]; });
+        const counts = data.inbox_counts || {normal: data.inbox, micro: 0};
+        $$('[data-tasks-module-badge],#tm-inbox-nav-count,[data-count="inbox"]').forEach(item => {
+            const micro = item.dataset.tasksModuleBadge === 'micro'; const count = micro ? counts.micro : counts.normal;
+            item.textContent = micro ? '⚡' : String(count); item.hidden = !count;
+            item.setAttribute('aria-label', `${micro ? 'Невыполненные микрозадачи' : 'Обычные входящие'}: ${count}`);
+        });
         $('#tm-overview-text').textContent = `${data.today} на сегодня · ${data.overdue} просрочено · ${data.delegated_waiting} ожидаю`;
     }
     function taskRow(task, micro = false) {
@@ -249,20 +253,38 @@
     function renderInbox(root, data) {
         if (!data.items.length) { empty(root, 'Входящих нет', 'Новые назначения появятся здесь.'); return; }
         data.items.forEach(event => {
-            const row = node('div', 'tm-inbox-row'); const content = node('div');
-            content.append(node('strong', '', event.payload.title), node('p', '', `${event.event_type === 'task_reassigned' ? 'Переназначение' : 'Новое поручение'} от ${name(event.actor_id)} · ${displayInstant(event.created_at)}`));
-            const read = async () => { await api.request(`/inbox/${event.id}/read`, 'POST', {}); await refresh(); };
-            const open = button('Открыть', async () => {
+            const micro = event.task_type === 'micro';
+            const row = node('div', `tm-inbox-row${micro ? ' tm-inbox-micro' : ''}`); const content = node('div');
+            row.dataset.inboxTask = event.task_id;
+            content.append(node('strong', 'tm-inbox-kind', micro ? '⚡ МИКРОЗАДАЧА · 24 ЧАСА' : 'Обычная задача'), node('strong', '', event.title), node('p', '', `${event.event_type === 'task_reassigned' ? 'Переназначение' : 'Новое поручение'} от ${name(event.actor_id)} · ${displayInstant(event.created_at)}`));
+            if (micro) {
+                const timer = node('strong', 'tm-deadline', remaining(event.micro_deadline_at)); timer.dataset.microDeadline = event.micro_deadline_at;
+                timer.classList.toggle('tm-overdue', Date.parse(event.micro_deadline_at) < now());
+                content.append(timer, node('p', 'tm-muted', `Срок: ${displayInstant(event.micro_deadline_at)}. 24 часа от создания; остаётся во входящих до выполнения.`));
+            }
+            const open = button('Ознакомиться', async () => {
                 open.disabled = true;
                 try {
                     const task = await request(`/tasks/${event.task_id}`);
-                    window.TasksModuleDialogs.showTask(task);
-                    try { await read(); } catch (_) { notice('Карточка открыта. Не удалось отметить событие прочитанным — оно осталось во входящих.'); }
+                    window.TasksModuleDialogs.preview(task);
                 } catch (error) { showError(error); } finally { open.disabled = false; }
             });
-            const mark = button('Прочитано', async () => { mark.disabled = true; try { await read(); } catch (error) { showError(error); mark.disabled = false; } });
-            row.append(content, open, mark); root.append(row);
+            row.append(content, open);
+            if (!micro) {
+                const act = button('Взять в работу', async () => {
+                    act.disabled = true;
+                    try { await inboxAction({id: event.task_id, task_type: event.task_type, version: event.version}); }
+                    catch (error) { showError(error); await refresh(); }
+                    finally { act.disabled = false; }
+                }, 'tm-primary');
+                row.append(act);
+            }
+            root.append(row);
         });
+    }
+    async function inboxAction(task) {
+        const result = await api.request(`/tasks/${task.id}/accept`, 'POST', {version: task.version});
+        await refresh(); return result;
     }
     async function renderBoard(root, generation) {
         const base = listQuery(); delete base.status; base.offset = 0; base.limit = 30;
@@ -379,7 +401,7 @@
         $('#tm-prev').addEventListener('click', () => { if (state.page) { state.page -= 1; loadList(); } });
         $('#tm-next').addEventListener('click', () => { state.page += 1; loadList(); });
         $('#tm-retry').addEventListener('click', () => refresh(true));
-        const fromURL = () => { const params = new URLSearchParams(location.search); navigate(params.get('view') || 'main', {project: params.get('project')}, false); const id = Number(params.get('task')); if (Number.isSafeInteger(id) && id > 0) window.TasksModuleDialogs.task(id); };
+        const fromURL = () => { const params = new URLSearchParams(location.search); navigate(params.get('view') || 'main', {project: params.get('project')}, false); const id = Number(params.get('task')); if (Number.isSafeInteger(id) && id > 0) window.TasksModuleDialogs.task(id); const previewId = Number(params.get('preview')); if (Number.isSafeInteger(previewId) && previewId > 0) request(`/tasks/${previewId}`).then(task => window.TasksModuleDialogs.preview(task)).catch(showError); };
         window.addEventListener('popstate', fromURL);
         await referenceData();
         fromURL(); await Promise.all([summaries().catch(showError), microPreview().catch(error => showError(error, '#tm-micro-error'))]);
@@ -392,6 +414,6 @@
         window.addEventListener('pagehide', () => clearInterval(clockTimer), {once: true});
     }
     window.TasksModuleUI = {$, $$, node, button, state, request, name, projectName, assignee, statusNames, userOptions, projectOptions,
-        displayDate, displayInstant, remaining, showError, notice, refresh, navigate, allPages, boot};
+        displayDate, displayInstant, remaining, showError, notice, refresh, navigate, allPages, boot, inboxAction};
     document.addEventListener('DOMContentLoaded', initialize, {once: true});
 })();
