@@ -59,7 +59,37 @@ test('read-only acquaintance, normal acceptance, persistent micro timer and spli
   const normalRow = page.locator(`[data-inbox-task="${normal.id}"]`);
   const microRow = page.locator(`[data-inbox-task="${micro.id}"]`);
   await expect(normalRow).toBeVisible();
-  await expect(microRow).toContainText('МИКРОЗАДАЧА · 24 ЧАСА');
+  await expect(microRow).toContainText('Микрозадача · 24 ч');
+  await expect(microRow.locator('.tm-inbox-content')).not.toContainText('Срок:');
+  await expect(microRow.locator('.tm-inbox-content [data-micro-deadline]')).toHaveCount(0);
+  await expect(microRow.locator('.tm-inbox-actions [data-micro-deadline]')).toBeVisible();
+  const order = await page
+    .locator('[data-inbox-task]')
+    .evaluateAll((rows) => rows.map((row) => row.classList.contains('tm-inbox-micro')));
+  expect(order).toEqual([...order].sort((a, b) => Number(b) - Number(a)));
+  if (testInfo.project.use.viewport!.width > 780) {
+    const geometry = await page.evaluate(
+      ({ normalId, microId }) => {
+        const normal = document.querySelector(`[data-inbox-task="${normalId}"]`)!;
+        const micro = document.querySelector(`[data-inbox-task="${microId}"]`)!;
+        const box = (element: Element) => element.getBoundingClientRect();
+        const center = (element: Element) => {
+          const b = box(element);
+          return b.x + b.width / 2;
+        };
+        return {
+          heights: [box(normal).height, box(micro).height],
+          centers: [
+            center(normal.querySelector('.tm-primary')!),
+            center(micro.querySelector('.tm-inbox-timer')!),
+          ],
+        };
+      },
+      { normalId: normal.id, microId: micro.id },
+    );
+    expect(Math.abs(geometry.heights[0] - geometry.heights[1])).toBeLessThan(1);
+    expect(Math.abs(geometry.centers[0] - geometry.centers[1])).toBeLessThan(1);
+  }
   await expect(page.locator('#tm-inbox-nav-count')).toBeVisible();
   await expect(page.locator('.tm-nav [data-tasks-module-badge="micro"]')).toHaveText('⚡');
   await expect(microRow.getByRole('button', { name: 'Готово', exact: true })).toHaveCount(0);

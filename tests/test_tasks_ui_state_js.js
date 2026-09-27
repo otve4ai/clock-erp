@@ -53,7 +53,7 @@ function harness() {
 async function inboxFailure() {
     const h = harness(); await h.initialize(); h.ui.navigate('inbox'); await flush();
     const row = h.element('#tm-list').children[0];
-    await row.children.find(child => child.textContent === 'Ознакомиться').listeners.click();
+    await row.children.flatMap(child => child.children).find(child => child.textContent === 'Ознакомиться').listeners.click();
     assert.equal(h.shown.length, 1); assert.equal(h.shown[0].id, 8);
     assert.equal(h.element('#tm-list').children[0], row, 'Preview must leave pending event visible');
     assert.equal(h.calls.filter(call => call[0].startsWith('/inbox/7/read')).length, 0);

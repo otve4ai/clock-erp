@@ -12,6 +12,23 @@ from scripts.prepare_tasks_inbox_workflow import prepare
 
 
 class InboxWorkflowTest(MicroFixture):
+    def test_micro_priority_precedes_newer_normal_across_pages(self):
+        first = self.micro(assigned_to=2)
+        normal = self.normal()
+        self.now = "2026-09-27T21:01:00+00:00"
+        latest_micro = self.micro(assigned_to=2)
+        tied_micro = self.micro(assigned_to=2)
+        self.now = "2026-09-27T21:02:00+00:00"
+        latest_normal = self.normal()
+        before = self.path.read_bytes()
+        expected = [tied_micro['id'], latest_micro['id'], first['id'], latest_normal['id'], normal['id']]
+        self.assertEqual([item['task_id'] for item in self.events()], expected)
+        pages = [self.inbox.list(self.users[2], {'limit': '1', 'offset': str(n)}) for n in range(5)]
+        self.assertEqual([page['items'][0]['task_id'] for page in pages], expected)
+        self.assertTrue(all(page['total'] == 5 for page in pages))
+        self.assertEqual(self.inbox.list(self.users[2], badge=True), {'count': 5, 'normal': 2, 'micro': 3})
+        self.assertEqual(self.path.read_bytes(), before)
+
     def normal(self, **values):
         return self.tasks.create(self.users[1], dict(title="Поручение", assigned_to=2, **values))
 
