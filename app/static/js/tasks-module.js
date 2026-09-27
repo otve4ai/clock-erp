@@ -254,14 +254,13 @@
         if (!data.items.length) { empty(root, 'Входящих нет', 'Новые назначения появятся здесь.'); return; }
         data.items.forEach(event => {
             const micro = event.task_type === 'micro';
-            const row = node('div', `tm-inbox-row${micro ? ' tm-inbox-micro' : ''}`); const content = node('div');
+            const row = node('div', `tm-inbox-row tm-inbox-task${micro ? ' tm-inbox-micro' : ''}`); const content = node('div', 'tm-inbox-content');
             row.dataset.inboxTask = event.task_id;
-            content.append(node('strong', 'tm-inbox-kind', micro ? '⚡ МИКРОЗАДАЧА · 24 ЧАСА' : 'Обычная задача'), node('strong', '', event.title), node('p', '', `${event.event_type === 'task_reassigned' ? 'Переназначение' : 'Новое поручение'} от ${name(event.actor_id)} · ${displayInstant(event.created_at)}`));
-            if (micro) {
-                const timer = node('strong', 'tm-deadline', remaining(event.micro_deadline_at)); timer.dataset.microDeadline = event.micro_deadline_at;
-                timer.classList.toggle('tm-overdue', Date.parse(event.micro_deadline_at) < now());
-                content.append(timer, node('p', 'tm-muted', `Срок: ${displayInstant(event.micro_deadline_at)}. 24 часа от создания; остаётся во входящих до выполнения.`));
-            }
+            const icon = node('span', 'tm-inbox-icon', micro ? '⚡' : '✓'); icon.setAttribute('aria-hidden', 'true');
+            const metadata = `${event.event_type === 'task_reassigned' ? 'Переназначение' : 'Новое поручение'} от ${name(event.actor_id)} · ${displayInstant(event.created_at)}`;
+            const meta = node('p', 'tm-inbox-meta', metadata); meta.title = metadata;
+            content.append(node('span', 'tm-inbox-kind', micro ? 'Микрозадача · 24 ч' : 'Обычная задача'), node('strong', 'tm-inbox-title', event.title), meta);
+            const actions = node('div', 'tm-inbox-actions');
             const open = button('Ознакомиться', async () => {
                 open.disabled = true;
                 try {
@@ -269,16 +268,22 @@
                     window.TasksModuleDialogs.preview(task);
                 } catch (error) { showError(error); } finally { open.disabled = false; }
             });
-            row.append(content, open);
-            if (!micro) {
+            actions.append(open);
+            if (micro) {
+                const slot = node('div', 'tm-inbox-timer'); const clock = node('span', '', '⏱'); clock.setAttribute('aria-hidden', 'true');
+                const timer = node('span', 'tm-deadline', remaining(event.micro_deadline_at)); timer.dataset.microDeadline = event.micro_deadline_at;
+                timer.classList.toggle('tm-overdue', Date.parse(event.micro_deadline_at) < now());
+                slot.append(clock, timer); actions.append(slot);
+            } else {
                 const act = button('Взять в работу', async () => {
                     act.disabled = true;
                     try { await inboxAction({id: event.task_id, task_type: event.task_type, version: event.version}); }
                     catch (error) { showError(error); await refresh(); }
                     finally { act.disabled = false; }
                 }, 'tm-primary');
-                row.append(act);
+                actions.append(act);
             }
+            row.append(icon, content, actions);
             root.append(row);
         });
     }

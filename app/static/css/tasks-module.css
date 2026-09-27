@@ -177,9 +177,24 @@ html[data-theme] .tasks-module-page button[aria-pressed=true] { background:color
     .tm-table td:first-child { grid-column:1 / -1; padding-bottom:5px; }
     .tm-table td:not(:first-child)::before { content:attr(data-label); display:block; color:var(--erp-muted); font-size:10px; margin-bottom:2px; }
 }
-.tm-inbox-row.tm-inbox-micro { border-left:4px solid #d97706; background:var(--erp-surface-alt,var(--erp-surface)); }
-.tm-inbox-kind { display:block; font-size:11px; margin-bottom:6px; }
-.tm-inbox-micro .tm-inbox-kind { color:var(--erp-text); }
+.tm-inbox-row.tm-inbox-task { display:grid; grid-template-columns:44px minmax(0,1fr) 290px; align-items:center; gap:16px; padding:20px 12px; min-height:100px; }
+.tm-inbox-icon { display:grid; place-items:center; width:44px; height:44px; border-radius:12px; color:var(--erp-primary); background:color-mix(in srgb,var(--erp-primary) 6%,var(--erp-surface)); font-size:26px; font-weight:600; }
+.tm-inbox-micro .tm-inbox-icon { color:#a65c00; background:color-mix(in srgb,#fbbf24 10%,var(--erp-surface)); }
+.tm-inbox-task .tm-inbox-kind { display:block; color:var(--erp-muted); font-size:11px; line-height:16px; margin:0 0 3px; }
+.tm-inbox-micro .tm-inbox-kind { color:#92400e; }
+.tm-inbox-title { display:block; font-size:15px; line-height:22px; overflow-wrap:anywhere; }
+.tm-inbox-task .tm-inbox-meta { margin:3px 0 0; line-height:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tm-inbox-task .tm-inbox-actions { display:grid; grid-template-columns:128px 148px; align-items:center; gap:14px; }
+.tm-inbox-actions > button { width:100%; min-height:40px; white-space:nowrap; }
+.tm-inbox-timer { display:flex; align-items:center; justify-content:center; gap:7px; min-height:40px; color:#92400e; font-size:13px; font-weight:600; }
+.tm-inbox-timer .tm-deadline { color:inherit; white-space:normal; text-align:center; font-size:inherit; background:none; padding:0; }
+.tm-inbox-timer .tm-overdue { color:var(--erp-danger); }
+@media(max-width:780px) {
+    .tm-inbox-row.tm-inbox-task { grid-template-columns:36px minmax(0,1fr); gap:10px 12px; padding:16px 6px; }
+    .tm-inbox-icon { width:36px; height:36px; font-size:24px; border-radius:10px; }
+    .tm-inbox-task .tm-inbox-actions { grid-column:1 / -1; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; }
+    .tm-inbox-actions > button { padding:8px 6px; font-size:12px; }
+}
 .tm-inbox-normal-badge { background:#b91c1c; color:#fff; }
 .tm-inbox-micro-badge { background:#fef3c7; color:#78350f; }
 .tm-nav .tm-inbox-micro-badge,.tm-nav .tm-inbox-normal-badge { padding:2px 6px; border-radius:12px; margin-left:5px; font-weight:700; }

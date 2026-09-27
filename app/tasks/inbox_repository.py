@@ -52,7 +52,7 @@ class InboxQueries:
         rows = self.connection.execute(
             "SELECT e.*,t.title,t.task_type,t.status,t.version,t.micro_deadline_at "
             "FROM task_inbox_events e JOIN tasks t ON t.id=e.task_id WHERE " + self.PENDING +
-            " ORDER BY e.created_at DESC,e.id DESC LIMIT ? OFFSET ?", (recipient, limit, offset)).fetchall()
+            " ORDER BY (t.task_type='micro') DESC,e.created_at DESC,e.id DESC LIMIT ? OFFSET ?", (recipient, limit, offset)).fetchall()
         counts = self.inbox_counts(recipient)
         return {"items": [self._inbox_row(row) for row in rows], "total": counts["count"],
                 "counts": counts, "limit": limit, "offset": offset}
