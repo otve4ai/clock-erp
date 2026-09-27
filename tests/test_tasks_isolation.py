@@ -16,7 +16,6 @@ from unittest import mock
 from app import web
 from app.domain_schema_migrations import apply_domain_migrations
 from app.services.collaboration import CollaborationStore
-from app.services.tasks import TaskStore
 from app.sms_migrations import migrate_database as migrate_sms
 from app.tasks.migrations import migrate_database
 from app.tasks.repository import TasksRepository
@@ -112,11 +111,10 @@ class TasksIsolationTest(unittest.TestCase):
         self.assertEqual(self.module.read_bytes(), b"not a SQLite database")
 
     def test_c_store_exceptions_do_not_reach_core_routes(self):
-        with mock.patch.object(web, "TaskStore", side_effect=RuntimeError("legacy store failed")) as legacy, \
-                mock.patch.object(TasksRepository, "status", side_effect=RuntimeError("module failed")) as repository, \
+        with mock.patch.object(TasksRepository, "status", side_effect=RuntimeError("module failed")) as repository, \
                 mock.patch.object(CollaborationStore, "connect", side_effect=RuntimeError("shared DB failed")) as shared:
             self.render_core()
-        legacy.assert_not_called()
+        self.assertFalse(hasattr(web, "TaskStore"))
         repository.assert_not_called()
         shared.assert_not_called()
 
@@ -145,7 +143,7 @@ class TasksIsolationTest(unittest.TestCase):
 
     def test_e_badge_failure_is_local_to_its_request(self):
         with mock.patch("app.navigation_badges._count", side_effect=RuntimeError("badge failed")):
-            response = self.client.get("/api/v1/tasks/badge")
+            response = self.client.get("/api/v1/inbox/badge")
             self.assertEqual(response.status_code, 503)
             self.assertEqual(response.get_json()["code"], "BADGE_UNAVAILABLE")
             self.render_core()
@@ -286,7 +284,7 @@ finally:
                     self.assertIsNone(process.poll(), "lock owner must remain alive until after requests")
                     if mode == "EXCLUSIVE":
                         started = time.monotonic()
-                        self.assertEqual(self.client.get("/api/v1/tasks/badge").status_code, 503)
+                        self.assertEqual(self.client.get("/api/v1/inbox/badge").status_code, 503)
                         self.assertLess(time.monotonic() - started, 1.0)
                     print("LINUX_TASKS_LOCK {}: Orders+Products {:.3f}s; task opens=0".format(mode, elapsed))
                 finally:
@@ -307,7 +305,7 @@ finally:
                 self.render_core()
             self.assertEqual(calls, [])
             started = time.monotonic()
-            self.assertEqual(self.client.get("/api/v1/tasks/badge").status_code, 503)
+            self.assertEqual(self.client.get("/api/v1/inbox/badge").status_code, 503)
             self.assertLess(time.monotonic() - started, 1.0)
         finally:
             for connection in locks:
@@ -315,17 +313,16 @@ finally:
                 connection.close()
 
     def test_badges_are_personal_read_only_and_do_not_generate_notifications(self):
-        task, unused = TaskStore(self.legacy).create(
-            {"title": "Badge fixture", "assignee_id": 1, "due_date": "2020-01-01"},
-            1, lambda user_id: True)
+        with sqlite3.connect(str(self.legacy)) as connection:
+            connection.execute("INSERT INTO inbox_events(recipient_user_id,actor_user_id,event_type,"
+                "entity_type,entity_id,created_at,metadata_json,operation_key) "
+                "VALUES(1,2,'assigned','order','test','now','{}','badge')")
         before = self.legacy.read_bytes()
-        with mock.patch.object(TaskStore, "generate_notifications", side_effect=AssertionError("badge must not write")):
-            response = self.client.get("/api/v1/tasks/badge")
-            self.assertEqual(response.get_json()["data"], {"count": 1})
-            self.assertEqual(self.client.get("/api/v1/inbox/badge").get_json()["data"], {"count": 0})
+        response = self.client.get("/api/v1/inbox/badge")
+        self.assertEqual(response.get_json()["data"], {"count": 1})
         self.assertEqual(self.legacy.read_bytes(), before)
         anonymous = web.app.test_client()
-        self.assertEqual(anonymous.get("/api/v1/tasks/badge").status_code, 401)
+        self.assertEqual(anonymous.get("/api/v1/inbox/badge").status_code, 401)
 
     def test_h_real_catalog_and_orders_writes_do_not_open_module_storage(self):
         from app.catalog_db import CatalogDatabase

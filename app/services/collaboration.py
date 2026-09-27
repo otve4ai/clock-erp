@@ -10,7 +10,7 @@ from app.collaboration_schema import validate_collaboration_database
 from app.services.audit_journal import AuditJournal
 
 
-ENTITY_TYPES = {"order", "customer", "purchase", "repair", "task"}
+ENTITY_TYPES = {"order", "customer", "purchase", "repair"}
 
 
 class CollaborationValidationError(ValueError):
@@ -98,11 +98,7 @@ class CollaborationStore:
             (entity_type, entity_id, previous_user_id, target_id, actor_id,
              str(comment or "").strip()[:2000], key, now),
         )
-        event_type = (
-            "task_assigned" if entity_type == "task" and previous_user_id is None
-            else "task_reassigned" if entity_type == "task"
-            else "assigned" if previous_user_id is None else "reassigned"
-        )
+        event_type = "assigned" if previous_user_id is None else "reassigned"
         if target_id is not None and target_id != actor_id:
             connection.execute(
                 "INSERT OR IGNORE INTO inbox_events(recipient_user_id,actor_user_id,event_type,entity_type,entity_id,created_at,metadata_json,operation_key) "
@@ -124,6 +120,8 @@ class CollaborationStore:
 
     def assign(self, entity_type, entity_id, new_user_id, actor, label, href="",
                comment="", operation_key=""):
+        if entity_type not in ENTITY_TYPES:
+            raise CollaborationValidationError("Ответственный для этого объекта не поддерживается.")
         self.active_user(new_user_id)
         with self.connect() as connection:
             self.prepare(connection)
@@ -145,6 +143,8 @@ class CollaborationStore:
         return self.get_assignment(entity_type, entity_id), created
 
     def get_assignment(self, entity_type, entity_id):
+        if entity_type not in ENTITY_TYPES:
+            raise CollaborationValidationError("Ответственный для этого объекта не поддерживается.")
         with self.connect() as connection:
             row = connection.execute(
                 "SELECT * FROM entity_assignments WHERE entity_type=? AND entity_id=?",
@@ -158,6 +158,8 @@ class CollaborationStore:
                 "history": [dict(item) for item in history]}
 
     def assigned_entity_ids(self, entity_type, user_id):
+        if entity_type not in ENTITY_TYPES:
+            raise CollaborationValidationError("Ответственный для этого объекта не поддерживается.")
         with self.connect() as connection:
             return {str(row[0]) for row in connection.execute(
                 "SELECT entity_id FROM entity_assignments WHERE entity_type=? AND responsible_user_id=?",
@@ -167,7 +169,7 @@ class CollaborationStore:
     def list_inbox(self, user_id, unread_only=False, page=1, per_page=30):
         page = max(1, int(page or 1))
         per_page = max(1, min(100, int(per_page or 30)))
-        where = "recipient_user_id=?" + (" AND read_at IS NULL" if unread_only else "")
+        where = "recipient_user_id=? AND entity_type!='task'" + (" AND read_at IS NULL" if unread_only else "")
         with self.connect() as connection:
             total = int(connection.execute(
                 "SELECT COUNT(*) FROM inbox_events WHERE " + where, (int(user_id),)
@@ -191,14 +193,14 @@ class CollaborationStore:
     def unread_count(self, user_id):
         with self.connect() as connection:
             return int(connection.execute(
-                "SELECT COUNT(*) FROM inbox_events WHERE recipient_user_id=? AND read_at IS NULL",
+                "SELECT COUNT(*) FROM inbox_events WHERE recipient_user_id=? AND read_at IS NULL AND entity_type!='task'",
                 (int(user_id),),
             ).fetchone()[0])
 
     def mark_read(self, event_id, user_id):
         with self.connect() as connection:
             cursor = connection.execute(
-                "UPDATE inbox_events SET read_at=COALESCE(read_at,?) WHERE id=? AND recipient_user_id=?",
+                "UPDATE inbox_events SET read_at=COALESCE(read_at,?) WHERE id=? AND recipient_user_id=? AND entity_type!='task'",
                 (utc_now(), int(event_id), int(user_id)),
             )
             connection.commit()
@@ -207,7 +209,7 @@ class CollaborationStore:
     def mark_all_read(self, user_id):
         with self.connect() as connection:
             cursor = connection.execute(
-                "UPDATE inbox_events SET read_at=? WHERE recipient_user_id=? AND read_at IS NULL",
+                "UPDATE inbox_events SET read_at=? WHERE recipient_user_id=? AND read_at IS NULL AND entity_type!='task'",
                 (utc_now(), int(user_id)),
             )
             connection.commit()

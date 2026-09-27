@@ -65,7 +65,7 @@
 .tm-row .tm-task-title:hover { color:var(--erp-primary); }
 .tm-assignee { display:flex; align-items:center; gap:6px; font-size:11px; min-width:0; color:var(--erp-muted); }
 .tm-assignee > span:last-child { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
-.tm-avatar { display:inline-grid; place-items:center; width:23px; height:23px; border-radius:50%; font-size:10px; font-weight:650; background:color-mix(in srgb,var(--erp-primary) 10%,var(--erp-surface)); color:var(--erp-primary); flex:none; }
+.tm-avatar { display:inline-grid; place-items:center; width:23px; height:23px; border-radius:50%; font-size:10px; font-weight:650; background:color-mix(in srgb,var(--erp-primary) 10%,var(--erp-surface)); color:var(--erp-text); flex:none; }
 .tm-deadline { font-size:11px; white-space:nowrap; color:var(--erp-muted); }
 .tm-overdue { color:var(--erp-danger) !important; }
 .tm-status { display:inline-block; border-radius:10px; font-size:10px; padding:3px 7px; white-space:nowrap; text-align:center; background:var(--erp-surface-muted); color:var(--erp-muted); }

@@ -2,7 +2,6 @@
 
 import sqlite3
 import time
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import jsonify
@@ -28,17 +27,10 @@ def register_navigation_badges(app, current_user):
             response.status_code = 401
         else:
             try:
-                if kind == "tasks":
-                    today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
-                    count = _count(app.config["TASKS_DATABASE"],
-                        "SELECT COUNT(*) FROM tasks WHERE assignee_id=? AND deleted_at IS NULL "
-                        "AND status IN ('new','in_progress','waiting') "
-                        "AND (due_date<=? OR (status='waiting' AND check_date<=?))",
-                        (user["id"], today, today))
-                else:
-                    count = _count(app.config["TASKS_DATABASE"],
-                        "SELECT COUNT(*) FROM inbox_events "
-                        "WHERE recipient_user_id=? AND read_at IS NULL", (user["id"],))
+                count = _count(app.config["TASKS_DATABASE"],
+                    "SELECT COUNT(*) FROM inbox_events "
+                    "WHERE recipient_user_id=? AND read_at IS NULL AND entity_type!='task'",
+                    (user["id"],))
                 response = jsonify(data={"count": count})
             except Exception:
                 app.logger.warning("Optional %s badge unavailable", kind, exc_info=True)
@@ -47,5 +39,4 @@ def register_navigation_badges(app, current_user):
         response.headers["Cache-Control"] = "no-store"
         return response
 
-    app.add_url_rule("/api/v1/tasks/badge", "task_sidebar_badge", lambda: badge("tasks"))
     app.add_url_rule("/api/v1/inbox/badge", "inbox_sidebar_badge", lambda: badge("inbox"))

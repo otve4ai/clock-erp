@@ -5,7 +5,7 @@ from pathlib import Path
 
 from app.domain_schema_migrations import apply_domain_migrations
 from app.services.collaboration import CollaborationStore, CollaborationValidationError
-from app.services.tasks import TaskConflictError, TaskStore
+from unittest import mock
 
 
 AUDIT_SQL = """CREATE TABLE erp_audit_events (
@@ -98,53 +98,31 @@ class CollaborationStoreTest(unittest.TestCase):
         self.assertIsNone(self.store.get_assignment("order", "fail")["assignment"])
         self.assertEqual(self.store.unread_count(2), 0)
 
-    def test_task_create_and_reassignment_share_transaction_and_scopes(self):
-        tasks = TaskStore(self.tasks)
-        task, created = tasks.create(
-            {"title": "Проверить остаток", "assignee_id": 2, "idempotency_key": "task-one"},
-            1, lambda value: int(value) in {1, 2},
-            collaboration=self.store, actor=self.maxim,
-        )
-        self.assertTrue(created)
-        self.assertEqual(self.store.unread_count(2), 1)
-        self.assertEqual(tasks.list("inbox", scope="mine", current_user_id=2)["total"], 1)
-        self.assertEqual(tasks.list("inbox", scope="created", current_user_id=1)["total"], 1)
-        tasks.update(
-            task["id"], {"assignee_id": 1, "assignment_operation_key": "task-back"}, 2,
-            lambda value: int(value) in {1, 2},
-            collaboration=self.store,
-            actor={"id": 2, "first_name": "MRV", "last_name": "", "email": "2@example.test"},
-        )
-        self.assertEqual(self.store.unread_count(1), 1)
-        history = self.store.get_assignment("task", str(task["id"]))["history"]
-        self.assertEqual((history[0]["previous_user_id"], history[0]["new_user_id"]), (2, 1))
+    def test_retired_task_assignments_are_rejected_before_database_access(self):
+        with mock.patch("sqlite3.connect", side_effect=AssertionError("no DB")) as connect:
+            for action in (
+                    lambda: self.store.assign("task", "1", 2, self.maxim, "Legacy"),
+                    lambda: self.store.get_assignment("task", "1"),
+                    lambda: self.store.assigned_entity_ids("task", 2)):
+                with self.assertRaises(CollaborationValidationError):
+                    action()
+            connect.assert_not_called()
 
-    def test_stale_task_save_is_rejected_without_false_history_or_audit(self):
-        tasks = TaskStore(self.tasks)
-        task, unused = tasks.create(
-            {"title": "Исходная", "assignee_id": 1}, 1,
-            lambda value: int(value) in {1, 2},
-            collaboration=self.store, actor=self.maxim,
-        )
-        version = task["version"]
-        saved = tasks.update(
-            task["id"], {"title": "Изменение A", "version": version}, 1,
-            lambda value: int(value) in {1, 2},
-            collaboration=self.store, actor=self.maxim,
-        )
-        self.assertEqual(saved["version"], version + 1)
-        with self.assertRaises(TaskConflictError):
-            tasks.update(
-                task["id"], {"title": "Изменение B", "version": version}, 2,
-                lambda value: int(value) in {1, 2},
-                collaboration=self.store,
-                actor={"id": 2, "first_name": "MRV", "last_name": ""},
-            )
-        current = tasks.get(task["id"])
-        self.assertEqual(current["title"], "Изменение A")
-        false_events = [event for event in current["history"]
-                        if event["details"].get("to") == "Изменение B"]
-        self.assertEqual(false_events, [])
+    def test_legacy_task_inbox_events_are_preserved_but_excluded_everywhere(self):
+        with sqlite3.connect(str(self.tasks)) as connection:
+            legacy_id = connection.execute(
+                "INSERT INTO inbox_events(recipient_user_id,actor_user_id,event_type,entity_type,"
+                "entity_id,created_at,metadata_json,operation_key) "
+                "VALUES(2,1,'task_assigned','task','1','now','{}','old-task')").lastrowid
+        self.store.assign("order", "1", 2, self.maxim, "Order", operation_key="new-order")
+        self.assertEqual(self.store.list_inbox(2)["total"], 1)
+        self.assertEqual(self.store.list_inbox(2, unread_only=True)["rows"][0]["entity_type"], "order")
+        self.assertEqual(self.store.unread_count(2), 1)
+        self.assertFalse(self.store.mark_read(legacy_id, 2))
+        self.assertEqual(self.store.mark_all_read(2), 1)
+        self.assertEqual(self.store.unread_count(2), 0)
+        with sqlite3.connect(str(self.tasks)) as connection:
+            self.assertIsNone(connection.execute("SELECT read_at FROM inbox_events WHERE id=?", (legacy_id,)).fetchone()[0])
 
 
 if __name__ == "__main__":

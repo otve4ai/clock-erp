@@ -98,7 +98,7 @@ window.ERP_NOTIFICATION_CONTEXT={
     <nav class="sidebar-nav" aria-label="Основная навигация">
         {% set navigation_group = namespace(current="") %}
         {% for item in sidebar_navigation_items %}
-            {% set item_active = item.active and not (tasks_module_ready and item.key == 'tasks' and request.path == '/app/tasks-module') %}
+            {% set item_active = item.active %}
             {% if item.group != navigation_group.current %}
                 <div class="sidebar-nav-group-title">
                     {{ "Система" if item.group == "system" else "Основное" }}
@@ -119,14 +119,8 @@ window.ERP_NOTIFICATION_CONTEXT={
                     {{ navigation_icon(item.icon) }}
                 </span>
                 <span class="sidebar-label">{{ item.label }}</span>
-                {% if item.key in ('tasks', 'inbox') and current_user %}<span class="sidebar-count" data-sidebar-badge="{{ item.key }}" hidden></span>{% elif item.badge %}<span class="sidebar-count" aria-label="Новых писем, требующих внимания: {{ item.badge }}">{{ item.badge }}</span>{% endif %}
+                {% if item.key == 'tasks' and tasks_module_ready and current_user %}<span class="sidebar-count" data-tasks-module-badge hidden></span>{% elif item.key == 'inbox' and current_user %}<span class="sidebar-count" data-sidebar-badge="inbox" hidden></span>{% elif item.badge %}<span class="sidebar-count" aria-label="Новых писем, требующих внимания: {{ item.badge }}">{{ item.badge }}</span>{% endif %}
             </a>
-            {% if item.key == 'tasks' and tasks_module_ready and current_user %}
-            <a class="sidebar-link{% if request.path == '/app/tasks-module' %} active{% endif %}" href="/app/tasks-module" aria-label="Новые задачи" data-tooltip="Новые задачи"{% if request.path == '/app/tasks-module' %} aria-current="page"{% endif %}>
-                <span class="sidebar-icon">{{ navigation_icon(item.icon) }}</span>
-                <span class="sidebar-label">Новые задачи</span><span class="sidebar-count" data-tasks-module-badge hidden></span>
-            </a>
-            {% endif %}
         {% endfor %}
     </nav>
 
@@ -216,7 +210,6 @@ window.ERP_NOTIFICATION_CONTEXT={
     <div class="notification-filters" role="tablist" aria-label="Фильтры уведомлений">
         <button type="button" data-notification-filter="all" class="active">Все</button>
         <button type="button" data-notification-filter="order">Заказы</button>
-        <button type="button" data-notification-filter="task">Задачи</button>
         <button type="button" data-notification-filter="system">Система</button>
     </div>
     <button class="notification-read-all" type="button" data-notification-read-all>Отметить все как прочитанные</button>
@@ -225,7 +218,6 @@ window.ERP_NOTIFICATION_CONTEXT={
         <button class="notification-settings-toggle" type="button" data-notification-settings-toggle aria-expanded="false">Настроить уведомления</button>
         <div class="notification-settings" data-notification-settings hidden>
             <label><span>Звук новых заказов</span><input type="checkbox" data-notification-preference="order_sound"></label>
-            <label><span>Звук новых задач</span><input type="checkbox" data-notification-preference="task_sound"></label>
             <label><span>Системные уведомления браузера</span><input type="checkbox" data-notification-preference="browser_notifications"></label>
             <label><span>Уведомлять об ошибках системы</span><input type="checkbox" data-notification-preference="system_errors"></label>
             <label><span>Уведомлять о завершении операций</span><input type="checkbox" data-notification-preference="operation_completions"></label>
@@ -266,7 +258,7 @@ window.ERP_EVENT_NOTIFICATIONS={csrf:{{ csrf_token()|tojson }}};
                     {{ navigation_icon(item.icon) }}
                 </span>
                 <span>{{ item.label }}</span>
-                {% if item.key in ('tasks', 'inbox') and current_user %}<span class="mobile-erp-count" data-sidebar-badge="{{ item.key }}" hidden></span>{% elif item.badge %}<span class="mobile-erp-count">{{ item.badge }}</span>{% endif %}
+                {% if item.key == 'tasks' and tasks_module_ready and current_user %}<span class="mobile-erp-count" data-tasks-module-badge hidden></span>{% elif item.key == 'inbox' and current_user %}<span class="mobile-erp-count" data-sidebar-badge="inbox" hidden></span>{% elif item.badge %}<span class="mobile-erp-count">{{ item.badge }}</span>{% endif %}
             </a>
         {% endif %}
     {% endfor %}
@@ -311,7 +303,7 @@ window.ERP_EVENT_NOTIFICATIONS={csrf:{{ csrf_token()|tojson }}};
                     {{ navigation_icon(item.icon) }}
                 </span>
                 <span>{{ item.label }}</span>
-                {% if item.key in ('tasks', 'inbox') and current_user %}<span class="sidebar-count" data-sidebar-badge="{{ item.key }}" hidden></span>{% elif item.badge %}<span class="sidebar-count">{{ item.badge }}</span>{% endif %}
+                {% if item.key == 'tasks' and tasks_module_ready and current_user %}<span class="sidebar-count" data-tasks-module-badge hidden></span>{% elif item.key == 'inbox' and current_user %}<span class="sidebar-count" data-sidebar-badge="inbox" hidden></span>{% elif item.badge %}<span class="sidebar-count">{{ item.badge }}</span>{% endif %}
             </a>
         {% endif %}
     {% endfor %}

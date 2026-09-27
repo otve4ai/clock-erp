@@ -172,7 +172,8 @@ class TasksUiTest(unittest.TestCase):
                 self.assertIn('tm-micro-form', html)
                 self.assertIn('tasks-module-dialogs.js', html)
                 self.assertIn('data-tasks-module-badge', html)
-                self.assertIn('href="/app/tasks"', html)
+                self.assertNotIn('href="/app/tasks"', html)
+                self.assertNotIn('Новые задачи', html)
                 self.assertIn('href="/app/tasks-module"', html)
                 app.config['TASKS_MODULE_ENABLED'] = False
                 core = client.get('/app/orders').get_data(as_text=True)

@@ -7,7 +7,7 @@ const freshFeed = {
     unread: 2,
     preferences: {order_sound: false, task_sound: false, browser_notifications: false},
     items: [
-      {id: 2, type: 'task', title: 'Новая задача', message: 'Собрать заказ #21134', metadata: {author: 'Иван', due: '2026-09-01 15:00'}, target_url: '/app/tasks?task=77', created_at: '2026-09-01T10:25:00+00:00', read_at: null, fresh: true},
+      {id: 2, type: 'system', title: 'Операция завершена', message: 'Обновление завершено', metadata: {}, target_url: '/app/settings', created_at: '2026-09-01T10:25:00+00:00', read_at: null, fresh: true},
       {id: 1, type: 'order', title: 'Новый заказ #21134', message: 'Wildberries', metadata: {}, target_url: '/order/wildberries/21134', created_at: '2026-09-01T10:32:00+00:00', read_at: null, fresh: true},
     ],
   },
@@ -19,10 +19,10 @@ beforeEach(() => {
     <div data-notification-backdrop hidden></div>
     <aside id="notificationCenter" hidden>
       <button data-notification-close></button>
-      <button data-notification-filter="all"></button><button data-notification-filter="order"></button><button data-notification-filter="task"></button><button data-notification-filter="system"></button>
+      <button data-notification-filter="all"></button><button data-notification-filter="order"></button><button data-notification-filter="system"></button>
       <button data-notification-read-all></button><div data-notification-feed></div>
       <button data-notification-settings-toggle></button><div data-notification-settings hidden>
-        <input type="checkbox" data-notification-preference="order_sound"><input type="checkbox" data-notification-preference="task_sound"><input type="checkbox" data-notification-preference="browser_notifications"><input type="checkbox" data-notification-preference="system_errors"><input type="checkbox" data-notification-preference="operation_completions">
+        <input type="checkbox" data-notification-preference="order_sound"><input type="checkbox" data-notification-preference="browser_notifications"><input type="checkbox" data-notification-preference="system_errors"><input type="checkbox" data-notification-preference="operation_completions">
         <p data-notification-permission-note hidden></p>
       </div>
     </aside>`;
@@ -40,7 +40,7 @@ test('fresh events create a stacked toast each and render a personal unread feed
   await vi.waitFor(() => expect(info).toHaveBeenCalledTimes(2));
   expect(document.querySelector('[data-notification-count]')?.textContent).toBe('2');
   expect(document.querySelector('[data-notification-feed]')?.textContent).toContain('Новый заказ #21134');
-  expect(document.querySelector('[data-notification-feed]')?.textContent).toContain('Собрать заказ #21134');
+  expect(document.querySelector('[data-notification-feed]')?.textContent).toContain('Обновление завершено');
   expect(info.mock.calls.map((call) => call[1].operationId)).toEqual([
     'event-notification-1', 'event-notification-2',
   ]);

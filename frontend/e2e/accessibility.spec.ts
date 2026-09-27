@@ -6,7 +6,7 @@ const routes = [
   '/app/sales',
   '/app/receipts',
   '/app/orders',
-  '/app/tasks',
+  '/app/tasks-module',
   '/app/mail',
   '/app/purchases',
   '/app/analytics',
@@ -113,11 +113,11 @@ test('existing product editor traps focus, closes on Escape, and restores focus'
 });
 
 test('task modal traps focus, closes on Escape, and restores trigger', async ({ page }) => {
-  await page.goto('/app/tasks', { waitUntil: 'domcontentloaded' });
-  const trigger = page.getByRole('button', { name: '+ Новая задача' });
+  await page.goto('/app/tasks-module', { waitUntil: 'domcontentloaded' });
+  const trigger = page.locator('#tm-create');
   await trigger.focus();
   await trigger.press('Enter');
-  const modal = page.locator('#taskModal');
+  const modal = page.locator('#tm-dialog');
   await expect(modal).toBeVisible();
   const focusable = modal.locator(
     'button:not([disabled]):not([hidden]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])',
@@ -160,7 +160,7 @@ test('key pages reflow at required widths and 200/400 percent zoom', async ({ pa
   test.setTimeout(90_000);
   for (const width of [1440, 1024, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
-    for (const route of ['/app/products', '/app/sales', '/app/tasks', '/app/mail', '/app/purchases', '/app/inventory', '/app/services', '/login', '/register']) {
+    for (const route of ['/app/products', '/app/sales', '/app/tasks-module', '/app/mail', '/app/purchases', '/app/inventory', '/app/services', '/login', '/register']) {
       await page.goto(route, { waitUntil: 'domcontentloaded' });
       const overflow = await page
         .locator('html')
