@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from app import auth, web
 from app.domain_schema_migrations import apply_domain_migrations
+from app.sms_migrations import migrate_database as migrate_sms
 from app.tasks.migrations import migrate_database
 
 
@@ -157,8 +158,12 @@ class TasksRetirementApiTest(unittest.TestCase):
     def test_new_namespace_and_crud_are_unaffected_by_legacy_tombstone(self):
         module = Path(self.temporary.name) / "tasks-module.db"
         migrate_database(module)
+        # A fresh ERP import must not reuse an SMS fixture altered by other tests.
+        sms = Path(self.temporary.name) / "sms.db"
+        migrate_sms(sms)
         with patch.dict(os.environ, {"ERP_TASKS_MODULE_ENABLED": "1", "ERP_TASKS_MODULE_DATABASE": str(module),
-                "ERP_AUTH_DATABASE": str(self.auth_path), "ERP_TASKS_DATABASE": str(self.tasks_path)}):
+                "ERP_AUTH_DATABASE": str(self.auth_path), "ERP_TASKS_DATABASE": str(self.tasks_path),
+                "ERP_SMS_DATABASE": str(sms)}):
             namespace = runpy.run_path(web.__file__, run_name="tasks_retirement")
         app = namespace["app"]
         app.config.update(TESTING=True, AUTH_TESTING=True, AUTH_ENABLED=True, SESSION_COOKIE_SECURE=False)
