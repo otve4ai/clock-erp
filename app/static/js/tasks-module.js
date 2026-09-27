@@ -112,7 +112,7 @@
         const counts = data.inbox_counts || {normal: data.inbox, micro: 0};
         $$('[data-tasks-module-badge],#tm-inbox-nav-count,[data-count="inbox"]').forEach(item => {
             const micro = item.dataset.tasksModuleBadge === 'micro'; const count = micro ? counts.micro : counts.normal;
-            item.textContent = micro ? '⚡' : String(count); item.hidden = !count;
+            item.textContent = micro ? `⚡${count}` : String(count); item.hidden = !count;
             item.setAttribute('aria-label', `${micro ? 'Невыполненные микрозадачи' : 'Обычные входящие'}: ${count}`);
         });
         $('#tm-overview-text').textContent = `${data.today} на сегодня · ${data.overdue} просрочено · ${data.delegated_waiting} ожидаю`;
@@ -153,7 +153,7 @@
     let microCollapsed = false;
     try { microCollapsed = localStorage.getItem(`tasks-module:micro-collapsed:${boot.userId}`) === 'true'; } catch (_) { /* Storage may be disabled. */ }
     function collapseMicro(value) {
-        microCollapsed = value; $('#tm-micro-body').hidden = value; $('#tm-micro-brief').hidden = !value; $('#tm-micro-add').hidden = !value;
+        microCollapsed = value; $('#tm-micro-body').hidden = value; $('#tm-micro-add').hidden = !value;
         $('#tm-micro-scopes').hidden = value; $('#tm-micro-toggle').setAttribute('aria-expanded', String(!value));
         $('#tm-micro-toggle').setAttribute('aria-label', value ? 'Развернуть микрозадачи' : 'Свернуть микрозадачи'); $('#tm-micro-toggle').textContent = value ? '⌄' : '⌃';
         try { localStorage.setItem(`tasks-module:micro-collapsed:${boot.userId}`, String(value)); } catch (_) { /* Optional preference. */ }
@@ -166,10 +166,11 @@
             $('#tm-micro-error').hidden = true;
             const root = $('#tm-micro-list'); root.replaceChildren(...list.items.map(task => taskRow(task, true)));
             if (!list.items.length) empty(root, 'Нет активных микрозадач', 'Добавьте небольшое поручение на ближайшие 24 часа.');
-            $('#tm-micro-count').textContent = list.total;
             $$('[data-micro-count]').forEach(item => { item.textContent = summary[item.dataset.microCount]; });
             $$('[data-micro-scope]').forEach(item => item.setAttribute('aria-pressed', String(item.dataset.microScope === state.microScope)));
-            $('#tm-micro-brief').textContent = `${summary.my_active} моих · ${summary.my_overdue} просрочено${summary.nearest_my_deadline_at ? ` · ближайшая через ${remaining(summary.nearest_my_deadline_at)}` : ''}`;
+            const count = summary.my_active; const last = count % 10; const teen = count % 100 >= 11 && count % 100 <= 14;
+            const mine = !teen && last === 1 ? 'моя' : !teen && last >= 2 && last <= 4 ? 'мои' : 'моих';
+            $('#tm-micro-brief').textContent = `${count} ${mine} · ${summary.my_overdue} просрочено${summary.nearest_my_deadline_at ? ` · ближайшая через ${remaining(summary.nearest_my_deadline_at)}` : ''}`;
         } catch (error) {
             if (generation !== state.microGeneration) return;
             empty($('#tm-micro-list'), 'Микрозадачи недоступны');

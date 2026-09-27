@@ -15,7 +15,7 @@
         document.querySelectorAll('[data-tasks-module-badge]').forEach(item => {
             const micro = item.dataset && item.dataset.tasksModuleBadge === 'micro';
             const count = micro ? counts.micro : (counts.normal === undefined ? counts.count : counts.normal);
-            item.textContent = Number.isSafeInteger(count) && count > 0 ? (micro ? '⚡' : String(count)) : '';
+            item.textContent = Number.isSafeInteger(count) && count > 0 ? (micro ? `⚡${count}` : String(count)) : '';
             if (item.setAttribute) item.setAttribute('aria-label', (micro ? 'Невыполненные микрозадачи: ' : 'Обычные входящие: ') + (count || 0));
             item.hidden = !item.textContent;
         });

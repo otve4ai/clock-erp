@@ -390,6 +390,11 @@ body[class] {
 }
 [data-tasks-module-badge="normal"] { background:#b91c1c; color:#fff; }
 [data-tasks-module-badge="micro"] { background:#fef3c7; color:#78350f; }
+.tasks-sidebar-counts { display:inline-flex; align-items:center; gap:4px; flex:0 0 auto; white-space:nowrap; }
+.tasks-sidebar-counts [data-tasks-module-badge] { height:18px; min-width:18px; padding:0 4px; font-size:10px; }
+.tasks-sidebar-counts [data-tasks-module-badge="micro"] { background:transparent; color:#fbbf24; padding:0; }
+.app.sidebar-collapsed .tasks-sidebar-counts { position:absolute; z-index:1; top:-3px; right:-5px; gap:2px; }
+.app.sidebar-collapsed .tasks-sidebar-counts .sidebar-count { position:static; font-size:9px; height:16px; min-width:0; }
 
 .sidebar-system-status {
     min-width: 0;
