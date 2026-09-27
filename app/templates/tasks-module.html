@@ -17,13 +17,13 @@
     </header>
     <section class="tm-metrics" id="tm-metrics" aria-label="Мои показатели">
         {% for key,label,icon in [('inbox','Входящие','✓'),('in_progress','В работе','▷'),('delegated_waiting','Ожидаю','◷'),('overdue','Просрочено','!'),('today','Сегодня','▦')] %}
-        <button class="tm-metric tm-metric-{{ key }}" data-metric="{{ key }}"><span class="tm-metric-icon" aria-hidden="true">{{ icon }}</span><span><strong data-count="{{ key }}">—</strong>{% if key=='inbox' %}<strong class="tm-inbox-micro-badge" data-tasks-module-badge="micro" hidden></strong>{% endif %}<small>{{ label }}</small></span><span class="tm-chevron" aria-hidden="true">›</span></button>
+        <button class="tm-metric tm-metric-{{ key }}" data-metric="{{ key }}"><span class="tm-metric-icon" aria-hidden="true">{{ icon }}</span><span><span class="tm-metric-counts"><strong data-count="{{ key }}">—</strong>{% if key=='inbox' %}<strong class="tm-inbox-micro-badge" data-tasks-module-badge="micro" hidden></strong>{% endif %}</span><small>{{ label }}</small></span><span class="tm-chevron" aria-hidden="true">›</span></button>
         {% endfor %}
     </section>
     <section class="tm-micro" id="tm-micro" aria-labelledby="tm-micro-heading">
-        <div class="tm-micro-heading"><h2 id="tm-micro-heading"><span class="tm-lightning" aria-hidden="true">ϟ</span> Микрозадачи · 24 часа <span id="tm-micro-count" class="tm-number">—</span></h2>
+        <div class="tm-micro-heading"><div class="tm-micro-caption"><h2 id="tm-micro-heading"><span class="tm-lightning" aria-hidden="true">⚡</span> Микрозадачи · 24 ч</h2><span id="tm-micro-brief" class="tm-muted"></span></div>
             <div id="tm-micro-scopes" class="tm-micro-scopes"><button data-micro-scope="my">Мои <b data-micro-count="my_active">—</b></button><button data-micro-scope="created">Поставленные мной <b data-micro-count="created_active">—</b></button><button data-micro-scope="team">Команда <b data-micro-count="team_active">—</b></button></div>
-            <span id="tm-micro-brief" class="tm-muted" hidden></span><button id="tm-micro-add" class="tm-link" hidden>＋ Добавить</button><a class="tm-link tm-micro-all" href="?view=micro" data-view="micro">Все микрозадачи →</a><button id="tm-micro-toggle" class="tm-icon-button" aria-expanded="true" aria-controls="tm-micro-body" aria-label="Свернуть микрозадачи">⌃</button>
+            <button id="tm-micro-add" class="tm-link" hidden>＋ Добавить</button><a class="tm-link tm-micro-all" href="?view=micro" data-view="micro">Все микрозадачи →</a><button id="tm-micro-toggle" class="tm-icon-button" aria-expanded="true" aria-controls="tm-micro-body" aria-label="Свернуть микрозадачи">⌃</button>
         </div>
         <div id="tm-micro-body">
             <form id="tm-micro-form" class="tm-quick"><input name="title" required maxlength="500" placeholder="Быстро добавить микрозадачу…" aria-label="Название микрозадачи"><select name="assigned_to" aria-label="Исполнитель микрозадачи"></select><button type="submit" class="tm-micro-submit" aria-label="Добавить микрозадачу">＋</button></form>
@@ -33,7 +33,7 @@
     </section>
     <nav class="tm-nav" aria-label="Разделы задач">
         {% for value,label in [('main','Задачи'),('inbox','Входящие'),('today','Сегодня'),('micro','Микрозадачи'),('delegated_waiting','Ожидаю'),('projects','Проекты'),('archive','Архив')] %}
-        <a href="?view={{ value }}" data-view="{{ value }}">{{ label }}{% if value=='inbox' %}<span id="tm-inbox-nav-count" class="tm-inbox-normal-badge" hidden></span><span class="tm-inbox-micro-badge" data-tasks-module-badge="micro" hidden></span>{% endif %}</a>
+        <a href="?view={{ value }}" data-view="{{ value }}">{{ label }}{% if value=='inbox' %}<span class="tm-inbox-counts"><span id="tm-inbox-nav-count" class="tm-inbox-normal-badge" hidden></span><span class="tm-inbox-micro-badge" data-tasks-module-badge="micro" hidden></span></span>{% endif %}</a>
         {% endfor %}
     </nav>
     <div id="tm-notice" class="tm-notice" role="status" hidden></div>

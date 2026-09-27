@@ -119,7 +119,7 @@ window.ERP_NOTIFICATION_CONTEXT={
                     {{ navigation_icon(item.icon) }}
                 </span>
                 <span class="sidebar-label">{{ item.label }}</span>
-                {% if item.key == 'tasks' and tasks_module_ready and current_user %}<span class="sidebar-count" data-tasks-module-badge="normal" hidden></span><span class="sidebar-count" data-tasks-module-badge="micro" hidden></span>{% elif item.key == 'inbox' and current_user %}<span class="sidebar-count" data-sidebar-badge="inbox" hidden></span>{% elif item.badge %}<span class="sidebar-count" aria-label="Новых писем, требующих внимания: {{ item.badge }}">{{ item.badge }}</span>{% endif %}
+                {% if item.key == 'tasks' and tasks_module_ready and current_user %}<span class="tasks-sidebar-counts"><span class="sidebar-count" data-tasks-module-badge="normal" hidden></span><span class="sidebar-count" data-tasks-module-badge="micro" hidden></span></span>{% elif item.key == 'inbox' and current_user %}<span class="sidebar-count" data-sidebar-badge="inbox" hidden></span>{% elif item.badge %}<span class="sidebar-count" aria-label="Новых писем, требующих внимания: {{ item.badge }}">{{ item.badge }}</span>{% endif %}
             </a>
         {% endfor %}
     </nav>
@@ -258,7 +258,7 @@ window.ERP_EVENT_NOTIFICATIONS={csrf:{{ csrf_token()|tojson }}};
                     {{ navigation_icon(item.icon) }}
                 </span>
                 <span>{{ item.label }}</span>
-                {% if item.key == 'tasks' and tasks_module_ready and current_user %}<span class="mobile-erp-count" data-tasks-module-badge="normal" hidden></span><span class="mobile-erp-count" data-tasks-module-badge="micro" hidden></span>{% elif item.key == 'inbox' and current_user %}<span class="mobile-erp-count" data-sidebar-badge="inbox" hidden></span>{% elif item.badge %}<span class="mobile-erp-count">{{ item.badge }}</span>{% endif %}
+                {% if item.key == 'tasks' and tasks_module_ready and current_user %}<span class="tasks-sidebar-counts"><span class="mobile-erp-count" data-tasks-module-badge="normal" hidden></span><span class="mobile-erp-count" data-tasks-module-badge="micro" hidden></span></span>{% elif item.key == 'inbox' and current_user %}<span class="mobile-erp-count" data-sidebar-badge="inbox" hidden></span>{% elif item.badge %}<span class="mobile-erp-count">{{ item.badge }}</span>{% endif %}
             </a>
         {% endif %}
     {% endfor %}
@@ -303,7 +303,7 @@ window.ERP_EVENT_NOTIFICATIONS={csrf:{{ csrf_token()|tojson }}};
                     {{ navigation_icon(item.icon) }}
                 </span>
                 <span>{{ item.label }}</span>
-                {% if item.key == 'tasks' and tasks_module_ready and current_user %}<span class="sidebar-count" data-tasks-module-badge="normal" hidden></span><span class="sidebar-count" data-tasks-module-badge="micro" hidden></span>{% elif item.key == 'inbox' and current_user %}<span class="sidebar-count" data-sidebar-badge="inbox" hidden></span>{% elif item.badge %}<span class="sidebar-count">{{ item.badge }}</span>{% endif %}
+                {% if item.key == 'tasks' and tasks_module_ready and current_user %}<span class="tasks-sidebar-counts"><span class="sidebar-count" data-tasks-module-badge="normal" hidden></span><span class="sidebar-count" data-tasks-module-badge="micro" hidden></span></span>{% elif item.key == 'inbox' and current_user %}<span class="sidebar-count" data-sidebar-badge="inbox" hidden></span>{% elif item.badge %}<span class="sidebar-count">{{ item.badge }}</span>{% endif %}
             </a>
         {% endif %}
     {% endfor %}

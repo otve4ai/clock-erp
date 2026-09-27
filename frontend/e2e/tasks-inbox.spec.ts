@@ -91,7 +91,54 @@ test('read-only acquaintance, normal acceptance, persistent micro timer and spli
     expect(Math.abs(geometry.centers[0] - geometry.centers[1])).toBeLessThan(1);
   }
   await expect(page.locator('#tm-inbox-nav-count')).toBeVisible();
-  await expect(page.locator('.tm-nav [data-tasks-module-badge="micro"]')).toHaveText('⚡');
+  await expect(page.locator('.tm-nav [data-tasks-module-badge="micro"]')).toHaveText(/^⚡\d+$/);
+  const polish = await page.evaluate(
+    ({ normalId, microId }) => {
+      const accept = document.querySelector(`[data-inbox-task="${normalId}"] .tm-primary`)!;
+      const timer = document.querySelector(`[data-inbox-task="${microId}"] .tm-inbox-timer`)!;
+      const box = (element: Element) => element.getBoundingClientRect();
+      const counts = Array.from(
+        document.querySelectorAll('.tm-metric-inbox .tm-metric-counts strong'),
+      );
+      return {
+        widths: [box(accept).width, box(timer).width],
+        heights: [box(accept).height, box(timer).height],
+        radii: [getComputedStyle(accept).borderRadius, getComputedStyle(timer).borderRadius],
+        cursor: getComputedStyle(timer).cursor,
+        role: timer.getAttribute('role'),
+        countsCenters: counts.map((element) => box(element).y + box(element).height / 2),
+        metricHeights: Array.from(document.querySelectorAll('.tm-metric')).map(
+          (element) => box(element).height,
+        ),
+        sidebarAlignment: Array.from(document.querySelectorAll('.tasks-sidebar-counts'))
+          .filter((element) => box(element).width > 0)
+          .map((group) => {
+            const badges = Array.from(group.children).filter((element) => box(element).width > 0);
+            return (
+              badges.length < 2 ||
+              Math.abs(
+                box(badges[0]).y +
+                  box(badges[0]).height / 2 -
+                  box(badges[1]).y -
+                  box(badges[1]).height / 2,
+              ) < 1
+            );
+          }),
+      };
+    },
+    { normalId: normal.id, microId: micro.id },
+  );
+  expect(Math.abs(polish.widths[0] - polish.widths[1])).toBeLessThan(1);
+  expect(Math.abs(polish.heights[0] - polish.heights[1])).toBeLessThan(1);
+  expect(polish.radii[0]).toBe(polish.radii[1]);
+  expect(polish.cursor).toBe('default');
+  expect(polish.role).not.toBe('button');
+  expect(Math.abs(polish.countsCenters[0] - polish.countsCenters[1])).toBeLessThan(1);
+  expect(Math.max(...polish.metricHeights) - Math.min(...polish.metricHeights)).toBeLessThan(1);
+  if (testInfo.project.use.viewport!.width > 780) {
+    expect(polish.sidebarAlignment.length).toBeGreaterThan(0);
+  }
+  expect(polish.sidebarAlignment.every(Boolean)).toBe(true);
   await expect(microRow.getByRole('button', { name: 'Готово', exact: true })).toHaveCount(0);
   const readRequests: string[] = [];
   page.on('request', (request) => {
