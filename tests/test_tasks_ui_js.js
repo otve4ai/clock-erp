@@ -31,12 +31,12 @@ async function apiTests() {
 }
 async function notificationTests() {
     let calls = [], notifications = [], time = 100000;
-    const elements = [{hidden: true, textContent: ''}]; const listeners = {};
+    const elements = [{hidden: true, textContent: ''}, {hidden: true, textContent: '', dataset: {tasksModuleBadge: 'micro'}}]; const listeners = {};
     const sandbox = {AbortController, Number, Date: {now: () => time}, document: {visibilityState: 'visible', querySelectorAll: () => elements, addEventListener: (type, callback) => { listeners[type] = callback; }},
         window: {ERP_TASKS_OPTIONAL: {csrf: 'synthetic'}, setTimeout, clearTimeout, VechasuNotify: {info: (title, options) => notifications.push({title, options})}},
         fetch: async (url, options) => {
             calls.push({url, options});
-            if (url.endsWith('/badge')) return response({data: {count: 2}});
+            if (url.endsWith('/badge')) return response({data: {count: 5, normal: 2, micro: 3}});
             if (url.endsWith('/directory')) return response({data: {items: [{id: 2, name: 'Actor'}]}});
             return response({data: {items: [{task_id: 8, actor_id: 2, title: '<img src=x>', task_type: 'normal'}]}});
         }};
@@ -44,11 +44,15 @@ async function notificationTests() {
     vm.runInNewContext(code, sandbox);
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(elements[0].textContent, '2'); assert.equal(elements[0].hidden, false);
+    assert.equal(elements[1].textContent, '⚡'); assert.equal(elements[1].hidden, false);
     assert.equal(notifications.length, 1); assert.equal(notifications[0].options.detail, 'От Actor · <img src=x>');
     assert.equal(notifications[0].options.action.href, '/app/tasks-module?view=inbox&preview=8');
     assert.equal(calls.find(item => item.url.endsWith('/claim')).options.headers['X-CSRF-Token'], 'synthetic'); checks += 1;
     listeners.visibilitychange(); await new Promise(resolve => setImmediate(resolve)); assert.equal(calls.length, 3); checks += 1;
     vm.runInNewContext(code, sandbox); await new Promise(resolve => setImmediate(resolve)); assert.equal(calls.length, 3); checks += 1;
+    time += 31000; sandbox.fetch = async url => response({data: url.endsWith('/badge') ? {count: 0, normal: 0, micro: 0} : {items: []}});
+    listeners.visibilitychange(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(elements[1].hidden, true); assert.equal(elements[1].textContent, '');
     time += 31000; sandbox.fetch = async () => { throw new Error('offline'); };
     listeners.visibilitychange(); await new Promise(resolve => setImmediate(resolve));
     assert.equal(elements[0].hidden, true); assert.equal(notifications.length, 1); checks += 1;

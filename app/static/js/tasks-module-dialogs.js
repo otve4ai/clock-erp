@@ -128,8 +128,8 @@
         }
         body.append(details);
         const controls = node('div', 'tm-form-actions'); controls.append(button('Закрыть', close));
-        if (!task.deleted_at && task.status !== 'done' && task.assigned_to === ui.boot.userId && (micro || task.permissions.accept)) {
-            controls.append(button(micro ? 'Готово' : 'Взять в работу', () => submit(() => ui.inboxAction(task), async () => close(), async () => preview(await ui.request(`/tasks/${task.id}`))), 'tm-primary'));
+        if (!micro && !task.deleted_at && task.status !== 'done' && task.assigned_to === ui.boot.userId && task.permissions.accept) {
+            controls.append(button('Взять в работу', () => submit(() => ui.inboxAction(task), async () => close(), async () => preview(await ui.request(`/tasks/${task.id}`))), 'tm-primary'));
         }
         body.append(controls); history(`/tasks/${task.id}/activity`, current);
     }

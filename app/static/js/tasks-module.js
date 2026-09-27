@@ -112,7 +112,7 @@
         const counts = data.inbox_counts || {normal: data.inbox, micro: 0};
         $$('[data-tasks-module-badge],#tm-inbox-nav-count,[data-count="inbox"]').forEach(item => {
             const micro = item.dataset.tasksModuleBadge === 'micro'; const count = micro ? counts.micro : counts.normal;
-            item.textContent = micro ? `⚡ ${count}` : String(count); item.hidden = !count;
+            item.textContent = micro ? '⚡' : String(count); item.hidden = !count;
             item.setAttribute('aria-label', `${micro ? 'Невыполненные микрозадачи' : 'Обычные входящие'}: ${count}`);
         });
         $('#tm-overview-text').textContent = `${data.today} на сегодня · ${data.overdue} просрочено · ${data.delegated_waiting} ожидаю`;
@@ -269,18 +269,21 @@
                     window.TasksModuleDialogs.preview(task);
                 } catch (error) { showError(error); } finally { open.disabled = false; }
             });
-            const act = button(micro ? 'Готово' : 'Взять в работу', async () => {
-                act.disabled = true;
-                try { await inboxAction({id: event.task_id, task_type: event.task_type, version: event.version}); }
-                catch (error) { showError(error); await refresh(); }
-                finally { act.disabled = false; }
-            }, 'tm-primary');
-            row.append(content, open, act); root.append(row);
+            row.append(content, open);
+            if (!micro) {
+                const act = button('Взять в работу', async () => {
+                    act.disabled = true;
+                    try { await inboxAction({id: event.task_id, task_type: event.task_type, version: event.version}); }
+                    catch (error) { showError(error); await refresh(); }
+                    finally { act.disabled = false; }
+                }, 'tm-primary');
+                row.append(act);
+            }
+            root.append(row);
         });
     }
     async function inboxAction(task) {
-        const path = task.task_type === 'micro' ? `/microtasks/${task.id}/complete` : `/tasks/${task.id}/accept`;
-        const result = await api.request(path, 'POST', {version: task.version});
+        const result = await api.request(`/tasks/${task.id}/accept`, 'POST', {version: task.version});
         await refresh(); return result;
     }
     async function renderBoard(root, generation) {

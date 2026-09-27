@@ -40,7 +40,8 @@ test('read-only acquaintance, normal acceptance, persistent micro timer and spli
   await expect(normalRow).toBeVisible();
   await expect(microRow).toContainText('МИКРОЗАДАЧА · 24 ЧАСА');
   await expect(page.locator('#tm-inbox-nav-count')).toBeVisible();
-  await expect(page.locator('.tm-nav [data-tasks-module-badge="micro"]')).toContainText('⚡');
+  await expect(page.locator('.tm-nav [data-tasks-module-badge="micro"]')).toHaveText('⚡');
+  await expect(microRow.getByRole('button', { name: 'Готово', exact: true })).toHaveCount(0);
   const readRequests: string[] = [];
   page.on('request', (request) => {
     if (/\/inbox\/\d+\/read/.test(request.url())) readRequests.push(request.url());
@@ -65,6 +66,7 @@ test('read-only acquaintance, normal acceptance, persistent micro timer and spli
   await expect(drawer).toContainText('24 часа отсчитываются от создания');
   await expect(drawer.locator('input,select,textarea')).toHaveCount(0);
   await expect(drawer.getByRole('button', { name: 'Принять', exact: true })).toHaveCount(0);
+  await expect(drawer.getByRole('button', { name: 'Готово', exact: true })).toHaveCount(0);
   await page.locator('#tm-dialog-close').click();
   await expect(microRow).toBeVisible();
   const timer = microRow.locator('[data-micro-deadline]');
@@ -73,7 +75,11 @@ test('read-only acquaintance, normal acceptance, persistent micro timer and spli
   await page.clock.fastForward(61000);
   await expect(timer).not.toHaveText(initial);
   await expect(page.getByRole('button', { name: 'Прочитано', exact: true })).toHaveCount(0);
-  await microRow.getByRole('button', { name: 'Готово', exact: true }).click();
+  await page.locator('.tm-nav [data-view="micro"]').click();
+  const complete = page.getByRole('checkbox', { name: `Завершить: ⚡ ${title}`, exact: true });
+  await complete.click();
+  await expect(complete).toHaveCount(0);
+  await page.locator('.tm-nav [data-view="inbox"]').click();
   await expect(microRow).toHaveCount(0);
   const done = await page.evaluate(
     async (id) => (await (await fetch(`/api/v1/tasks-module/tasks/${id}`)).json()).data,
