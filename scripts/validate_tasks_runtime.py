@@ -42,12 +42,14 @@ STAGE_A_PYTHON = (
     "app/tasks/presentation.py", "app/tasks/ui_routes.py", "tests/test_tasks_ui.py",
     "tests/test_tasks_acceptance.py", "scripts/benchmark_tasks_module.py",
     "tests/stage2_preview_server.py", "tests/test_tasks_standalone.py",
+    "tests/test_tasks_inbox_workflow.py", "scripts/prepare_tasks_inbox_workflow.py",
 )
 PATTERNS = (
     "test_tasks_isolation.py", "test_tasks_module.py", "test_tasks_runtime_compat.py",
     "test_tasks_core*.py",
     "test_tasks_projects.py",
     "test_tasks_microtasks.py",
+    "test_tasks_inbox_workflow.py",
     "test_tasks_ui.py",
     "test_tasks_acceptance.py",
     "test_tasks_api.py", "test_tasks_standalone.py", "test_collaboration*.py",

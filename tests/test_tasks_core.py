@@ -52,7 +52,7 @@ class TasksCoreTest(unittest.TestCase):
         task = self.create()
         self.assertEqual((task["created_by"], task["assigned_to"], task["version"]), (1, 2, 1))
         self.assertEqual((task["task_type"], task["title"], task["priority"], task["status"]),
-                         ("normal", "Новая задача", "normal", "new"))
+                         ("normal", "Новая задача", "normal", "waiting"))
         for field in ("deadline_date", "completed_at", "deleted_at", "related_entity_type", "related_entity_id", "related_entity_label"):
             self.assertIsNone(task[field])
         self.assertEqual(self.service.create(self.creator, {"title": "Mine"})["assigned_to"], 1)
@@ -441,7 +441,7 @@ class TasksCoreTest(unittest.TestCase):
             with self.subTest(instant=instant), mock.patch("app.tasks.domain.datetime") as clock:
                 clock.now.side_effect = lambda zone: instant.astimezone(zone)
                 self.assertEqual(business_today(), day)
-                today = self.service.list(self.assignee, {"today": "true", "status": "new"})
+                today = self.service.list(self.assignee, {"today": "true", "status": "waiting"})
                 overdue = self.service.list(self.assignee, {"overdue": "true"})
                 self.assertEqual([row["id"] for row in today["items"]], today_ids)
                 self.assertEqual([row["id"] for row in overdue["items"]], overdue_ids)

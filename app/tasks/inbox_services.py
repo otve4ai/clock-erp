@@ -16,7 +16,7 @@ class InboxService:
         paging = list_options(options)
         with self.repository.transaction() as session:
             if badge:
-                return {"count": session.inbox_badge(user["id"])}
+                return session.inbox_counts(user["id"])
             return session.inbox(user["id"], paging["limit"], paging["offset"])
 
     def read(self, user, event_id, payload):

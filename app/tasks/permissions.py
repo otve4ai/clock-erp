@@ -29,6 +29,11 @@ def can_change_status(user, task):
     return can_edit(user, task)
 
 
+def can_accept(user, task):
+    return (task["deleted_at"] is None and task["task_type"] == "normal"
+            and task["status"] != "done" and user["id"] == task["assigned_to"])
+
+
 def can_reassign(user, task):
     return task["deleted_at"] is None and _owner(user, task)
 
@@ -49,7 +54,7 @@ def require_view(user, task, project_access=False):
 
 def require_action(user, task, action, project_access=False):
     require_view(user, task, project_access)
-    checks = {"edit": can_edit, "change_status": can_change_status,
+    checks = {"edit": can_edit, "change_status": can_change_status, "accept": can_accept,
               "reassign": can_reassign, "delete": can_delete, "restore": can_restore}
     if not checks[action](user, task):
         raise TaskError("FORBIDDEN", "Недостаточно прав для этого действия.", 403)
@@ -104,5 +109,6 @@ def can_manage_project(user, project):
 
 def task_capabilities(user, task):
     return {"edit": can_edit(user, task), "change_status": can_change_status(user, task),
+            "accept": can_accept(user, task),
             "reassign": can_reassign(user, task), "delete": can_delete(user, task),
             "restore": can_restore(user, task)}

@@ -9,6 +9,8 @@ def present(data, user):
     value = dict(data)
     if {"id", "task_type", "created_by", "assigned_to", "deleted_at"} <= set(value):
         value["permissions"] = permissions.task_capabilities(user, value)
+        pending = value.pop("inbox_pending", False)
+        value["permissions"]["accept"] = value["permissions"]["accept"] and bool(pending)
     elif {"id", "owner_id", "archived_at", "name"} <= set(value):
         value["permissions"] = {"manage": permissions.can_manage_project(user, value)}
     elif isinstance(value.get("items"), list):

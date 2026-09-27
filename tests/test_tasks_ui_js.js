@@ -45,7 +45,7 @@ async function notificationTests() {
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(elements[0].textContent, '2'); assert.equal(elements[0].hidden, false);
     assert.equal(notifications.length, 1); assert.equal(notifications[0].options.detail, 'От Actor · <img src=x>');
-    assert.equal(notifications[0].options.action.href, '/app/tasks-module?task=8');
+    assert.equal(notifications[0].options.action.href, '/app/tasks-module?view=inbox&preview=8');
     assert.equal(calls.find(item => item.url.endsWith('/claim')).options.headers['X-CSRF-Token'], 'synthetic'); checks += 1;
     listeners.visibilitychange(); await new Promise(resolve => setImmediate(resolve)); assert.equal(calls.length, 3); checks += 1;
     vm.runInNewContext(code, sandbox); await new Promise(resolve => setImmediate(resolve)); assert.equal(calls.length, 3); checks += 1;

@@ -66,6 +66,6 @@ class TasksAcceptanceTest(unittest.TestCase):
             self.post('/microtasks/{}/convert'.format(micro['id']), {'version': 1})
             self.actor = self.users[2]
             event = self.client.get(self.base + '/inbox').get_json()['data']['items'][0]
-            self.post('/inbox/{}/read'.format(event['id']), {})
+            self.post('/tasks/{}/accept'.format(event['task_id']), {'version': event['version']})
             self.post('/notifications/claim', {})
         self.assertGreater(len(opened), 8)

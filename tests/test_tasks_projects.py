@@ -387,7 +387,7 @@ class TaskViewsTest(ProjectsFixture):
             self.tasks.mutate(self.users[actor], deleted["id"], {"version": 1}, "delete")
             dashboard = self.tasks.list(self.users[actor], summary=True)
             self.assertEqual({key: dashboard[key] for key in ("total", "done", "in_progress", "today", "overdue", "delegated_waiting", "inbox")},
-                             dict(total=3, done=1, in_progress=1, today=1, overdue=1, delegated_waiting=1, inbox=3))
+                             dict(total=3, done=1, in_progress=1, today=1, overdue=1, delegated_waiting=1, inbox=2))
             explicit = self.tasks.list(self.users[actor], {"scope": "my"}, summary=True)
             self.assertEqual(explicit["delegated_waiting"], 0)
             filtered = self.tasks.list(self.users[actor], {"project_id": str(project["id"])}, summary=True)

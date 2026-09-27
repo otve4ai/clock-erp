@@ -17,7 +17,7 @@
     </header>
     <section class="tm-metrics" id="tm-metrics" aria-label="Мои показатели">
         {% for key,label,icon in [('inbox','Входящие','✓'),('in_progress','В работе','▷'),('delegated_waiting','Ожидаю','◷'),('overdue','Просрочено','!'),('today','Сегодня','▦')] %}
-        <button class="tm-metric tm-metric-{{ key }}" data-metric="{{ key }}"><span class="tm-metric-icon" aria-hidden="true">{{ icon }}</span><span><strong data-count="{{ key }}">—</strong><small>{{ label }}</small></span><span class="tm-chevron" aria-hidden="true">›</span></button>
+        <button class="tm-metric tm-metric-{{ key }}" data-metric="{{ key }}"><span class="tm-metric-icon" aria-hidden="true">{{ icon }}</span><span><strong data-count="{{ key }}">—</strong>{% if key=='inbox' %}<strong class="tm-inbox-micro-badge" data-tasks-module-badge="micro" hidden></strong>{% endif %}<small>{{ label }}</small></span><span class="tm-chevron" aria-hidden="true">›</span></button>
         {% endfor %}
     </section>
     <section class="tm-micro" id="tm-micro" aria-labelledby="tm-micro-heading">
@@ -33,7 +33,7 @@
     </section>
     <nav class="tm-nav" aria-label="Разделы задач">
         {% for value,label in [('main','Задачи'),('inbox','Входящие'),('today','Сегодня'),('micro','Микрозадачи'),('delegated_waiting','Ожидаю'),('projects','Проекты'),('archive','Архив')] %}
-        <a href="?view={{ value }}" data-view="{{ value }}">{{ label }}{% if value=='inbox' %}<span id="tm-inbox-nav-count" hidden></span>{% endif %}</a>
+        <a href="?view={{ value }}" data-view="{{ value }}">{{ label }}{% if value=='inbox' %}<span id="tm-inbox-nav-count" class="tm-inbox-normal-badge" hidden></span><span class="tm-inbox-micro-badge" data-tasks-module-badge="micro" hidden></span>{% endif %}</a>
         {% endfor %}
     </nav>
     <div id="tm-notice" class="tm-notice" role="status" hidden></div>
@@ -50,7 +50,7 @@
                 <label data-filter="project"><span>Проект</span><select name="project_id"><option value="">Все проекты</option><option value="none">Без проекта</option></select></label>
                 <label><span>Исполнитель</span><select name="assigned_to"><option value="">Все исполнители</option></select></label>
                 <label><span>Поставил</span><select name="created_by"><option value="">Все постановщики</option></select></label>
-                <label data-filter="status"><span>Статус</span><select name="status"><option value="">Активные</option><option value="new">Новая</option><option value="in_progress">В работе</option><option value="waiting">Ожидает ответа</option><option value="done">Готово</option></select></label>
+                <label data-filter="status"><span>Статус</span><select name="status"><option value="">Активные</option><option value="new">Новая</option><option value="in_progress">В работе</option><option value="waiting">Ожидает принятия</option><option value="done">Готово</option></select></label>
                 <label data-filter="priority"><span>Приоритет</span><select name="priority"><option value="">Любой</option><option value="low">Низкий</option><option value="normal">Обычный</option><option value="high">Высокий</option></select></label>
                 <label data-filter="overdue" hidden><span>Срок</span><select name="overdue"><option value="">Любой</option><option value="true">Просроченные</option><option value="false">Без просрочки</option></select></label>
                 <label data-filter="period" hidden><span>Период с</span><input name="date_from" type="date"></label><label data-filter="period" hidden><span>По</span><input name="date_to" type="date"></label>

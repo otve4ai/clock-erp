@@ -113,6 +113,26 @@
         const yes = button('Удалить задачу', () => submit(() => api.request(`/tasks/${task.id}/delete`, 'POST', {version: task.version}), async result => { showTask(result); ui.notice('Задача удалена'); await ui.refresh(true); }, () => taskById(task.id)), 'tm-danger');
         confirm.append(button('Отмена', () => confirm.remove()), yes); body.prepend(confirm); yes.focus();
     }
+    function preview(task) {
+        const micro = task.task_type === 'micro';
+        const current = open(task.title, micro ? '⚡ Микрозадача · 24 часа' : 'Ознакомление с задачей');
+        const details = node('div', 'tm-details tm-task-preview');
+        details.append(node('p', '', `Поставил: ${ui.name(task.created_by)}`), node('p', '', `Исполнитель: ${ui.name(task.assigned_to)}`),
+            node('p', '', `Статус: ${micro ? (task.status === 'done' ? 'Готово' : 'К выполнению') : ui.statusNames[task.status]}`));
+        if (micro) {
+            details.append(node('p', '', `Срок: ${ui.displayInstant(task.micro_deadline_at)}`), node('p', '', '24 часа отсчитываются от создания. Во входящих остаётся до выполнения.'));
+            if (task.status !== 'done') { const timer = node('strong', 'tm-deadline', ui.remaining(task.micro_deadline_at)); timer.dataset.microDeadline = task.micro_deadline_at; timer.classList.toggle('tm-overdue', timer.textContent.startsWith('Просрочено')); details.append(timer); }
+        } else {
+            details.append(node('p', '', `Срок: ${ui.displayDate(task.deadline_date)}`), node('p', '', `Проект: ${ui.projectName(task.project_id)}`),
+                node('p', '', `Приоритет: ${{low: 'Низкий', normal: 'Обычный', high: 'Высокий'}[task.priority]}`), node('p', 'tm-preview-description', task.description || 'Без описания'));
+        }
+        body.append(details);
+        const controls = node('div', 'tm-form-actions'); controls.append(button('Закрыть', close));
+        if (!task.deleted_at && task.status !== 'done' && task.assigned_to === ui.boot.userId && (micro || task.permissions.accept)) {
+            controls.append(button(micro ? 'Готово' : 'Взять в работу', () => submit(() => ui.inboxAction(task), async () => close(), async () => preview(await ui.request(`/tasks/${task.id}`))), 'tm-primary'));
+        }
+        body.append(controls); history(`/tasks/${task.id}/activity`, current);
+    }
     function showTask(task, focus) {
         const micro = task.task_type === 'micro'; const current = open(task.title, `${micro ? 'Микрозадача' : 'Задача'} #${task.id}${task.deleted_at ? ' · удалена' : ''}`);
         const form = node('form', 'tm-form'); const controls = {};
@@ -196,5 +216,5 @@
         } catch (failure) { if (current === generation) error(failure); }
         if (current === generation) history(`/projects/${id}/activity`, current);
     }
-    window.TasksModuleDialogs = Object.freeze({task: taskById, showTask, create, project, close});
+    window.TasksModuleDialogs = Object.freeze({task: taskById, showTask, preview, create, project, close});
 })();
