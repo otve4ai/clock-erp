@@ -244,11 +244,11 @@ class InboxDomainTest(MicroFixture):
         self.micro()
         self.tasks.create(self.users[2], {"title": "Self"})
         self.assertEqual(self.events(1) + self.events(2), [])
-        self.micro(assigned_to=2)
+        micro = self.micro(assigned_to=2)
         normal = self.tasks.create(self.users[1], {"title": "Normal", "assigned_to": 2})
         events = self.events()
         self.assertEqual(len(events), 2)
-        self.assertEqual(events[0]["task_id"], normal["id"])
+        self.assertEqual([event["task_id"] for event in events], [micro["id"], normal["id"]])
         self.assertEqual({row["event_type"] for row in events}, {"task_assigned"})
         self.assertEqual(self.tasks.list(self.users[2], summary=True)["inbox"], 2)
 
