@@ -452,7 +452,7 @@ class BackupAdminService:
         }
 
     def _recovery_capabilities(self, backups, git, operation):
-        from app.services.recovery_v2 import _json_hash, inspect_instance
+        from app.services.recovery_v2 import RecoveryEngine, _json_hash, inspect_instance
 
         helper_available = self.recovery_helper.is_file() and os.access(str(self.recovery_helper), os.X_OK)
         release_available = self.current_release.is_symlink()
@@ -483,8 +483,8 @@ class BackupAdminService:
             data_reason = common_reason
             if not data_reason and backup.get("recovery_contract") != contract_hash:
                 data_reason = "Версия данных несовместима с текущим кодом"
-            if not data_reason and not self._manifests_match(
-                backup.get("database_manifest"), manifest
+            if not data_reason and not RecoveryEngine._restore_manifest_compatible(
+                backup.get("database_manifest"), manifest, contract
             ):
                 data_reason = "Схема backup несовместима с текущей схемой"
             backup["can_restore_data"] = data_reason is None
@@ -509,8 +509,8 @@ class BackupAdminService:
                         target_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
                         if target_hash != backup.get("recovery_contract"):
                             full_reason = "Код и данные точки восстановления несовместимы"
-                        elif set(backup.get("database_manifest") or {}) != set(
-                            value.get("databases") or {}
+                        elif not RecoveryEngine._full_restore_manifest_compatible(
+                            backup.get("database_manifest"), manifest, contract, value
                         ):
                             full_reason = "Metadata не подтверждает все базы выбранного кода"
                     except ValueError:

@@ -91,25 +91,69 @@ def _schema_digest(connection):
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def _schema_fingerprint(connection):
+    # Contract format 1: all user schema objects, ignoring only SQL whitespace
+    # and keyword case. Preserve string literals; never execute contract SQL.
+    objects = []
+    for kind, name, table, sql in connection.execute(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master "
+        "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
+    ):
+        tokens = re.findall(r"'(?:''|[^'])*'|[A-Za-z_][A-Za-z_0-9]*|[0-9]+|<=|>=|!=|<>|[^\s]", sql or "")
+        objects.append((kind, name, table,
+                        [token if token.startswith("'") else token.lower() for token in tokens]))
+    normalized = json.dumps(objects, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _validate_optional_connection(connection, specification):
+    # The selected release's contract is authoritative, not today's Tasks code.
+    if (not isinstance(specification, dict) or specification.get("format") != 1
+            or specification.get("schema_fingerprint") != _schema_fingerprint(connection)
+            or specification.get("user_version") != connection.execute("PRAGMA user_version").fetchone()[0]):
+        raise RecoveryError("INCOMPATIBLE_SCHEMA", "Optional database schema differs from selected contract")
+    ledger = specification.get("migration_ledger")
+    if not isinstance(ledger, list) or not ledger:
+        raise RecoveryError("CONTRACT_INVALID", "Optional database ledger contract missing")
+    actual = [list(row) for row in connection.execute(
+        "SELECT version,signature FROM tasks_module_migrations ORDER BY version LIMIT ?", (len(ledger) + 1,))]
+    if actual != ledger:
+        raise RecoveryError("INCOMPATIBLE_SCHEMA", "Optional database ledger differs from selected contract")
+    if connection.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+        raise RecoveryError("SQLITE_CHECK_FAILED", "Tasks integrity check failed")
+    if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+        raise RecoveryError("SQLITE_CHECK_FAILED", "Tasks foreign key check failed")
+
+
 def inspect_instance(instance_root, contract, require_all=True):
     """Return a secret-free schema manifest and validate critical tables."""
     root = Path(instance_root)
     databases = contract.get("databases") if isinstance(contract, dict) else None
     if not isinstance(databases, dict) or not databases:
         raise RecoveryError("CONTRACT_INVALID", "Контракт совместимости некорректен")
+    optional = contract.get("optional_databases", {})
+    if not isinstance(optional, dict) or set(optional) - {"tasks-module.db"} or set(optional) & set(databases):
+        raise RecoveryError("CONTRACT_INVALID", "Некорректный optional database contract")
+    specifications = contract.get("optional_database_contracts", {})
+    if not isinstance(specifications, dict) or set(specifications) != set(optional):
+        raise RecoveryError("CONTRACT_INVALID", "Отсутствует точный optional schema contract")
     result = {}
-    for name, required_tables in sorted(databases.items()):
+    for name, required_tables in sorted(dict(databases, **optional).items()):
         path = root / name
+        if name in optional and (path.is_symlink() or (path.exists() and not path.is_file())):
+            raise RecoveryError("DATABASE_UNREADABLE", "Optional database должна быть обычным файлом")
         if not path.is_file() or path.is_symlink():
-            if require_all:
+            if require_all and name not in optional:
                 raise RecoveryError("DATABASE_MISSING", "Отсутствует обязательная база {}".format(name))
             continue
         try:
-            connection = sqlite3.connect("file:{}?mode=ro".format(path), uri=True)
+            connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
             try:
                 check = connection.execute("PRAGMA quick_check").fetchone()
                 if not check or check[0] != "ok":
                     raise RecoveryError("SQLITE_CHECK_FAILED", "База {} повреждена".format(name))
+                if name in optional:
+                    _validate_optional_connection(connection, specifications[name])
                 tables = set(row[0] for row in connection.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 ).fetchall())
@@ -313,6 +357,28 @@ class RecoveryEngine:
             for name in left
         )
 
+    @classmethod
+    def _restore_manifest_compatible(cls, backup, current, contract):
+        # A backup may recover a lost optional DB, but may never silently remove
+        # one that exists now. Required ERP databases retain exact-set semantics.
+        optional = set(contract.get("optional_databases", {}))
+        if not isinstance(backup, dict) or not isinstance(current, dict):
+            return False
+        if set(current) - set(backup) or (set(backup) - set(current)) - optional:
+            return False
+        return cls._manifest_compatible({name: backup[name] for name in current}, current)
+
+    @staticmethod
+    def _full_restore_manifest_compatible(backup, current, source_contract, target_contract):
+        if not isinstance(backup, dict) or not isinstance(current, dict):
+            return False
+        recorded = set(backup)
+        required = set(target_contract.get("databases") or {})
+        optional = set(target_contract.get("optional_databases") or {})
+        existing_optional = set(current) & set(source_contract.get("optional_databases") or {})
+        return (required.issubset(recorded) and not recorded - required - optional
+                and not existing_optional - recorded)
+
     def _preflight(self, operation):
         kind = operation["kind"]
         contract_hash, contract = _json_hash(self.contract_path)
@@ -350,8 +416,8 @@ class RecoveryEngine:
                 raise RecoveryError("BACKUP_METADATA_INVALID", "Metadata не подтверждает состав persistent data")
             if metadata.get("recovery_contract") != contract_hash and kind == "data_restore":
                 raise RecoveryError("INCOMPATIBLE_SCHEMA", "Версия данных несовместима с текущим кодом")
-            if kind == "data_restore" and not self._manifest_compatible(
-                metadata.get("database_manifest"), current_manifest
+            if kind == "data_restore" and not self._restore_manifest_compatible(
+                metadata.get("database_manifest"), current_manifest, contract
             ):
                 raise RecoveryError("INCOMPATIBLE_SCHEMA", "Схема backup несовместима с текущими данными")
 
@@ -367,8 +433,10 @@ class RecoveryEngine:
             if kind == "full_restore":
                 if metadata.get("recovery_contract") != target_hash:
                     raise RecoveryError("INCOMPATIBLE_SCHEMA", "Точка восстановления несовместима с кодом")
-                if set((metadata.get("database_manifest") or {})) != set(target_contract.get("databases") or {}):
-                    raise RecoveryError("INCOMPATIBLE_SCHEMA", "Metadata не подтверждает все базы выбранного кода")
+                if not self._full_restore_manifest_compatible(
+                    metadata.get("database_manifest"), current_manifest, contract, target_contract
+                ):
+                    raise RecoveryError("INCOMPATIBLE_SCHEMA", "Metadata не подтверждает необходимые базы")
                 runtime_contract = target_contract
             if not self.current_link.is_symlink():
                 raise RecoveryError("RELEASE_RUNTIME_UNAVAILABLE", "Атомарный release runtime не настроен")

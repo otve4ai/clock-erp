@@ -18,6 +18,7 @@ from app.services.recovery_v2 import (
     RecoveryEngine,
     RecoveryError,
     _json_hash,
+    _schema_fingerprint,
     create_operation_record,
     inspect_file_manifest,
     inspect_instance,
@@ -60,7 +61,8 @@ class RecoveryV2Test(unittest.TestCase):
         (self.project / ".gitignore").write_text("instance/\n", encoding="utf-8")
         (self.project / "app.txt").write_text("v1", encoding="utf-8")
         (self.project / "requirements.txt").write_text("flask\n", encoding="utf-8")
-        self._git("init", "-b", "main")
+        self._git("init")
+        self._git("symbolic-ref", "HEAD", "refs/heads/main")
         self._git("config", "user.email", "recovery-test@example.com")
         self._git("config", "user.name", "Recovery Test")
         self._git(
@@ -157,6 +159,103 @@ class RecoveryV2Test(unittest.TestCase):
         value = connection.execute("SELECT value FROM recovery_payload").fetchone()[0]
         connection.close()
         return value
+
+    def _optional_tasks_contract(self):
+        contract = json.loads(self.contract.read_text())
+        actual = Path(__file__).resolve().parents[1] / "ops/recovery-schema-contract.json"
+        value = json.loads(actual.read_text())
+        contract["optional_databases"] = value["optional_databases"]
+        contract["optional_database_contracts"] = value["optional_database_contracts"]
+        self.contract.write_text(json.dumps(contract), encoding="utf-8")
+        self._git("add", "ops/recovery-schema-contract.json")
+        self._git("commit", "-m", "optional Tasks contract")
+        head = self._git("rev-parse", "HEAD").stdout.strip()
+        self._git("update-ref", "refs/remotes/origin/main", head)
+        return head
+
+    def test_optional_tasks_absent_does_not_prevent_normal_restore(self):
+        self._optional_tasks_contract()
+        backup = self._make_backup()
+        result = self._engine().run(self._operation(backup=backup)["id"])
+        self.assertEqual(result["status"], "completed", result)
+        self.assertFalse((self.instance / "tasks-module.db").exists())
+
+    def test_data_restore_recovers_lost_optional_tasks_database(self):
+        from app.tasks.migrations import migrate_database
+        from app.tasks.repository import TasksRepository
+        head = self._optional_tasks_contract()
+        backup = self._make_backup(commit=head, mutate=lambda root: migrate_database(root / "tasks-module.db"))
+        self.service._recovery_capabilities([backup], {"dirty": False, "history": []}, {})
+        self.assertTrue(backup["can_restore_data"], backup)
+        self.assertTrue(backup["can_restore_system"], backup)
+        result = self._engine().run(self._operation(backup=backup)["id"])
+        self.assertEqual(result["status"], "completed", result)
+        self.assertEqual(TasksRepository(self.instance / "tasks-module.db").status()["schema_version"], 4)
+
+    def test_data_and_full_restore_cannot_silently_drop_existing_tasks_database(self):
+        from app.tasks.migrations import migrate_database
+        head = self._optional_tasks_contract()
+        backup = self._make_backup(commit=head)
+        migrate_database(self.instance / "tasks-module.db")
+        self.service._recovery_capabilities([backup], {"dirty": False, "history": []}, {})
+        self.assertFalse(backup["can_restore_data"])
+        self.assertFalse(backup["can_restore_system"])
+        for kind in ("data_restore", "full_restore"):
+            with self.subTest(kind=kind):
+                operation = self._operation(kind=kind, backup=backup)
+                with self.assertRaises(RecoveryError) as failure:
+                    self._engine()._preflight(operation)
+                self.assertEqual(failure.exception.code, "INCOMPATIBLE_SCHEMA")
+                self.assertTrue((self.instance / "tasks-module.db").exists())
+                # Finish this synthetic operation so the next fixture can be created.
+                operation.update(status="failed", stage="failed")
+                self._engine()._write_operation(operation)
+
+    def test_old_contract_backup_data_restore_is_blocked_but_full_restore_is_valid_without_tasks(self):
+        backup = self._make_backup()
+        self._optional_tasks_contract()
+        self.service._recovery_capabilities([backup], {"dirty": False, "history": []}, {})
+        self.assertFalse(backup["can_restore_data"])
+        self.assertTrue(backup["can_restore_system"], backup)
+        operation = self._operation(backup=backup)
+        with self.assertRaises(RecoveryError) as failure:
+            self._engine()._preflight(operation)
+        self.assertEqual(failure.exception.code, "INCOMPATIBLE_SCHEMA")
+        operation.update(status="failed", stage="failed")
+        self._engine()._write_operation(operation)
+        result = self._engine().run(self._operation(kind="full_restore", backup=backup)["id"])
+        self.assertEqual(result["status"], "completed", result)
+        self.assertFalse((self.instance / "tasks-module.db").exists())
+
+    def test_full_restore_uses_target_tasks_contract_not_current_tasks_code(self):
+        from app.tasks.migrations import migrate_database
+        from app.tasks.repository import TasksRepository
+        target = self._optional_tasks_contract()
+        backup = self._make_backup(commit=target, mutate=lambda root: migrate_database(root / "tasks-module.db"))
+        path = self.instance / "tasks-module.db"
+        migrate_database(path)
+        # Synthetic future contract: real alternate DDL and ledger, no v5 feature.
+        contract = json.loads(self.contract.read_text())
+        spec = contract["optional_database_contracts"]["tasks-module.db"]
+        connection = sqlite3.connect(str(path))
+        connection.execute("ALTER TABLE tasks ADD COLUMN future_fixture TEXT")
+        connection.execute("INSERT INTO tasks_module_migrations VALUES(5,'fixture-v5','now','fixture')")
+        connection.commit()
+        spec["schema_fingerprint"] = _schema_fingerprint(connection)
+        spec["migration_ledger"].append([5, "fixture-v5"])
+        connection.close()
+        self.contract.write_text(json.dumps(contract), encoding="utf-8")
+        self._git("add", "ops/recovery-schema-contract.json")
+        self._git("commit", "-m", "synthetic future recovery contract")
+        head = self._git("rev-parse", "HEAD").stdout.strip()
+        self._git("update-ref", "refs/remotes/origin/main", head)
+        self.service._recovery_capabilities([backup], {"dirty": False, "history": []}, {})
+        self.assertFalse(backup["can_restore_data"])
+        self.assertTrue(backup["can_restore_system"], backup)
+        with mock.patch("app.tasks.repository.validate_connection", side_effect=AssertionError("current code")):
+            result = self._engine().run(self._operation(kind="full_restore", backup=backup)["id"])
+        self.assertEqual(result["status"], "completed", result)
+        self.assertEqual(TasksRepository(path).status()["schema_version"], 4)
 
     def test_successful_data_restore_uses_verified_staging_and_atomic_swap(self):
         backup = self._make_backup()
@@ -431,7 +530,7 @@ class RecoveryV2Test(unittest.TestCase):
         with mock.patch("app.services.backup_admin.shutil.which", return_value="/usr/bin/systemd-run"), \
              mock.patch("app.services.backup_admin.subprocess.run", return_value=completed) as run:
             self.service._launch_recovery(operation_id)
-        command = run.call_args.args[0]
+        command = run.call_args[0][0]
         self.assertIn("--unit=clock-erp-recovery-" + operation_id, command)
         self.assertIn("--service-type=simple", command)
         self.assertNotIn("--scope", command)

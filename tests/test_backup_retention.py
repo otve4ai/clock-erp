@@ -276,7 +276,9 @@ class BackupRetentionTest(unittest.TestCase):
         with sqlite3.connect(str(instance / "catalog.db")) as connection:
             connection.execute("CREATE TABLE products (id INTEGER PRIMARY KEY)")
         (project / ".gitignore").write_text("instance/\n", encoding="utf-8")
-        subprocess.run(["git", "init", "-b", "main"], cwd=str(project), check=True,
+        subprocess.run(["git", "init"], cwd=str(project), check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(["git", "symbolic-ref", "HEAD", "refs/heads/main"], cwd=str(project), check=True,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(project), check=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=str(project), check=True)
@@ -288,10 +290,16 @@ class BackupRetentionTest(unittest.TestCase):
             "daily", apply_changes=True,
         )
 
-        write_recovery_metadata(
-            project, self.root, archive, "daily", reason="scheduled",
-            retention_categories=["daily"],
-        )
+        # A host may have a real immutable release symlink. This fixture must
+        # select only its own contract, while exercising real metadata capture.
+        def fixture_path(value):
+            return (Path(self.temp.name) / "current" if str(value) == "/opt/clock-erp-current"
+                    else Path(value))
+        with mock.patch("scripts.retain_erp_backups.Path", side_effect=fixture_path):
+            write_recovery_metadata(
+                project, self.root, archive, "daily", reason="scheduled",
+                retention_categories=["daily"], strict=True,
+            )
 
         metadata_files = list((self.root / "metadata").glob("*.json"))
         self.assertEqual(len(metadata_files), 1)

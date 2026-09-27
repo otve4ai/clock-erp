@@ -313,7 +313,17 @@ chmod 700 "$REHEARSAL_ROOT" "$DEPLOY_CHECK_DIR"
 git fetch "$REMOTE_NAME"
 FETCHED_COMMIT="$(git rev-parse "$REMOTE_NAME/$EXPECTED_BRANCH")"
 changed_files="$(git diff --name-only "$PREVIOUS_COMMIT" "$FETCHED_COMMIT")"
-if printf '%s\n' "$changed_files" | grep -Eq \
+if [[ -x venv/bin/python ]]; then
+    PYTHON_BIN="$PROJECT_DIR/venv/bin/python"
+else
+    PYTHON_BIN="python3"
+fi
+# Exact-tree, source-controlled classification; never a SKIP_SCHEMA_CHECK flag.
+# Run candidate code offline before any application/database update.
+git show "$FETCHED_COMMIT:scripts/tasks_release_preflight.py" > "$DEPLOY_WORKDIR/tasks-release-preflight.py"
+schema_changed_files="$("$PYTHON_BIN" "$DEPLOY_WORKDIR/tasks-release-preflight.py" \
+    --repository "$PROJECT_DIR" --base "$PREVIOUS_COMMIT" --candidate "$FETCHED_COMMIT")"
+if printf '%s\n' "$schema_changed_files" | grep -Eq \
     '^(app/(catalog_db|catalog_migration_steps|schema_migrations)\.py|app/catalog_schema_manifest\.json|scripts/migration_preflight\.py)$'; then
     CATALOG_MIGRATION_REQUIRED=1
 fi
@@ -325,7 +335,7 @@ if printf '%s\n' "$changed_files" | grep -Eq \
     '^(app/(mail_migrations\.py|services/mail\.py)|scripts/(migrate_mail\.py|mail_worker\.py))$'; then
     MAIL_MIGRATION_REQUIRED=1
 fi
-if printf '%s\n' "$changed_files" | grep -Eq \
+if printf '%s\n' "$schema_changed_files" | grep -Eq \
     '^(app/(auth|domain_schema_migrations)\.py|app/services/orders_snapshot\.py|scripts/domain_migration_preflight\.py)$'; then
     DOMAIN_MIGRATION_REQUIRED=1
 fi

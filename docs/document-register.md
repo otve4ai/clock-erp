@@ -181,3 +181,10 @@ workflows/fault injection/themes/responsive, 32000-task synthetic benchmark.
 `docs/validation/tasks-final-f-runtime.json`, `tasks-final-f-ddl.json`,
 `tasks-final-f-performance.json` — воспроизводимые результаты; TD-TASKS-001 измерен.
 Нет schema/business changes, legacy migration, push/merge/deploy/enable.
+
+2026-09-27: `docs/operations/tasks-release-readiness.md` — `current`: локальная
+подготовка exact-tree deploy classification и optional Tasks backup/recovery,
+без изменения функциональности A–F. `docs/validation/tasks-release-runtime.json`:
+368/368 exact-runtime PASS (Python 3.6.8, SQLite 3.7.17, Git 1.8.3.1), 0 skips,
+0 обращений за пределы fixtures. Финальный manifest/diff review — перед commit;
+production rehearsal/R3/merge/deploy/ON этим документом не разрешаются.

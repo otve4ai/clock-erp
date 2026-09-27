@@ -347,6 +347,8 @@ class BackupAdminAuthorizationTest(unittest.TestCase):
         self.original_config = dict(web.app.config)
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
+        project = root / "project"
+        project.mkdir()
         self.maintenance_marker = root / "maintenance.json"
         backup_root = root / "backups"
         backup_root.mkdir()
@@ -361,6 +363,10 @@ class BackupAdminAuthorizationTest(unittest.TestCase):
             ERP_BACKUP_CRON=str(cron),
             ERP_BACKUP_REMOTE_CHECK=False,
             ERP_MAINTENANCE_MARKER=str(self.maintenance_marker),
+            ERP_SOURCE_ROOT=str(project),
+            ERP_RECOVERY_CONTRACT=str(project / "ops/recovery-schema-contract.json"),
+            ERP_RECOVERY_HELPER=str(project / "missing-recovery-helper"),
+            ERP_CURRENT_RELEASE=str(root / "current"),
         )
         web.app.extensions.pop("backup_admin_service", None)
         self.store = auth.AuthStore(web.app.config["AUTH_DATABASE"])
@@ -458,7 +464,7 @@ class BackupAdminAuthorizationTest(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         fake.start_recovery.assert_called_once()
         self.assertEqual(
-            fake.start_recovery.call_args.kwargs["idempotency_key"],
+            fake.start_recovery.call_args[1]["idempotency_key"],
             "restore-request-2",
         )
 

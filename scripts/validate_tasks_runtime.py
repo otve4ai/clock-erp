@@ -9,6 +9,7 @@ import platform
 import re
 import socket
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -65,6 +66,7 @@ def is_inside(path, directory):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", required=True)
+    parser.add_argument("--release", action="store_true", help="Also validate offline release/backup/recovery changes")
     arguments = parser.parse_args()
     if sys.version_info[:3] != (3, 6, 8) or sqlite3.sqlite_version != "3.7.17" or sys.platform != "linux":
         parser.error("requires Linux, Python 3.6.8 and SQLite 3.7.17; no modern-runtime fallback")
@@ -97,9 +99,19 @@ def main():
         "sqlite": sqlite3.sqlite_version, "platform": platform.platform(),
         "euid": os.geteuid(), "source_root": str(ROOT),
     }
+    extra_python = ()
+    patterns = PATTERNS
+    if arguments.release:
+        report["stage"] = "release-readiness"
+        report["git"] = subprocess.check_output(["git", "--version"]).decode("ascii").strip()
+        extra_python = ("scripts/tasks_release_preflight.py", "app/services/recovery_v2.py",
+                        "app/services/backup_admin.py", "tests/test_tasks_release.py", "tests/test_recovery_v2.py",
+                        "tests/test_backup_admin.py", "tests/test_backup_retention.py")
+        patterns += ("test_tasks_release.py", "test_recovery_v2.py", "test_backup_admin.py",
+                     "test_backup_retention.py", "test_deploy_availability.py")
     compiled = []
     source_hashes = {}
-    for relative in STAGE_A_PYTHON + (
+    for relative in STAGE_A_PYTHON + extra_python + (
             "scripts/validate_tasks_runtime.py", "tests/test_tasks_runtime_compat.py", "tests/test_tasks.py"):
         path = ROOT / relative
         # Compile with the actual 3.6.8 interpreter, without writing pyc.
@@ -180,7 +192,7 @@ def main():
 
         def discover(start_directory, pattern="test*.py", **kwargs):
             suite = unittest.TestSuite()
-            for selected in PATTERNS:
+            for selected in patterns:
                 selected_suite = original_discover(start_directory, pattern=selected, **kwargs)
                 if not selected_suite.countTestCases():
                     raise AssertionError("required test pattern is empty: " + selected)
