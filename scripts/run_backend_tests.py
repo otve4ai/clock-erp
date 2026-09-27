@@ -144,6 +144,8 @@ def main():
             "ERP_AUTH_DATABASE": str(auth_path),
             "ORDERS_DATABASE_PATH": str(orders_path),
             "ERP_TASKS_DATABASE": str(tasks_path),
+            "ERP_TASKS_MODULE_DATABASE": str(test_root / "tasks-module.db"),
+            "ERP_TASKS_MODULE_ENABLED": "0",
             "ERP_PURCHASES_DATABASE": str(purchases_path),
             "CUSTOMERS_DATABASE_PATH": str(customers_path),
             "ERP_SMS_DATABASE": str(sms_path),

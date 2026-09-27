@@ -199,6 +199,15 @@ class AuthStore:
             ).fetchone()
         return self._row_dict(row)
 
+    def get_active_user_identity(self, user_id):
+        """Narrow read-only identity lookup for optional independent modules."""
+        connection = sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.1)
+        try:
+            row = connection.execute("SELECT id,active FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+            return {"id": row[0], "active": row[1]} if row else None
+        finally:
+            connection.close()
+
     def get_navigation_preferences(self, user_id):
         if not user_id:
             return None
@@ -350,6 +359,19 @@ class AuthStore:
                 "FROM users WHERE id=?", (int(user_id),)
             ).fetchone()
         return self._row_dict(row)
+
+    def list_active_task_identities(self):
+        """Minimal read-only directory for the optional Tasks user selector."""
+        connection = sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.1)
+        try:
+            rows = connection.execute(
+                "SELECT id,first_name,last_name,login FROM users WHERE active=1 ORDER BY id LIMIT 1001").fetchall()
+            if len(rows) > 1000:
+                raise ValueError("Tasks directory needs pagination")
+            return [{"id": row[0], "name": (str(row[1] or "") + " " + str(row[2] or "")).strip()
+                     or str(row[3] or "Сотрудник #{}".format(row[0]))} for row in rows]
+        finally:
+            connection.close()
 
     def list_team_users(self, query=""):
         query = str(query or "").strip().casefold()

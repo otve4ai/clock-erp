@@ -10,6 +10,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.domain_schema_migrations import validate_tasks_database
+from app.task_errors import (
+    TaskConflictError, TaskNotFoundError, TaskPermissionError, TaskValidationError,
+)
 
 
 MOSCOW_TIMEZONE = timezone(timedelta(hours=3), "Europe/Moscow")
@@ -19,24 +22,6 @@ ACTIVE_STATUSES = {"new", "in_progress", "waiting"}
 PRIORITIES = {"urgent", "important", "other"}
 VIEWS = {"inbox", "overdue", "today", "plans", "waiting", "anytime", "someday", "logbook"}
 REPEAT_TYPES = {"none", "daily", "weekdays", "weekly", "monthly", "custom"}
-
-
-class TaskValidationError(ValueError):
-    def __init__(self, message, field=""):
-        super().__init__(message)
-        self.field = field
-
-
-class TaskNotFoundError(LookupError):
-    pass
-
-
-class TaskConflictError(RuntimeError):
-    pass
-
-
-class TaskPermissionError(PermissionError):
-    pass
 
 
 def moscow_today(now=None):

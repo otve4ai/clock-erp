@@ -118,3 +118,73 @@ WB через общий сервис продаж; код `app/services/wildber
 
 2026-09-26: в `docs/orders-progressive-disclosure.md` уточнено разделение здоровья синхронизации WB и счётчика замечаний сверки; общий индикатор и диагностика используют один расчёт, backend и расписание не менялись.
 `docs/architecture/tasks-boundary.md` — `current`, 2026-09-26: удаление старых ERP-привязок задач с сохранением данных, общих назначений, почты и уведомлений; схема базы не меняется, production deploy не подтверждён.
+
+2026-09-26: `docs/architecture/tasks-isolation-stage-a.md` — `current` для ветки
+`codex/tasks-isolation-stage-a`: независимый от Tasks рендер ERP, асинхронные
+счётчики, отдельная проверка collaboration и выключенный фундамент нового
+модуля с `tasks-module.db`. Связанный `tasks-boundary.md` уточнён; схема legacy
+`tasks.db` сохранена. Документы не подтверждают merge или production deploy.
+
+2026-09-26: `docs/architecture/tasks-runtime-compatibility-a1.md` — `current`
+для `codex/tasks-runtime-a1`: проверка фундамента A на Linux / Python 3.6.8 /
+SQLite 3.7.17, только временная копия и синтетические данные. Production-код
+этапа A не изменён, добавлены воспроизводимые проверки и исправлен legacy
+test trace callback. Merge, push и deploy не выполнялись.
+
+2026-09-26: `docs/architecture/tasks-core-stage-b.md` — `current` для
+`codex/tasks-core-stage-b` от принятого `6d06b8f`: новый normal Task core,
+единые permissions, локальные activity/transactions, version, soft delete,
+API и schema v2 новой tasks-module.db. По умолчанию OFF, UI и legacy не
+переключены. `tasks-boundary.md` уточнён: legacy data migration не предусмотрена.
+`docs/validation/tasks-core-b-runtime.json` и `tasks-core-b-ddl.json` фиксируют
+134 успешных теста на Linux / Python 3.6.8 / SQLite 3.7.17 и runtime DDL gate.
+Только временные fixtures; merge, push, deploy не выполнялись.
+
+2026-09-26: `docs/architecture/tasks-core-review-fixes-b1.md` — `current` для
+`codex/tasks-core-stage-b1` от `c5c1762`: строгий schema contract, сохранение
+HTTPException status, bounded JSON body на Werkzeug 2.0.3 и UTF-8 validation.
+24 новых regression tests; 158 обязательных тестов прошли на Linux / Python 3.6.8 /
+SQLite 3.7.17. Результаты: `docs/validation/tasks-core-b1-runtime.json`,
+`docs/validation/tasks-core-b1-ddl.json`. Schema v2 и бизнес-функции не менялись.
+`docs/technical-debt/tasks-query-performance.md` — `deferred`, TD-TASKS-001:
+оптимизация SQL/индексов отложена до измерений перед performance acceptance.
+Auth sessions не переделаны, legacy не переносится; push, merge, deploy запрещены.
+
+2026-09-26: `docs/architecture/tasks-projects-stage-c.md` — `current` для
+`codex/tasks-projects-stage-c` от принятого B.2 `beb68e8`: schema v3 Projects,
+members, visibility, scopes/views, archive, counters и персональный dashboard.
+Уточняет контракты Stage B для этой ветки; flag OFF, без UI и legacy migration.
+`docs/validation/tasks-projects-c-runtime.json` и `tasks-projects-c-ddl.json`:
+208 успешных tests на Linux / Python 3.6.8 / SQLite 3.7.17 / Flask 2.0.3 /
+Werkzeug 2.0.3, DDL gate, SHA31 sources и query plans. Только synthetic fixtures,
+без сети, от UID99. TD-TASKS-001 остаётся отложенным; production не переключён.
+
+2026-09-27: `docs/architecture/tasks-roadmap-d-f.md` — `planned`: автоматический
+цикл D/E/F с независимым review, согласованный через ветку «Задачи по ERP» по
+прямому поручению владельца. Не является evidence завершения будущих этапов.
+`docs/architecture/tasks-microtasks-stage-d.md` — `current` Stage D, final review PASS: schema v4,
+точные UTC microtasks24h, recipient Inbox и отдельный notification claim.
+`docs/validation/tasks-microtasks-d-runtime.json` и `tasks-microtasks-d-ddl.json`:
+248/248 PASS на Linux/Python3.6.8/SQLite3.7.17/Flask2.0.3/Werkzeug2.0.3,
+35 source hashes, DDL gate, synthetic fixtures UID99 без сети. Flag OFF.
+
+2026-09-27: `docs/architecture/tasks-ui-stage-e.md` — `current`, final review PASS.
+Отдельный UI entry `/app/tasks-module`, main/micro/Inbox/Projects/board/archive;
+legacy не переключён. Три MEDIUM JS races/read dependency исправлены с 4 regression
+checks; ещё 15 adapter checks PASS. `docs/validation/tasks-ui-e-runtime.json` и
+`tasks-ui-e-ddl.json`: 257/257 PASS на exact production runtime, 38 source hashes,
+DDL gate PASS. Feature OFF, без push/merge/deploy. LOW polish относится к Stage F.
+
+2026-09-27: `docs/architecture/tasks-final-stage-f.md` — `current`, final/delta review
+PASS, итог A–F PASS. 261/261 exact-runtime PASS, 22 JS checks PASS, browser
+workflows/fault injection/themes/responsive, 32000-task synthetic benchmark.
+`docs/validation/tasks-final-f-runtime.json`, `tasks-final-f-ddl.json`,
+`tasks-final-f-performance.json` — воспроизводимые результаты; TD-TASKS-001 измерен.
+Нет schema/business changes, legacy migration, push/merge/deploy/enable.
+
+2026-09-27: `docs/operations/tasks-release-readiness.md` — `current`: локальная
+подготовка exact-tree deploy classification и optional Tasks backup/recovery,
+без изменения функциональности A–F. `docs/validation/tasks-release-runtime.json`:
+368/368 exact-runtime PASS (Python 3.6.8, SQLite 3.7.17, Git 1.8.3.1), 0 skips,
+0 обращений за пределы fixtures. Финальный manifest/diff review — перед commit;
+production rehearsal/R3/merge/deploy/ON этим документом не разрешаются.

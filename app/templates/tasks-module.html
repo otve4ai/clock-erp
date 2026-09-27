@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    {% include "_favicon.html" %}
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Задачи — TTT ERP</title>
+    <link rel="stylesheet" href="{{ static_asset_url('css/themes.css') }}">
+    <link rel="stylesheet" href="{{ static_asset_url('css/erp-components.css') }}">
+    <link rel="stylesheet" href="{{ static_asset_url('css/tasks-module.css') }}">
+</head>
+<body class="tasks-module-page">
+<div class="app">{% include "_sidebar.html" %}
+<main id="main-content" class="tm-main" tabindex="-1">
+    <header class="erp-workspace-header tm-header">
+        <div class="erp-workspace-heading"><h1 id="tm-title">Задачи</h1><p id="tm-subtitle">Мои задачи, микрозадачи, проекты и работа команды</p></div>
+        <div class="tm-header-actions"><label class="tm-search"><span aria-hidden="true">⌕</span><input id="tm-search" type="search" placeholder="Поиск по задачам…" aria-label="Поиск по задачам"></label><button class="tm-primary" id="tm-create">＋ Новая задача</button></div>
+    </header>
+    <section class="tm-metrics" id="tm-metrics" aria-label="Мои показатели">
+        {% for key,label,icon in [('inbox','Входящие','✓'),('in_progress','В работе','▷'),('delegated_waiting','Ожидаю','◷'),('overdue','Просрочено','!'),('today','Сегодня','▦')] %}
+        <button class="tm-metric tm-metric-{{ key }}" data-metric="{{ key }}"><span class="tm-metric-icon" aria-hidden="true">{{ icon }}</span><span><strong data-count="{{ key }}">—</strong><small>{{ label }}</small></span><span class="tm-chevron" aria-hidden="true">›</span></button>
+        {% endfor %}
+    </section>
+    <section class="tm-micro" id="tm-micro" aria-labelledby="tm-micro-heading">
+        <div class="tm-micro-heading"><h2 id="tm-micro-heading"><span class="tm-lightning" aria-hidden="true">ϟ</span> Микрозадачи · 24 часа <span id="tm-micro-count" class="tm-number">—</span></h2>
+            <div id="tm-micro-scopes" class="tm-micro-scopes"><button data-micro-scope="my">Мои <b data-micro-count="my_active">—</b></button><button data-micro-scope="created">Поставленные мной <b data-micro-count="created_active">—</b></button><button data-micro-scope="team">Команда <b data-micro-count="team_active">—</b></button></div>
+            <span id="tm-micro-brief" class="tm-muted" hidden></span><button id="tm-micro-add" class="tm-link" hidden>＋ Добавить</button><a class="tm-link tm-micro-all" href="?view=micro" data-view="micro">Все микрозадачи →</a><button id="tm-micro-toggle" class="tm-icon-button" aria-expanded="true" aria-controls="tm-micro-body" aria-label="Свернуть микрозадачи">⌃</button>
+        </div>
+        <div id="tm-micro-body">
+            <form id="tm-micro-form" class="tm-quick"><input name="title" required maxlength="500" placeholder="Быстро добавить микрозадачу…" aria-label="Название микрозадачи"><select name="assigned_to" aria-label="Исполнитель микрозадачи"></select><button type="submit" class="tm-micro-submit" aria-label="Добавить микрозадачу">＋</button></form>
+            <div id="tm-micro-error" role="alert" class="tm-error" hidden></div>
+            <div id="tm-micro-list" aria-live="polite"><p class="tm-loading">Загружаем микрозадачи…</p></div>
+        </div>
+    </section>
+    <nav class="tm-nav" aria-label="Разделы задач">
+        {% for value,label in [('main','Задачи'),('inbox','Входящие'),('today','Сегодня'),('micro','Микрозадачи'),('delegated_waiting','Ожидаю'),('projects','Проекты'),('archive','Архив')] %}
+        <a href="?view={{ value }}" data-view="{{ value }}">{{ label }}{% if value=='inbox' %}<span id="tm-inbox-nav-count" hidden></span>{% endif %}</a>
+        {% endfor %}
+    </nav>
+    <div id="tm-notice" class="tm-notice" role="status" hidden></div>
+    <div id="tm-error" class="tm-error" role="alert" hidden><span></span><button id="tm-retry">Повторить</button></div>
+    <div class="tm-content-layout" id="tm-content-layout">
+        <section class="tm-workspace" aria-label="Рабочая область задач">
+            <div class="tm-toolbar" id="tm-toolbar">
+                <div class="tm-scopes" id="tm-scopes" role="group" aria-label="Область задач">
+                    {% for key,label in [('my','Мои'),('created','Поставленные мной'),('team','Команда'),('all','Все')] %}<button data-scope="{{ key }}">{{ label }}</button>{% endfor %}
+                </div>
+                <button id="tm-filters-toggle" aria-expanded="false" aria-controls="tm-filters">☷ Фильтры</button>
+            </div>
+            <form class="tm-filters" id="tm-filters" hidden>
+                <label data-filter="project"><span>Проект</span><select name="project_id"><option value="">Все проекты</option><option value="none">Без проекта</option></select></label>
+                <label><span>Исполнитель</span><select name="assigned_to"><option value="">Все исполнители</option></select></label>
+                <label><span>Поставил</span><select name="created_by"><option value="">Все постановщики</option></select></label>
+                <label data-filter="status"><span>Статус</span><select name="status"><option value="">Активные</option><option value="new">Новая</option><option value="in_progress">В работе</option><option value="waiting">Ожидает ответа</option><option value="done">Готово</option></select></label>
+                <label data-filter="priority"><span>Приоритет</span><select name="priority"><option value="">Любой</option><option value="low">Низкий</option><option value="normal">Обычный</option><option value="high">Высокий</option></select></label>
+                <label data-filter="overdue" hidden><span>Срок</span><select name="overdue"><option value="">Любой</option><option value="true">Просроченные</option><option value="false">Без просрочки</option></select></label>
+                <label data-filter="period" hidden><span>Период с</span><input name="date_from" type="date"></label><label data-filter="period" hidden><span>По</span><input name="date_to" type="date"></label>
+                <button type="submit">Применить</button><button type="button" id="tm-reset-filters" class="tm-link">Сбросить</button>
+            </form>
+            <div id="tm-periods" class="tm-periods" hidden><span>Период:</span><button data-period="30">30 дней</button><button data-period="90">3 месяца</button><button data-period="365">Год</button><button data-period="all">Всё время</button></div>
+            <div id="tm-project-controls" class="tm-project-controls" hidden><div role="group" aria-label="Вид проекта"><button data-project-mode="list">Список</button><button data-project-mode="board">Доска</button></div><span id="tm-project-archive-label" class="tm-muted"></span><button id="tm-project-settings">Настройки проекта</button></div>
+            <div id="tm-project-list-controls" class="tm-project-controls" hidden><label><input id="tm-projects-archived" type="checkbox"> Архивные проекты</label><button id="tm-new-project" class="tm-primary">＋ Новый проект</button></div>
+            <div class="tm-list-heading"><h2 id="tm-list-title">Задачи, порученные мне</h2><span id="tm-list-total" class="tm-muted"></span><span id="tm-sort-label" class="tm-muted">Сначала по сроку</span></div>
+            <div id="tm-list" class="tm-list" aria-live="polite" aria-busy="true"><p class="tm-loading">Загружаем задачи…</p></div>
+            <nav id="tm-pagination" class="tm-pagination" aria-label="Страницы списка" hidden><button id="tm-prev">← Назад</button><span id="tm-page"></span><button id="tm-next">Далее →</button></nav>
+        </section>
+        <aside class="tm-right" id="tm-right" aria-label="Краткий обзор">
+            <section class="tm-panel"><header><h2>Активные проекты</h2><a href="?view=projects" data-view="projects">Все проекты →</a></header><div id="tm-project-preview"></div></section>
+            <section class="tm-panel"><header><h2>Исполнители</h2><span class="tm-muted">Задачи команды</span></header><div id="tm-people"></div></section>
+            <section class="tm-panel tm-overview"><span class="tm-metric-icon" aria-hidden="true">▥</span><div><h2>Быстрый обзор</h2><p id="tm-overview-text" class="tm-muted">Ваши задачи на сегодня</p></div></section>
+        </aside>
+    </div>
+    <noscript>Для работы с новым модулем задач включите JavaScript. Остальные разделы ERP доступны через меню.</noscript>
+</main></div>
+<div id="tm-backdrop" class="tm-backdrop" hidden></div>
+<section id="tm-dialog" class="tm-dialog" role="dialog" aria-modal="true" aria-labelledby="tm-dialog-title" tabindex="-1" hidden>
+    <header><div><small id="tm-dialog-kicker" class="tm-muted">Задача</small><h2 id="tm-dialog-title">Новая задача</h2></div><button type="button" id="tm-dialog-close" class="tm-icon-button" aria-label="Закрыть карточку">×</button></header>
+    <div id="tm-dialog-body"></div><div id="tm-dialog-error" role="alert" class="tm-error" hidden></div>
+</section>
+<script>window.TASKS_MODULE_BOOTSTRAP = {userId: {{ tasks_user_id|tojson }}, csrf: {{ tasks_csrf|tojson }}};</script>
+<script src="{{ static_asset_url('js/tasks-module-api.js') }}" defer></script>
+<script src="{{ static_asset_url('js/tasks-module.js') }}" defer></script>
+<script src="{{ static_asset_url('js/tasks-module-dialogs.js') }}" defer></script>
+</body>
+</html>

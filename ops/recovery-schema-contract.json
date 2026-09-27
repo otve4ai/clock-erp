@@ -1,7 +1,10 @@
 {
   "contract_version": 2,
   "databases": {
-    "auth.db": ["users", "auth_sessions"],
+    "auth.db": [
+      "users",
+      "auth_sessions"
+    ],
     "catalog.db": [
       "catalog_excel_products",
       "catalog_stock_movements",
@@ -12,20 +15,33 @@
       "erp_warehouse_stocks",
       "erp_warehouses"
     ],
-    "customers.db": ["customers", "registry_meta"],
-    "mail.db": ["mail_messages", "mail_threads", "mail_links"],
+    "customers.db": [
+      "customers",
+      "registry_meta"
+    ],
+    "mail.db": [
+      "mail_messages",
+      "mail_threads",
+      "mail_links"
+    ],
     "orders.db": [
       "orders_snapshot",
       "orders_snapshot_meta"
     ],
-    "purchases.db": ["purchase_requests", "supplier_orders"],
+    "purchases.db": [
+      "purchase_requests",
+      "supplier_orders"
+    ],
     "services.db": [
       "services",
       "service_accounts",
       "service_categories",
       "service_permissions"
     ],
-    "sms.db": ["sms_messages", "sms_meta"],
+    "sms.db": [
+      "sms_messages",
+      "sms_meta"
+    ],
     "tasks.db": [
       "tasks",
       "task_history",
@@ -35,11 +51,47 @@
       "inbox_events"
     ]
   },
+  "optional_databases": {
+    "tasks-module.db": [
+      "tasks_module_migrations",
+      "tasks",
+      "task_activity",
+      "task_projects",
+      "task_project_members",
+      "task_project_activity",
+      "task_inbox_events"
+    ]
+  },
   "metadata": {
     "orders.db": {
       "orders_snapshot_meta": {
         "deleted_orders_v1": "Local order deletion tombstones preserved across source synchronization"
       }
+    }
+  },
+  "optional_database_contracts": {
+    "tasks-module.db": {
+      "format": 1,
+      "schema_fingerprint": "145d21207720c48d263a0f2f907e90b3849c45e2ccb684cea605838b895d38bf",
+      "user_version": 0,
+      "migration_ledger": [
+        [
+          1,
+          "tasks-module-foundation-v1"
+        ],
+        [
+          2,
+          "tasks-module-core-v2"
+        ],
+        [
+          3,
+          "tasks-module-projects-v3"
+        ],
+        [
+          4,
+          "tasks-module-microtasks-v4"
+        ]
+      ]
     }
   }
 }

@@ -8,6 +8,18 @@
   },
   "runtime_containers": [
     {
+      "id": "READONLY-OPTIONAL-RECOVERY-CONTRACT",
+      "file": "app/services/recovery_v2.py",
+      "node_type": "function",
+      "symbol": "_validate_optional_connection",
+      "sha256": "045f9a0448bede868a09bcd8e03fe9828c424e18cd011c8ac45200acd391577f",
+      "owner": "recovery-platform",
+      "planned_pr": "keep",
+      "category": "read-only-inspection",
+      "risk": "read-only",
+      "production_reachable": "Backup/recovery inspection on mode=ro connections; PRAGMA user_version reads only, no assignment or DDL"
+    },
+    {
       "id": "DDL-LEDGER-RUNNER",
       "file": "app/schema_migrations.py",
       "node_type": "assignment",
@@ -21,6 +33,16 @@
     }
   ],
   "migration_modules": [
+    {
+      "file": "app/tasks/migrations.py",
+      "sha256": "20997bf18046d5b5ece43c6a5fc87808fa31392f618939dc040bdd89fdafdad4",
+      "owner": "tasks-module-offline"
+    },
+    {
+      "file": "app/tasks/schema.py",
+      "sha256": "e4c0b2785771ef91945032a00a7da54d405a9fbef9e3ea9829a4a656fbd9029b",
+      "owner": "tasks-module-passive-schema-contract"
+    },
     {
       "file": "app/purchases_migrations.py",
       "sha256": "c88fe195d4c786b8ef30c3f171f9c36dcd6579bb164e2ad9c70ea56d8d3e0897",
@@ -48,7 +70,7 @@
     },
     {
       "file": "app/schema_migrations.py",
-      "sha256": "6f16c9b1f753fb04d49bc20c4ab6b80d8f7896438f7a6d2b31be28aef5124a7d",
+      "sha256": "63f928a2dcf15cc7f7fcab326376ec95e866195d67b8dbee193cd51df7a83e34",
       "owner": "migration-platform"
     },
     {

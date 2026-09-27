@@ -1,0 +1,1193 @@
+{
+  "runtime": {
+    "python": "3.6.8",
+    "sqlite": "3.7.17",
+    "platform": "Linux-3.10.0-1160.25.1.el7.x86_64-x86_64-with-centos-7.9.2009-Core"
+  },
+  "dataset": {
+    "normal_tasks": 30000,
+    "microtasks": 2000,
+    "projects": 500,
+    "users": 100,
+    "activity_hot_task": 10000,
+    "inbox_events": 2000
+  },
+  "timings": {
+    "activity_deep": {
+      "median_ms": 24.638,
+      "max_ms": 28.062,
+      "samples": 7
+    },
+    "admin_all": {
+      "median_ms": 107.583,
+      "max_ms": 109.674,
+      "samples": 7
+    },
+    "admin_deep_15000": {
+      "median_ms": 162.166,
+      "max_ms": 174.052,
+      "samples": 7
+    },
+    "all_offset_0": {
+      "median_ms": 105.315,
+      "max_ms": 110.81,
+      "samples": 7
+    },
+    "all_offset_150": {
+      "median_ms": 103.347,
+      "max_ms": 104.228,
+      "samples": 7
+    },
+    "archive": {
+      "median_ms": 53.541,
+      "max_ms": 54.629,
+      "samples": 7
+    },
+    "created_offset_0": {
+      "median_ms": 101.107,
+      "max_ms": 103.176,
+      "samples": 7
+    },
+    "created_offset_150": {
+      "median_ms": 99.735,
+      "max_ms": 126.683,
+      "samples": 7
+    },
+    "inbox": {
+      "median_ms": 2.273,
+      "max_ms": 2.393,
+      "samples": 7
+    },
+    "micro_list": {
+      "median_ms": 5.658,
+      "max_ms": 5.958,
+      "samples": 7
+    },
+    "micro_summary": {
+      "median_ms": 7.358,
+      "max_ms": 7.868,
+      "samples": 7
+    },
+    "my_offset_0": {
+      "median_ms": 101.571,
+      "max_ms": 104.243,
+      "samples": 7
+    },
+    "my_offset_150": {
+      "median_ms": 99.525,
+      "max_ms": 100.444,
+      "samples": 7
+    },
+    "overdue": {
+      "median_ms": 81.261,
+      "max_ms": 87.504,
+      "samples": 7
+    },
+    "overdue_boolean": {
+      "median_ms": 101.846,
+      "max_ms": 102.941,
+      "samples": 7
+    },
+    "projects_admin_100": {
+      "median_ms": 12.105,
+      "max_ms": 12.823,
+      "samples": 7
+    },
+    "projects_page_counters": {
+      "median_ms": 5.36,
+      "max_ms": 5.476,
+      "samples": 7
+    },
+    "search": {
+      "median_ms": 106.195,
+      "max_ms": 107.711,
+      "samples": 7
+    },
+    "summary": {
+      "median_ms": 101.05,
+      "max_ms": 101.967,
+      "samples": 7
+    },
+    "team_offset_0": {
+      "median_ms": 105.332,
+      "max_ms": 110.502,
+      "samples": 7
+    },
+    "team_offset_150": {
+      "median_ms": 103.93,
+      "max_ms": 112.385,
+      "samples": 7
+    },
+    "today": {
+      "median_ms": 99.942,
+      "max_ms": 112.691,
+      "samples": 7
+    }
+  },
+  "query_plans": [
+    {
+      "sql": "SELECT * FROM task_activity WHERE task_id=? ORDER BY id LIMIT ? OFFSET ?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE task_activity USING INDEX task_activity_task_version (task_id=?) (~10 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM task_inbox_events WHERE recipient_id=? AND handled_at IS NULL ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE task_inbox_events USING INDEX task_inbox_recipient_pending (recipient_id=? AND handled_at=?) (~9 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM tasks WHERE id=? AND 1=1",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM tasks WHERE task_type='micro' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND assigned_to=? AND status=? ORDER BY micro_deadline_at,id LIMIT ? OFFSET ?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND (tasks_casefold(title) LIKE ? ESCAPE '\\' OR tasks_casefold(description) LIKE ? ESCAPE '\\') AND status!='done' ORDER BY deadline_date IS NULL,deadline_date,id LIMIT ? OFFSET ?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND COALESCE((deadline_date < ? AND status != 'done'),0)=1 AND status!='done' ORDER BY deadline_date IS NULL,deadline_date,id LIMIT ? OFFSET ?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND assigned_to=? AND status!='done' ORDER BY deadline_date IS NULL,deadline_date,id LIMIT ? OFFSET ?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND created_by=? AND status!='done' ORDER BY deadline_date IS NULL,deadline_date,id LIMIT ? OFFSET ?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND deadline_date < ? AND status!='done' AND status!='done' ORDER BY deadline_date IS NULL,deadline_date,id LIMIT ? OFFSET ?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_active_deadline (deleted_at=? AND deadline_date<?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND deadline_date = ? AND status!='done' AND status!='done' ORDER BY deadline_date IS NULL,deadline_date,id LIMIT ? OFFSET ?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND status!='done' ORDER BY deadline_date IS NULL,deadline_date,id LIMIT ? OFFSET ?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND status='done' ORDER BY completed_at DESC,id DESC LIMIT ? OFFSET ?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_completed (deleted_at=? AND status=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND 1=1 AND status!='done' ORDER BY deadline_date IS NULL,deadline_date,id LIMIT ? OFFSET ?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~4 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) AS total,COALESCE(SUM(status='new'),0) AS new,COALESCE(SUM(status='in_progress'),0) AS in_progress,COALESCE(SUM(status='waiting'),0) AS waiting,COALESCE(SUM(status='done'),0) AS done,COALESCE(SUM(deadline_date < ? AND status!='done'),0) AS overdue,COALESCE(SUM(deadline_date = ? AND status!='done'),0) AS today,COALESCE(SUM(created_by=? AND assigned_to!=? AND status!='done'),0) AS delegated_waiting FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND assigned_to=?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM task_inbox_events WHERE recipient_id=? AND handled_at IS NULL",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE task_inbox_events USING COVERING INDEX task_inbox_recipient_pending (recipient_id=? AND handled_at=?) (~9 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM task_projects WHERE (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)) AND archived_at IS NULL",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SCAN TABLE task_projects USING COVERING INDEX task_projects_owner_active (~50000 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM task_projects WHERE 1=1 AND archived_at IS NULL",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SCAN TABLE task_projects USING COVERING INDEX task_projects_owner_active (~100000 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM tasks WHERE task_type='micro' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND assigned_to=? AND status=?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND (tasks_casefold(title) LIKE ? ESCAPE '\\' OR tasks_casefold(description) LIKE ? ESCAPE '\\') AND status!='done'",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND COALESCE((deadline_date < ? AND status != 'done'),0)=1 AND status!='done'",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND assigned_to=? AND status!='done'",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND created_by=? AND created_by=? AND assigned_to!=? AND status!='done'",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND created_by=? AND status!='done'",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND deadline_date < ? AND status!='done' AND status!='done'",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_active_deadline (deleted_at=? AND deadline_date<?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND deadline_date = ? AND status!='done' AND status!='done'",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND status!='done'",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND status='done'",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*) FROM tasks WHERE task_type='normal' AND deleted_at IS NULL AND 1=1 AND status!='done'",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~4 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*),COALESCE(SUM(micro_deadline_at < ?),0),MIN(CASE WHEN micro_deadline_at >= ? THEN micro_deadline_at END) FROM tasks WHERE task_type='micro' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND assigned_to=? AND status=?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*),COALESCE(SUM(micro_deadline_at < ?),0),MIN(CASE WHEN micro_deadline_at >= ? THEN micro_deadline_at END) FROM tasks WHERE task_type='micro' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND created_by=? AND status=?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT COUNT(*),COALESCE(SUM(micro_deadline_at < ?),0),MIN(CASE WHEN micro_deadline_at >= ? THEN micro_deadline_at END) FROM tasks WHERE task_type='micro' AND deleted_at IS NULL AND (tasks.created_by=? OR tasks.assigned_to=? OR EXISTS (SELECT 1 FROM task_projects WHERE task_projects.id=tasks.project_id AND (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)))) AND status=?",
+      "plan": [
+        [
+          0,
+          0,
+          0,
+          "SEARCH TABLE tasks USING INDEX tasks_micro_deadline (task_type=? AND deleted_at=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 1"
+        ],
+        [
+          1,
+          0,
+          0,
+          "SEARCH TABLE task_projects USING INTEGER PRIMARY KEY (rowid=?) (~1 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT selected.*,COUNT(CASE WHEN t.status!='done' THEN 1 END) AS open,COUNT(CASE WHEN t.status='in_progress' THEN 1 END) AS in_progress,COUNT(CASE WHEN t.status!='done' AND t.deadline_date < ? THEN 1 END) AS overdue FROM (SELECT * FROM task_projects WHERE (task_projects.owner_id=? OR EXISTS (SELECT 1 FROM task_project_members pm WHERE pm.project_id=task_projects.id AND pm.user_id=?)) AND archived_at IS NULL ORDER BY id LIMIT ? OFFSET ?) selected LEFT JOIN tasks t ON t.project_id=selected.id AND t.deleted_at IS NULL GROUP BY selected.id ORDER BY selected.id",
+      "plan": [
+        [
+          1,
+          0,
+          0,
+          "SCAN TABLE task_projects USING INTEGER PRIMARY KEY (~50000 rows)"
+        ],
+        [
+          1,
+          0,
+          0,
+          "EXECUTE CORRELATED SCALAR SUBQUERY 2"
+        ],
+        [
+          2,
+          0,
+          0,
+          "SEARCH TABLE task_project_members AS pm USING COVERING INDEX sqlite_autoindex_task_project_members_1 (project_id=? AND user_id=?) (~1 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "SCAN SUBQUERY 1 AS selected (~50000 rows)"
+        ],
+        [
+          0,
+          1,
+          1,
+          "SEARCH TABLE tasks AS t USING COVERING INDEX tasks_project_active (project_id=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "USE TEMP B-TREE FOR GROUP BY"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT selected.*,COUNT(CASE WHEN t.status!='done' THEN 1 END) AS open,COUNT(CASE WHEN t.status='in_progress' THEN 1 END) AS in_progress,COUNT(CASE WHEN t.status!='done' AND t.deadline_date < ? THEN 1 END) AS overdue FROM (SELECT * FROM task_projects WHERE 1=1 AND archived_at IS NULL ORDER BY id LIMIT ? OFFSET ?) selected LEFT JOIN tasks t ON t.project_id=selected.id AND t.deleted_at IS NULL GROUP BY selected.id ORDER BY selected.id",
+      "plan": [
+        [
+          1,
+          0,
+          0,
+          "SCAN TABLE task_projects USING INTEGER PRIMARY KEY (~100000 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "SCAN SUBQUERY 1 AS selected (~100000 rows)"
+        ],
+        [
+          0,
+          1,
+          1,
+          "SEARCH TABLE tasks AS t USING COVERING INDEX tasks_project_active (project_id=?) (~2 rows)"
+        ],
+        [
+          0,
+          0,
+          0,
+          "USE TEMP B-TREE FOR GROUP BY"
+        ]
+      ]
+    }
+  ],
+  "concurrent_reader": {
+    "ok": 5,
+    "busy": 0,
+    "max_ms": 181.48,
+    "unexpected_errors": []
+  },
+  "concurrent_writes": {
+    "count": 20,
+    "median_ms": 4.652,
+    "max_ms": 114.859
+  },
+  "source_sha256": {
+    "app/tasks/__init__.py": "df5a806fc22c3ed18b653c449ab528f459cff6a8341ff60d73a090c7872c963c",
+    "app/tasks/domain.py": "681b3a2e32e93c3cfe7ca8d78e13bd33f72d70e898f777eda7ba280006c5e233",
+    "app/tasks/error_boundary.py": "2268a63fd49c4cd05ff8ef3223f1e672c060f026d965ba5c5a7dd1d89e8b0bf3",
+    "app/tasks/inbox_repository.py": "c494116ea17ab65830d5c0b3cace00f5abec438dc1849e22186d5138a1382676",
+    "app/tasks/inbox_services.py": "92f6ce7b5cd567fc0e8daaabff1eccf976f337abf0185ae4c975049e65a2e582",
+    "app/tasks/micro_repository.py": "6cbd346351ab2e4ceb8c6b3876a7874ca442b2bebc9fbaebe2a195bfdfa51ae6",
+    "app/tasks/migrations.py": "20997bf18046d5b5ece43c6a5fc87808fa31392f618939dc040bdd89fdafdad4",
+    "app/tasks/permissions.py": "06142ae7fb16be86f01b4fe93ce029c755b48e59ddeab475dc8266430bb9f749",
+    "app/tasks/presentation.py": "df02dbdb1f7a8948b327b5d26a5c52663635ebe560c573a175699d7d74300c5e",
+    "app/tasks/project_repository.py": "f7e981be011b94c6e385f56574b9d248bd6135ec3b28941045d21a74a131b232",
+    "app/tasks/project_services.py": "a9506b5f76ced359d74cc98db8736cb72db93fb04f22bde337e04338dd4ff064",
+    "app/tasks/repository.py": "49ade0c6a484c867d7462ad1e8acdd884a8419d80f319f81f59885e2ab595999",
+    "app/tasks/routes.py": "15474c1162322c73216035ea1ca70cf843593b0d8e967b299241cc4e82c88990",
+    "app/tasks/schema.py": "e4c0b2785771ef91945032a00a7da54d405a9fbef9e3ea9829a4a656fbd9029b",
+    "app/tasks/services.py": "94966bdccd6459cbf6216387a8a7115d0de0618f18f0635dc0931333c87fa673",
+    "app/tasks/ui_routes.py": "37dedc0340be755b9631db07a73ef061ef84d8f95e6e551f96295667f156f10c"
+  }
+}

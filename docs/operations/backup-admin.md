@@ -45,6 +45,15 @@ SQLite schema digest и обязательным таблицам. В UI дос�
 Откат кода и полный restore также блокируются, если `requirements.txt` выбранной
 версии отличается от декларации зависимостей текущего immutable release.
 
+Новая `tasks-module.db` — единственная optional DB в contract: отсутствие допустимо,
+присутствие требует точного schema fingerprint/ledger выбранного release,
+`integrity_check` и `foreign_key_check`. Recovery не импортирует текущий Tasks
+validator и не запускает миграции. Backup может восстановить утраченную optional
+DB, но не может молча удалить существующую. После смены contract старые backups
+не допускаются для data_restore новым кодом; нужен новый verified backup при OFF.
+Условия первого выпуска и full_restore описаны в
+[Tasks release readiness](tasks-release-readiness.md).
+
 Выбранный архив безопасно распаковывается в закрытый staging с
 запретом traversal, ссылок и special files. После сверки manifests включается
 maintenance marker, останавливаются web service и фоновые writer timers, затем

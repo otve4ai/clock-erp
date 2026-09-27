@@ -179,6 +179,10 @@ jobs:
         if: needs.changes.outputs.css_only != 'true'
         run: pnpm run test
 
+      - name: Optional sidebar badge isolation
+        if: needs.changes.outputs.css_only != 'true'
+        run: node --test ../tests/sidebar_badges.test.cjs
+
       - name: Production build
         run: pnpm run build
 

@@ -282,7 +282,8 @@ class TaskStoreTest(unittest.TestCase):
         original = sqlite3.connect
         def traced(*args, **kwargs):
             connection = original(*args, **kwargs)
-            connection.set_trace_callback(statements.append)
+            # Python 3.6 sqlite3 requires a hashable callback; list.append is not.
+            connection.set_trace_callback(lambda statement: statements.append(statement))
             return connection
         try:
             sqlite3.connect = traced
