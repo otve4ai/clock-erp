@@ -112,7 +112,7 @@
         const counts = data.inbox_counts || {normal: data.inbox, micro: 0};
         $$('[data-tasks-module-badge],#tm-inbox-nav-count,[data-count="inbox"]').forEach(item => {
             const micro = item.dataset.tasksModuleBadge === 'micro'; const count = micro ? counts.micro : counts.normal;
-            item.textContent = micro ? `⚡${count}` : String(count); item.hidden = !count;
+            item.textContent = micro ? `⚡${count}` : String(count); item.hidden = item.dataset.count !== 'inbox' && !count;
             item.setAttribute('aria-label', `${micro ? 'Невыполненные микрозадачи' : 'Обычные входящие'}: ${count}`);
         });
         $('#tm-overview-text').textContent = `${data.today} на сегодня · ${data.overdue} просрочено · ${data.delegated_waiting} ожидаю`;
