@@ -24,6 +24,15 @@ test('recovery diagnostics separate remarks while retaining pending, API and ful
     await new Promise(setImmediate);
     assert.match(field('[data-wb-health]').textContent, /^Синхронизирован/);
     assert.equal(field('[data-wb-diagnostic]').classList.warning, false);
+    diagnostics = {...diagnostics, historical_status_missing: ['1000']};
+    await listeners['orders:wb-refresh']();
+    assert.match(field('[data-wb-health]').textContent, /^Синхронизирован/);
+    assert.equal(field('[data-wb-history-note]').hidden, false);
+    assert.match(field('[data-wb-history-note]').textContent, /1000/);
+    assert.match(field('[data-wb-history-note]').textContent, /оставлены прежними/);
+    diagnostics = {...diagnostics, historical_status_missing: []};
+    await listeners['orders:wb-refresh']();
+    assert.equal(field('[data-wb-history-note]').hidden, true);
     for (const issue of [{pending: [{error: 'API'}]}, {errors: [{error: 'API'}]},
         {full_outcome: 'error'}, {error_count: 1}, {last_success_at: 'invalid'},
         {last_success_at: new Date(Date.now() - 16 * 60000).toISOString()}]) {

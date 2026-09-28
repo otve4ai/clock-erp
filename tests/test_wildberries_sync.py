@@ -198,16 +198,32 @@ class WildberriesSyncTest(unittest.TestCase):
         self.client.statuses = {str(i): dict(id=i, supplierStatus='complete', wbStatus='sold')
                                 for i in range(1001, 1101)}
         first = self.sync('full')
-        self.assertEqual(first['outcome'], 'partial')
+        self.assertEqual(first['outcome'], 'success')
         self.assertEqual(first['recovery']['terminal_cursor'], '1099')
-        self.assertEqual(first['recovery']['errors'][0]['order_ids'], ['1000'])
+        self.assertEqual(first['recovery']['historical_status_missing'], ['1000'])
+        self.assertEqual(first['recovery']['full_errors'], [])
+        fast = self.sync()
+        self.assertEqual(fast['outcome'], 'success')
+        self.assertEqual(fast['recovery']['historical_status_missing'], ['1000'])
         self.client.polled = []
         self.assertEqual(self.sync('full')['outcome'], 'success')
         self.assertEqual(self.client.polled, ['1100'])
         self.client.polled = []
-        self.assertEqual(self.sync('full')['outcome'], 'partial')
+        self.assertEqual(self.sync('full')['outcome'], 'success')
         self.assertIn('1000', self.client.polled)
         self.assertEqual(self.store.get('wb:1000')['wb_status'], 'sold')
+        self.assertFalse(self.store.get('wb:1000').get('wb_status_checked_at'))
+
+    def test_missing_active_status_still_blocks_full_sync_with_terminal_missing(self):
+        self.store.upsert_wildberries([normalize_wildberries_order(dict(
+            id=1000, supplierStatus='complete', wbStatus='canceled_by_client'))])
+        self.client.statuses = {}
+        with mock.patch('app.services.wildberries_sync.WildberriesRecovery.reconcile',
+                        return_value={'recovered': 0, 'errors': []}):
+            result = self.sync('full')
+        self.assertEqual(result['outcome'], 'partial')
+        self.assertEqual(result['recovery']['historical_status_missing'], ['1000'])
+        self.assertEqual(result['recovery']['errors'][0]['order_ids'], ['101'])
 
     def test_transport_error_does_not_advance_history_cursor(self):
         self.client.rows = []

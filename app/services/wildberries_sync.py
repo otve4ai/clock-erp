@@ -132,6 +132,9 @@ def run_sync(client, store, catalog_path, mode='fast', locked=False):
         except WildberriesReadOnlyError as error:
             failures.append(failure_details(error, 'new_orders'))
         ids, cursor = status_ids(store, mode, previous.get('terminal_cursor', ''))
+        active_ids = set(status_ids(store, 'fast')[0]) if mode == 'full' else set(ids)
+        if mode == 'full':
+            info['historical_status_missing'] = []
         status_request_failed = False
         for offset in range(0, len(ids), 100):
             chunk = ids[offset:offset + 100]
@@ -148,6 +151,10 @@ def run_sync(client, store, catalog_path, mode='fast', locked=False):
                     result['statuses_updated'] += store.update_wildberries_statuses(retry_statuses)
                     statuses.update(retry_statuses)
                     missing = [value for value in missing if value not in statuses]
+                if missing:
+                    historical_missing = [value for value in missing if value not in active_ids]
+                    info.setdefault('historical_status_missing', []).extend(historical_missing)
+                    missing = [value for value in missing if value in active_ids]
                 if missing:
                     failures.append({'error': 'WB не вернул статусы {} заказов после повторной проверки'.format(len(missing)),
                                      'code': 'WB_MISSING_STATUSES', 'order_ids': missing,
@@ -171,8 +178,8 @@ def run_sync(client, store, catalog_path, mode='fast', locked=False):
             except (WildberriesReadOnlyError, ValueError) as error:
                 failures.append(failure_details(error, 'full_recovery'))
         # A valid but incomplete response must not pin the history cursor forever.
-        # Missing orders remain errors and will be retried on the next rotation;
-        # active orders are always selected, irrespective of this cursor.
+        # Missing historical statuses are reported separately, without changing
+        # saved statuses/freshness. Missing active orders remain errors.
         if not status_request_failed:
             info['terminal_cursor'] = cursor
         result['errors'] = max(result['errors'], len(failures))

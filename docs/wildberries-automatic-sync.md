@@ -9,9 +9,15 @@ failures can delay this). A valid response that omits some IDs does not block
 the history cursor: omitted historical orders are revisited on the next rotation.
 Active orders remain selected on every pass. The status stage retries omitted IDs
 once, within the existing request/time budget. Statuses already received are saved
-before that retry, so retry failures cannot discard them. Persistently omitted IDs
-remain explicit `WB_MISSING_STATUSES` errors with order IDs and a count; the run
-is partial, not successful. No missing status is inferred from an older snapshot.
+before that retry, so retry failures cannot discard them. Persistently omitted
+active IDs remain explicit `WB_MISSING_STATUSES` errors with IDs and a count;
+the run is partial, not successful. Omitted terminal IDs from the historical
+rotation are listed separately in `historical_status_missing` and in the WB
+diagnostics UI. They do not turn a healthy active-order sync into an actionable
+error. This note survives FAST passes and is replaced by the next FULL pass.
+Transport errors remain errors even for history. No missing status or fresh
+check timestamp is inferred from an older snapshot, and terminal orders are
+still polled on subsequent rotations without an age cutoff.
 Terminal wbStatus values: sold, canceled, canceled_by_client, declined_by_client,
 defect. Other/unknown statuses continue to be polled. Supplier complete/sorted
 are not terminal. Source: https://dev.wildberries.cn/docs/openapi/orders-fbs
