@@ -32,6 +32,9 @@ for (const route of routes) {
     });
     page.on('pageerror', (error) => browserErrors.push(error.message));
 
+    // Toasts can arrive after load. Scan their settled colors, not transient
+    // opacity during entry; the production CSS supports reduced motion.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(route, { waitUntil: 'load' });
     const results = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
