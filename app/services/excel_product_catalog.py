@@ -961,14 +961,18 @@ class ExcelProductCatalog:
             " WHERE " + " AND ".join(brand_facet_where)
         )
         select_sql = (
-            "SELECT p.*, c.name AS category_name, cp.barcode AS bitrix_barcode, "
+            "SELECT p.*, c.name AS category_name, "
+            "canonical_brand.name AS canonical_brand, "
+            "cp.barcode AS bitrix_barcode, "
             "b.source_filename, b.applied_at, b.row_count AS batch_row_count "
             "FROM catalog_excel_products p JOIN catalog_excel_batches b "
             "ON b.id = p.current_batch_id "
             "LEFT JOIN catalog_products cp "
             "ON cp.id = p.bitrix_catalog_product_id "
             "LEFT JOIN erp_categories c "
-            "ON c.id = p.category_id"
+            "ON c.id = p.category_id "
+            "LEFT JOIN erp_brands canonical_brand "
+            "ON canonical_brand.id = p.brand_id"
         )
         with self.database.connect() as connection:
             if query or model:
@@ -2159,7 +2163,11 @@ class ExcelProductCatalog:
     @staticmethod
     def _prepare_product(item):
         item["display_name"] = item.get("bitrix_name") or item.get("excel_name_raw")
-        item["display_brand"] = item.get("bitrix_brand") or item.get("excel_brand")
+        item["display_brand"] = (
+            item.get("canonical_brand")
+            or item.get("bitrix_brand")
+            or item.get("excel_brand")
+        )
         item["display_category"] = item.get("bitrix_category") or item.get("excel_category")
         item["candidates"] = _load_json(item.get("candidates_json"), [])
         item["gallery"] = _load_json(item.get("bitrix_gallery_json"), [])
