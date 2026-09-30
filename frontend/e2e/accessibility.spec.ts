@@ -32,6 +32,8 @@ for (const route of routes) {
     });
     page.on('pageerror', (error) => browserErrors.push(error.message));
 
+    // Audit the rendered colors, not a transient opacity during toast entry.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(route, { waitUntil: 'load' });
     const results = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
