@@ -1,12 +1,13 @@
 {% set sync = site_status_sync or {} %}
 {% set mismatches = sync.mismatch_count|default(0)|int %}
+{% set unknown_count = sync.unknown_statuses|default(0)|int %}
 <div
     class="product-site-sync-control"
     data-product-site-sync
     data-summary-url="{{ url_for('api_product_site_status_sync') }}"
     data-run-url="{{ url_for('api_product_site_status_sync') }}"
     data-csrf-token="{{ site_status_sync_csrf }}"
-    data-sync-state="{% if sync.outcome == 'running' %}running{% elif sync.outcome == 'error' %}error{% elif not sync.has_data %}unknown{% elif mismatches %}attention{% else %}success{% endif %}"
+    data-sync-state="{% if sync.outcome == 'running' %}running{% elif sync.outcome == 'error' %}error{% elif not sync.has_data %}unknown{% elif mismatches or unknown_count %}attention{% else %}success{% endif %}"
 >
     <button
         class="products-workspace-button product-site-sync-indicator"
@@ -26,6 +27,8 @@
                 Нет данных
             {% elif mismatches %}
                 Сверка сайта · {{ mismatches }} расхождений
+            {% elif unknown_count %}
+                Сверка сайта · {{ unknown_count }} неизвестных статусов
             {% else %}
                 Сверка сайта · Всё совпадает
             {% endif %}
@@ -66,7 +69,7 @@
             <span class="product-site-sync-source-dot" aria-hidden="true"></span>
             <strong>TicTacToy</strong>
             <span class="product-site-sync-source-state" data-site-sync-state>
-                {% if sync.outcome == 'running' %}Проверка выполняется{% elif sync.outcome == 'error' %}Ошибка сверки{% elif not sync.has_data %}Нет данных{% elif mismatches %}Требует внимания{% else %}Всё совпадает{% endif %}
+                {% if sync.outcome == 'running' %}Проверка выполняется{% elif sync.outcome == 'error' %}Ошибка сверки · Данные устарели{% elif not sync.has_data %}Нет данных{% elif mismatches or unknown_count %}Требует внимания{% else %}Всё совпадает{% endif %}
             </span>
             <time class="product-site-sync-source-time"{% if sync.last_attempt_at %} datetime="{{ sync.last_attempt_at }}"{% endif %} data-site-sync-attempt>{{ sync.last_attempt_at or 'Нет данных' }}</time>
             {% if can_sync_site_status %}

@@ -16,6 +16,19 @@
     var inactive = root.querySelector("[data-site-sync-inactive]");
     var active = root.querySelector("[data-site-sync-active]");
     var running = false;
+    var lastSuccess = success ? success.getAttribute("datetime") : null;
+
+    async function updateSummary(summary) {
+        applySummary(summary);
+        if (summary.outcome === "success" && summary.last_success_at
+                && summary.last_success_at !== lastSuccess
+                && typeof window.loadWarehouseResultsUrl === "function") {
+            var refreshed = await window.loadWarehouseResultsUrl(
+                new URL(window.location.href), {history: "none"}
+            );
+            if (refreshed) lastSuccess = summary.last_success_at;
+        }
+    }
 
     function formatDate(value) {
         if (!value) {
@@ -50,12 +63,13 @@
         var inStockInactive = Number(summary.in_stock_inactive || 0);
         var outOfStockActive = Number(summary.out_of_stock_active || 0);
         var mismatchCount = inStockInactive + outOfStockActive;
+        var unknownCount = Number(summary.unknown_statuses || 0);
         var hasData = Boolean(summary.has_data || summary.last_success_at);
         var outcome = summary.outcome || "unknown";
         root.dataset.syncState = (
             outcome === "running" || outcome === "error" ? outcome
                 : !hasData ? "unknown"
-                    : mismatchCount > 0 ? "attention" : "success"
+                    : mismatchCount > 0 || unknownCount > 0 ? "attention" : "success"
         );
         inactive.textContent = String(inStockInactive);
         active.textContent = String(outOfStockActive);
@@ -66,12 +80,15 @@
             state.textContent = "Проверка выполняется";
         } else if (outcome === "error") {
             label.textContent = "Ошибка сверки";
-            state.textContent = "Ошибка сверки";
+            state.textContent = "Ошибка сверки · Данные устарели";
         } else if (!hasData) {
             label.textContent = "Нет данных";
             state.textContent = "Нет данных";
         } else if (mismatchCount > 0) {
             label.textContent = "Сверка сайта · " + mismatchCount + " расхождений";
+            state.textContent = "Требует внимания";
+        } else if (unknownCount > 0) {
+            label.textContent = "Сверка сайта · " + unknownCount + " неизвестных статусов";
             state.textContent = "Требует внимания";
         } else {
             label.textContent = "Сверка сайта · Всё совпадает";
@@ -119,7 +136,7 @@
         if (!response.ok) {
             throw new Error((payload && payload.message) || "Не удалось обновить данные");
         }
-        applySummary(payload.data || {});
+        await updateSummary(payload.data || {});
     }
 
     async function runSync() {
@@ -147,12 +164,12 @@
                 throw new Error((payload && payload.message) || "Ошибка сверки");
             }
             running = false;
-            applySummary(payload.data || {});
+            await updateSummary(payload.data || {});
         } catch (error) {
             running = false;
             root.dataset.syncState = "error";
             label.textContent = "Ошибка сверки";
-            state.textContent = "Ошибка сверки";
+            state.textContent = "Ошибка сверки · Данные устарели";
             feedback.textContent = error.message;
         } finally {
             root.querySelectorAll("[data-site-sync-run]").forEach(function (button) {

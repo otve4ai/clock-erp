@@ -125,6 +125,23 @@ class BitrixSiteStatusSync:
             "automatic_schedule": "03:00",
         })
         if run is not None:
+            # A killed worker releases the OS lock but cannot finish its run.
+            # Do not leave that attempt displayed as running indefinitely.
+            if (run["status"] == "running"
+                    and getattr(self.lock, "handle", None) is None
+                    and self.lock.acquire()):
+                try:
+                    with self.database.transaction() as connection:
+                        connection.execute(
+                            "UPDATE catalog_sync_runs SET status='failed', "
+                            "finished_at=?, errors_count=1, "
+                            "error_summary='InterruptedSync' "
+                            "WHERE mode=? AND status='running'",
+                            (utc_now(), RUN_MODE),
+                        )
+                    return self.summary()
+                finally:
+                    self.lock.release()
             try:
                 details = json.loads(run["details_json"] or "{}")
             except (TypeError, ValueError):
@@ -148,6 +165,7 @@ class BitrixSiteStatusSync:
             result["in_stock_inactive"] + result["out_of_stock_active"]
         )
         result["has_data"] = bool(result["last_success_at"])
+        result["stale"] = result["outcome"] == "error"
         return result
 
     def _create_run(self):
@@ -215,6 +233,7 @@ class BitrixSiteStatusSync:
             run_id = self._create_run()
             statuses = {}
             pages = received = unknown_source_statuses = 0
+            expected_total = 0
             page = 1
             while True:
                 payload = self.client.get_products_page(
@@ -223,7 +242,10 @@ class BitrixSiteStatusSync:
                     include_inactive=True,
                 )
                 pages += 1
+                expected_total = max(expected_total, int(payload.get("total") or 0))
                 products = payload.get("products") or []
+                if not products and payload.get("has_more"):
+                    raise ValueError("Incomplete Bitrix catalog page")
                 received += len(products)
                 for product in products:
                     product_id = str(
@@ -233,11 +255,15 @@ class BitrixSiteStatusSync:
                         continue
                     if not product.get("active_known", "active" in product):
                         unknown_source_statuses += 1
+                        statuses[product_id] = None
                         continue
                     statuses[product_id] = int(bool(product.get("active")))
                 if not payload.get("has_more") or not products:
                     break
                 page += 1
+
+            if received < expected_total:
+                raise ValueError("Incomplete Bitrix catalog response")
 
             updated = unchanged = missing_from_bitrix = 0
             with self.database.transaction() as connection:
@@ -250,8 +276,7 @@ class BitrixSiteStatusSync:
                     external_id = str(row["bitrix_external_product_id"]).strip()
                     if external_id not in statuses:
                         missing_from_bitrix += 1
-                        continue
-                    next_active = statuses[external_id]
+                    next_active = statuses.get(external_id)
                     if row["bitrix_active"] == next_active:
                         unchanged += 1
                         continue
