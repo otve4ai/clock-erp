@@ -5136,7 +5136,12 @@ def build_excel_warehouse_items(products):
             "article": product.get("excel_article") or "",
             "barcode": product.get("bitrix_barcode") or "",
             "moysklad_product_id": product.get("moysklad_product_id") or "",
-            "brand": product.get("excel_brand") or "",
+            "brand": (
+                product.get("display_brand")
+                or product.get("canonical_brand")
+                or product.get("excel_brand")
+                or ""
+            ),
             "category": (
                 product.get("excel_category")
                 or product.get("category_name")

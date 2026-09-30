@@ -385,7 +385,12 @@
                     && dropdown.scrollWidth <= dropdown.clientWidth
                 );
 
-                const passed = Object.values(result).every(Boolean);
+                // Timing is diagnostic: a measured 0 ms is valid and fast.
+                const passed = Object.entries(result).every(([key, value]) => (
+                    key === "liveReactionMs"
+                        ? Number.isFinite(value) && value >= 0
+                        : value === true
+                ));
                 root.dataset.catalogComboboxE2e = passed ? "pass" : "fail";
                 root.dataset.catalogComboboxE2eResult = JSON.stringify(result);
             } catch (error) {
