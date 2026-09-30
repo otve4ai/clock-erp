@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.catalog_db import CatalogDatabase
-from app.services.excel_product_catalog import product_site_issue_sql
+from app.services.excel_product_catalog import (
+    product_list_scope_sql,
+    product_site_issue_sql,
+)
 
 try:
     import fcntl
@@ -93,7 +96,9 @@ class BitrixSiteStatusSync:
                 "SUM(CASE WHEN trim(COALESCE(bitrix_external_product_id, '')) "
                 "<> '' AND bitrix_active IS NULL THEN 1 ELSE 0 END) "
                 "AS unknown_statuses "
-                "FROM catalog_excel_products p WHERE active = 1"
+                "FROM catalog_excel_products p "
+                "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
+                "WHERE " + product_list_scope_sql()
             ).fetchone()
             run = connection.execute(
                 "SELECT status, started_at, finished_at, products_received, "
