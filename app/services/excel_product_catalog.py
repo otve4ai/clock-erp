@@ -83,6 +83,17 @@ def normalize_product_site_issue(value):
     return value if value in PRODUCT_SITE_ISSUE_LABELS else ""
 
 
+def product_list_scope_sql(include_inventory_locked=False):
+    """Shared baseline for the product table and its site-issue counters.
+
+    Queries must join catalog_excel_batches b on p.current_batch_id.
+    """
+    conditions = ["p.active = 1", VISIBLE_PRODUCT_SQL]
+    if not include_inventory_locked:
+        conditions.append(unlocked_product_sql("p"))
+    return " AND ".join(conditions)
+
+
 def product_site_issue_sql(value, product_alias="p"):
     """Return a fixed SQL predicate for one read-only site-status issue."""
     value = normalize_product_site_issue(value)
@@ -845,9 +856,7 @@ class ExcelProductCatalog:
         sort_by = sort_by if sort_by in allowed_sort_fields else "name"
         sort_dir = sort_dir if sort_dir in {"asc", "desc"} else "asc"
         visible_cards_sql = VISIBLE_PRODUCT_SQL
-        where = ["p.active = 1", visible_cards_sql]
-        if not include_inventory_locked:
-            where.append(unlocked_product_sql("p"))
+        where = [product_list_scope_sql(include_inventory_locked)]
         parameters = []
         if query:
             prefix_pattern = catalog_prefix_pattern(query)
