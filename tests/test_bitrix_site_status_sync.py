@@ -209,7 +209,6 @@ class BitrixSiteStatusSyncTest(unittest.TestCase):
                 })
 
     def test_unknown_status_is_not_guessed(self):
-        before = self.snapshot()
         result = BitrixSiteStatusSync(
             self.database,
             client=FakeClient([[
@@ -217,8 +216,61 @@ class BitrixSiteStatusSyncTest(unittest.TestCase):
                  "active_known": False},
             ]]),
         ).run()
-        self.assertEqual(self.snapshot(), before)
+        self.assertEqual([row["bitrix_active"] for row in self.snapshot()], [None, None])
         self.assertEqual(result["unknown_source_statuses"], 1)
+        self.assertEqual(result["missing_from_bitrix"], 1)
+
+    def test_missing_product_clears_old_active_and_keeps_link_and_stock(self):
+        before = self.snapshot()
+        service = BitrixSiteStatusSync(self.database, client=FakeClient([[
+            {"external_product_id": "102", "active": False},
+        ]]))
+        report = service.run()
+        after = self.snapshot()
+        self.assertIsNone(after[0]["bitrix_active"])
+        self.assertEqual(after[0], {**before[0], "bitrix_active": None})
+        self.assertEqual(report["missing_from_bitrix"], 1)
+        self.assertEqual(report["unknown_statuses"], 1)
+        service.client = FakeClient([[
+            {"external_product_id": "101", "active": False},
+            {"external_product_id": "102", "active": False},
+        ]])
+        service.run()
+        self.assertEqual(self.snapshot()[0]["bitrix_active"], 0)
+
+    def test_empty_intermediate_page_fails_without_clearing_statuses(self):
+        before = self.snapshot()
+        service = BitrixSiteStatusSync(self.database, client=FakeClient([[], []]))
+        with self.assertRaises(ValueError):
+            service.run()
+        self.assertEqual(self.snapshot(), before)
+        self.assertTrue(service.summary()["stale"])
+
+    def test_incomplete_total_fails_without_clearing_statuses(self):
+        before = self.snapshot()
+        client = types.SimpleNamespace(get_products_page=lambda **kwargs: {
+            "products": [{"external_product_id": "102", "active": True}],
+            "has_more": False, "total": 2,
+        })
+        with self.assertRaises(ValueError):
+            BitrixSiteStatusSync(self.database, client=client).run()
+        self.assertEqual(self.snapshot(), before)
+
+    def test_interrupted_run_is_error_and_preserves_last_success(self):
+        service = BitrixSiteStatusSync(self.database, client=FakeClient([[]]))
+        previous = service.run()["last_success_at"]
+        service._create_run()
+        summary = service.summary()
+        self.assertEqual(summary["outcome"], "error")
+        self.assertEqual(summary["last_error"], "InterruptedSync")
+        self.assertEqual(summary["last_success_at"], previous)
+        self.assertTrue(summary["stale"])
+
+    def test_running_worker_with_busy_lock_is_not_marked_interrupted(self):
+        service = BitrixSiteStatusSync(self.database)
+        service._create_run()
+        service.lock = types.SimpleNamespace(handle=None, acquire=lambda: False)
+        self.assertEqual(service.summary()["outcome"], "running")
 
     def test_indicator_count_excludes_unlinked_and_unknown(self):
         with self.database.transaction() as connection:
