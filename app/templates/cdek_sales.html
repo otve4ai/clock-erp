@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru"><head>{% include '_favicon.html' %}<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Сверка СДЭК — TTT ERP</title><link rel="stylesheet" href="{{ url_for('static',filename='css/erp-components.css') }}"><link rel="stylesheet" href="{{ url_for('static',filename='css/cdek-sales.css') }}"></head>
+<html lang="ru"><head>{% include "_favicon.html" %}<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Сверка СДЭК — TTT ERP</title><link rel="stylesheet" href="{{ url_for('static',filename='css/erp-components.css') }}"><link rel="stylesheet" href="{{ url_for('static',filename='css/cdek-sales.css') }}"></head>
 <body class="cdek-body"><div class="app">{% include '_sidebar.html' %}<main class="main" id="main-content"><div class="cdek-page">
 <header class="cdek-heading"><div><h1>Сверка СДЭК</h1><span class="cdek-muted">Tictactoy · контроль отправлений и работа с проблемами</span></div><a class="cdek-button" href="{{ back }}">← Назад к продажам</a></header>
 {% if message %}<div class="cdek-notice" role="status">{{ message }}</div>{% endif %}
