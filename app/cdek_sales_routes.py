@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 from flask import abort, redirect, render_template, request, url_for
 
 from app.clients.cdek import CdekError
-from app.services.cdek_sales import CATEGORIES, WORK, group_sales
+from app.services.cdek_sales import CATEGORIES, WORK, group_sales, order_number_key
 
 
 def sales_return(value):
@@ -43,6 +43,9 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor):
         work = args.get("work", "") if args.get("work", "") in WORK else ""
         urgent = args.get("urgent") == "1"
         query = str(args.get("q") or "").strip()[:255]
+        sort = args.get("sort", "priority")
+        if sort not in {"priority", "order_asc", "order_desc", "date_asc", "date_desc"}:
+            sort = "priority"
         try:
             size = 50 if int(args.get("per_page", 25)) == 50 else 25
             page = max(1, int(args.get("page", 1)))
@@ -53,13 +56,19 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor):
                 and (not work or r["work"] == work)
                 and (not urgent or r["priority"] == 2)
                 and (not query or query in " ".join(r["orders"] + [r["tracking"], r["delivery"].get("cdek_number", "")]))]
+        if sort in {"order_asc", "order_desc"}:
+            rows = sorted((r for r in rows if r["orders"]), key=order_number_key,
+                          reverse=sort == "order_desc") + [r for r in rows if not r["orders"]]
+        elif sort in {"date_asc", "date_desc"}:
+            rows = sorted((r for r in rows if r["order_date"]), key=lambda r: r["order_date"],
+                          reverse=sort == "date_desc") + [r for r in rows if not r["order_date"]]
         total = len(rows)
         if selected and not args.get("page"):
             page = next((i // size + 1 for i, r in enumerate(rows) if r["id"] == selected["id"]), page)
         pages = max(1, (total + size - 1) // size)
         page = min(page, pages)
         back = sales_return(args.get("back"))
-        params = dict(mode=mode, category=category, work=work, urgent="1" if urgent else "", q=query, per_page=size, back=back)
+        params = dict(mode=mode, category=category, work=work, urgent="1" if urgent else "", q=query, per_page=size, back=back, sort=sort)
         def link(**changes):
             values = dict(params, page=1)
             values.update(changes)
@@ -67,14 +76,14 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor):
         return render_template("cdek_sales.html", rows=rows[(page-1)*size:page*size], counts=counts,
             categories=CATEGORIES, category_counts={k: sum(any(i["category"] == k for i in r["issues"]) for r in all_rows) for k in CATEGORIES},
             work_labels=WORK, mode=mode, category=category, work=work, urgent=urgent, query=query,
-            total=total, page=page, pages=pages, size=size, back=back, link=link,
+            total=total, page=page, pages=pages, size=size, back=back, link=link, sort=sort,
             selected=args.get("shipment", ""), message=args.get("message", ""),
             configured=service.delivery.client.configured,
             pvz_warning=service.pvz_warning, pvz_urgent=service.pvz_urgent, transit_days=service.transit_days)
 
     def finish(key, message):
         # Only preserve recognized list controls; never accept arbitrary redirects.
-        params = {k: request.form.get(k, "") for k in ("mode", "category", "work", "urgent", "q", "per_page", "page")}
+        params = {k: request.form.get(k, "") for k in ("mode", "category", "work", "urgent", "q", "per_page", "page", "sort")}
         params.update(back=sales_return(request.form.get("back")), shipment=key, message=message)
         return redirect(url_for("cdek_sales_page", **params))
 

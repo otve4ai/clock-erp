@@ -14225,7 +14225,7 @@ def sales_page():
         requested_tab if requested_tab is not None
         else request.args.get("source")
     )
-    cdek_rows = CDEK_SALES.rows(all_sales) if active_source == "tictactoy" else []
+    cdek_rows = CDEK_SALES.rows(all_sales) if active_source in {"all", "tictactoy"} else []
     _, cdek_summary = CDEK_SALES.summary(cdek_rows)
     cdek_by_id = {row["id"]: row for row in cdek_rows}
     # Keep the cached canonical sales dictionaries immutable.

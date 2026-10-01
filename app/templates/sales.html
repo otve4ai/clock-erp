@@ -1721,7 +1721,7 @@
             </div>
 
             <div class="sales-page-actions erp-workspace-actions">
-                {% if active_source == 'tictactoy' %}
+                {% if active_source in ['all', 'tictactoy'] %}
                 <a class="button button-secondary cdek-audit-link" href="{{ cdek_audit_url }}">
                     <span class="cdek-dot cdek-{{ 'red' if cdek_summary.urgent else 'yellow' if cdek_summary.problems else 'green' }}" aria-hidden="true"></span>
                     Сверка СДЭК · {{ cdek_summary.problems }} проблем

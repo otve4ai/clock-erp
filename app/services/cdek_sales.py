@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from app.clients.cdek import CdekError
 from app.services.cdek_delivery import MOSCOW, display_time
+from app.time_ranking import parse_erp_datetime
 
 DAY = 86400
 PICKUP = {"ACCEPTED_AT_PICK_UP_POINT", "POSTOMAT_POSTED"}
@@ -60,13 +61,29 @@ def group_sales(sales):
         group = groups.setdefault(key, {"id": key, "source": "tictactoy",
             "number": str(sale.get("order_number") or "").strip(),
             "tracking": str(sale.get("track_number") or "").strip(),
-            "orders": [], "sale_ids": [], "items": []})
+            "orders": [], "sale_ids": [], "items": [], "order_date": ""})
+        parsed = parse_erp_datetime(sale.get("created_at"))
+        if parsed:
+            created = parsed[0]
+            if created.tzinfo is not None:
+                created = created.astimezone(MOSCOW)
+            date = created.strftime("%Y-%m-%d")
+            if not group["order_date"] or date < group["order_date"]:
+                group["order_date"] = date
         for field, value in (("orders", str(sale.get("order_number") or "")),
                              ("sale_ids", str(sale.get("id") or "")),
                              ("items", str(sale.get("product_name") or ""))):
             if value and value not in group[field]:
                 group[field].append(value)
     return list(groups.values())
+
+
+def order_number_key(row):
+    """Natural number order: 2 before 10, including prefixed references."""
+    def natural(value):
+        return tuple((0, int(part)) if part.isdecimal() else (1, part.casefold())
+                     for part in re.split(r"(\d+)", value) if part)
+    return min((natural(number) for number in row["orders"]), default=())
 
 
 def short_status(data, track):
@@ -78,7 +95,7 @@ def short_status(data, track):
     if code in PICKUP:
         return "В ПВЗ", "yellow"
     if code in TRANSIT:
-        return "В пути", "yellow"
+        return "В пути", "blue"
     return LABELS.get(code, ("Нет данных", "gray") if track else ("Нет трека", "gray"))
 
 
