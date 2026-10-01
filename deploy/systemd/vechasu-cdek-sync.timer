@@ -1,0 +1,11 @@
+[Unit]
+Description=Vechasu CDEK delivery polling every ten minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/10:00
+AccuracySec=10s
+Persistent=true
+Unit=vechasu-cdek-sync.service
+
+[Install]
+WantedBy=timers.target

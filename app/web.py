@@ -31,6 +31,10 @@ from functools import lru_cache, wraps
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from app.time_ranking import erp_timestamp, parse_erp_datetime, receipt_business_timestamp
 from app.clients.moysklad import MoySkladClient
+from app.cdek_routes import register_cdek_routes
+from app.services.cdek_delivery import CdekDelivery
+from app.services.cdek_sales import CdekSales, shipment_id
+from app.cdek_sales_routes import register_cdek_sales_routes
 from app.clients.smsbliss import (
     SmsBlissClient,
     SmsBlissError,
@@ -2430,6 +2434,9 @@ def render_orders_page(
         order_location_data=(get_tictactoy_location_catalog()
                              if selected_order and not is_wildberries and sale_state["can_create_sale"] else {}),
         order_tracking=get_order_tracking(selected_order or {}),
+        cdek_delivery=CDEK_DELIVERY.view(
+            selected_order, tracking=get_order_tracking(selected_order or {})
+        ),
         order_sale_pricing=build_order_sale_pricing(
             (selected_order or {}).get("products") or []
         ),
@@ -4324,6 +4331,21 @@ def order_tracking_update(order_id):
         "order_page", order_id=order_id, notice="success",
         message="Трекинг сохранён",
     ))
+
+
+CDEK_DELIVERY = CdekDelivery(
+    path=os.getenv("CDEK_CACHE_DIR") or str(Path(app.instance_path) / "cdek")
+)
+register_cdek_routes(
+    app, CDEK_DELIVERY, can_view_orders, require_csrf_when_authenticated,
+    lambda order_id: apply_local_order_overrides(OrdersSnapshotStore().get(order_id), order_id),
+    get_order_tracking,
+)
+CDEK_SALES = CdekSales(CDEK_DELIVERY)
+register_cdek_sales_routes(
+    app, CDEK_SALES, lambda: api_sales_records(), can_view_orders,
+    require_csrf_when_authenticated, lambda: (current_auth_user() or {}).get("id", "local"),
+)
 
 
 def validate_order_status_transition(current_status, new_status):
@@ -9486,6 +9508,7 @@ SALES_TABLE_COLUMNS = {
         ("order_number", "Номер заказа"),
         ("track_number", "Трекинг"),
         ("delivery_cost_display", "Стоимость доставки"),
+        ("cdek_status", "СДЭК"),
         ("country", "Страна"),
         ("region", "Регион"),
         ("city", "Город"),
@@ -14202,6 +14225,12 @@ def sales_page():
         requested_tab if requested_tab is not None
         else request.args.get("source")
     )
+    cdek_rows = CDEK_SALES.rows(all_sales) if active_source == "tictactoy" else []
+    _, cdek_summary = CDEK_SALES.summary(cdek_rows)
+    cdek_by_id = {row["id"]: row for row in cdek_rows}
+    # Keep the cached canonical sales dictionaries immutable.
+    if active_source == "tictactoy":
+        all_sales = [dict(sale, cdek_status=(cdek_by_id.get(shipment_id(sale)) or {}).get("label", "Нет данных")) for sale in all_sales]
     filters = get_sales_report_filters()
     filters["source"] = (
         filters["source"]
@@ -14305,6 +14334,11 @@ def sales_page():
     sales_product_images = {}
     for sale in sales:
         sale["search_text"] = build_sales_search_text(sale, active_source)
+        if active_source == "tictactoy":
+            key = shipment_id(sale)
+            item = cdek_by_id.get(key)
+            sale["cdek"] = item
+            sale["cdek_url"] = url_for("cdek_sales_page", mode="all", q=sale.get("track_number") or sale.get("order_number") or "", shipment=key, back=request.full_path)
         sale["is_warranty_item"] = is_warranty_sale_product(
             sale.get("product_name")
         )
@@ -14385,6 +14419,8 @@ def sales_page():
         sales=sales,
         pagination=pagination,
         source_tabs=source_tabs,
+        cdek_summary=cdek_summary,
+        cdek_audit_url=url_for("cdek_sales_page", back=request.full_path),
         sales_view=sales_view,
         today_url=url_for("sales_page", **today_query),
         active_source=active_source,

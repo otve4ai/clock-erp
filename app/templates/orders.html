@@ -206,6 +206,7 @@
                                 <div class="fact tracking-fact"><label class="fact-label" for="orderTracking">Трекинг</label><form class="tracking-form" method="post" action="/order/{{ detail_id }}/tracking" data-tracking-form data-erp-pending data-pending-label="Сохраняем трекинг…"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input class="field" id="orderTracking" name="tracking" maxlength="255" value="{{ request.args.get('tracking_value', order_tracking or '') }}" placeholder="Номер отправления"><button class="button button-secondary orders-secondary-submit" type="submit">Сохранить</button></form></div>
                             </div>
                         </section>
+                        {% include '_cdek_delivery.html' %}
                         <section class="section order-payment">
                             <div class="section-head"><h3>Оплата</h3></div>
                             <div class="customer-grid">

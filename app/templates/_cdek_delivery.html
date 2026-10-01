@@ -1,0 +1,29 @@
+{% if not is_wb and cdek_delivery and (cdek_delivery.configured or cdek_delivery.checked_at) %}
+<section class="section order-cdek" aria-label="Доставка СДЭК">
+    <div class="section-head">
+        <h3>СДЭК{% if cdek_delivery.is_return %} · Возврат{% endif %}</h3>
+        {% if cdek_delivery.configured %}
+        <form method="post" action="{{ url_for('cdek_delivery_sync', order_id=detail_id) }}" data-erp-pending data-pending-label="Проверяем СДЭК…">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="button button-secondary" type="submit">Обновить доставку</button>
+        </form>
+        {% endif %}
+    </div>
+    {% if cdek_delivery.error %}<p role="status">{{ cdek_delivery.error }}{% if cdek_delivery.checked_at %} Показаны ранее полученные данные.{% endif %}</p>{% endif %}
+    {% if cdek_delivery.checked_at %}
+    <div class="customer-grid">
+        <div class="fact"><span class="fact-label">Накладная СДЭК</span><span class="fact-value">{{ cdek_delivery.cdek_number }}</span></div>
+        <div class="fact"><span class="fact-label">Статус доставки</span><span class="fact-value">{{ cdek_delivery.status }}</span></div>
+        <div class="fact"><span class="fact-label">Город</span><span class="fact-value">{{ cdek_delivery.city or '—' }}</span></div>
+        <div class="fact"><span class="fact-label">Время статуса (МСК)</span><span class="fact-value">{{ cdek_delivery.date_display or '—' }}</span></div>
+    </div>
+    <p>Проверено {{ cdek_delivery.checked_display }} МСК{% if cdek_delivery.stale %} · Данные требуют обновления{% endif %}</p>
+    <details>
+        <summary>История доставки · {{ cdek_delivery.events|length }}</summary>
+        <ol>{% for event in cdek_delivery.events %}<li>{{ event.date_display }} МСК — {{ event.name }}{% if event.city %} · {{ event.city }}{% endif %}</li>{% endfor %}</ol>
+    </details>
+    {% elif not cdek_delivery.error %}
+    <p>Статус ещё не получен. Отправление будет найдено по трекингу или номеру заказа магазина.</p>
+    {% endif %}
+</section>
+{% endif %}

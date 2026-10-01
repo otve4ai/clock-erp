@@ -1,0 +1,32 @@
+.cdek-badge,.cdek-dot{--cdek-ink:var(--erp-muted,#64748b)}
+.cdek-yellow{--cdek-ink:var(--erp-warning,#92400e)}
+.cdek-red{--cdek-ink:var(--erp-danger,#b42318)}
+.cdek-green{--cdek-ink:var(--erp-success,#166534)}
+.cdek-dot{width:7px;height:7px;border-radius:50%;display:inline-block;background:var(--cdek-ink);flex-shrink:0}
+.cdek-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 7px;border-radius:5px;white-space:nowrap;font-size:11px;font-weight:650;line-height:1.3;text-decoration:none;color:var(--cdek-ink);background:color-mix(in srgb,var(--cdek-ink) 9%,var(--erp-surface,#fff))}
+.cdek-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+.cdek-audit-link{display:inline-flex;align-items:center;gap:8px}
+.cdek-page{max-width:1600px;margin:0 auto;padding:24px;color:var(--erp-text)}
+.cdek-page h1{font-size:27px;margin:0 0 6px}.cdek-page .cdek-muted{color:var(--erp-muted);font-size:12px}
+.cdek-heading,.cdek-toolbar,.cdek-footer,.cdek-mode{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.cdek-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:18px 0}
+.cdek-stat{padding:14px;border:1px solid var(--erp-border);border-radius:12px;background:var(--erp-surface)}
+.cdek-stat strong{display:block;font-size:26px;margin:5px 0}.cdek-stat small{font-size:11px;color:var(--erp-muted)}
+.cdek-stat-problem{background:color-mix(in srgb,var(--erp-danger) 6%,var(--erp-surface));color:var(--erp-danger)}
+.cdek-panel{background:var(--erp-surface);border:1px solid var(--erp-border);border-radius:12px;overflow:hidden}
+.cdek-mode,.cdek-toolbar,.cdek-footer{padding:12px 16px}.cdek-mode{border-bottom:1px solid var(--erp-border)}
+.cdek-mode nav,.cdek-categories{display:flex;gap:14px;flex-wrap:wrap}.cdek-mode a,.cdek-categories a{color:var(--erp-muted);text-decoration:none;padding:5px 0;font-size:13px}
+.cdek-mode a[aria-current],.cdek-categories a[aria-current]{color:var(--erp-primary);box-shadow:0 2px var(--erp-primary)}
+.cdek-toolbar{justify-content:flex-start}.cdek-toolbar input{flex:1;min-width:140px}
+.cdek-page input,.cdek-page select,.cdek-page textarea{background:var(--erp-surface);color:var(--erp-text);border:1px solid var(--erp-border);border-radius:7px;padding:8px;font:inherit;max-width:100%}
+.cdek-page button,.cdek-page .cdek-button{padding:8px 12px;border:1px solid var(--erp-border);border-radius:7px;background:var(--erp-surface);color:var(--erp-text);font:inherit;text-decoration:none;display:inline-block;cursor:pointer}
+.cdek-categories{padding:0 16px 12px}.cdek-scroll{overflow-x:auto}.cdek-table{width:100%;border-collapse:collapse;min-width:900px;font-size:12px}
+.cdek-table th{text-align:left;background:var(--erp-surface-muted);color:var(--erp-muted);font-size:11px;padding:12px}
+.cdek-table td{border-top:1px solid var(--erp-border);padding:10px 12px;vertical-align:middle}.cdek-table td small{display:block;margin-top:4px;color:var(--erp-muted);font-size:11px}
+.cdek-table .cdek-critical{background:color-mix(in srgb,var(--erp-danger) 4%,var(--erp-surface))}.cdek-critical td:first-child{border-left:3px solid var(--erp-danger)}.cdek-warning td:first-child{border-left:3px solid var(--erp-warning)}
+.cdek-critical .cdek-reason{color:var(--erp-danger);font-weight:650}.cdek-table a{color:var(--erp-primary)}
+.cdek-detail{background:var(--erp-surface-muted)}.cdek-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}.cdek-detail-grid form{display:grid;gap:9px}.cdek-detail-grid label{display:grid;gap:5px}.cdek-detail-grid textarea{width:100%;min-height:70px;resize:vertical}
+.cdek-events{padding-left:20px}.cdek-events li{margin:6px 0}.cdek-notice{padding:12px 15px;background:var(--erp-surface-muted);border:1px solid var(--erp-border);border-radius:8px;margin:12px 0}
+.cdek-rules{font-size:12px;color:var(--erp-muted);margin-top:16px}.cdek-rules li{margin:7px 0}.cdek-rules summary{cursor:pointer;color:var(--erp-text)}
+body.cdek-body{margin:0;background:var(--erp-canvas);font-family:var(--erp-font-family)}.cdek-body .app{display:flex;min-height:100vh}.cdek-body .main{flex:1;min-width:0}
+@media(max-width:700px){.cdek-page{padding:14px}.cdek-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.cdek-stat-problem{grid-column:1/-1}.cdek-detail-grid{grid-template-columns:1fr}.cdek-page input,.cdek-page select,.cdek-page textarea{font-size:16px}.cdek-toolbar>*{max-width:100%}}

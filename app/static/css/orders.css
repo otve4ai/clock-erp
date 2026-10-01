@@ -196,6 +196,10 @@ details.more summary::-webkit-details-marker { display:none; }
 .order-detail-main .order-products { order:1; }
 .order-detail-main .order-information { order:2; }
 .order-detail-main .order-delivery { order:3; }
+.order-detail-main .order-cdek { order:3; overflow-wrap:anywhere; }
+.order-cdek .section-head { flex-wrap:wrap; }
+.order-cdek ol { padding-left:20px; }
+.order-cdek li { margin:8px 0; }
 .order-detail-main .order-payment { order:4; }
 .order-detail-main .order-notes { order:5; }
 .order-detail-main .order-calculation { order:6; }
