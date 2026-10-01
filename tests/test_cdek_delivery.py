@@ -11,6 +11,7 @@ from flask import Flask, abort, render_template
 from app.cdek_routes import register_cdek_routes
 from app.clients.cdek import CdekClient, CdekError
 from app.services.cdek_delivery import CdekDelivery, delivery_reference, normalize_delivery
+from scripts.cdek_delivery_sync import tracked_cards
 
 
 def response(payload, status=200):
@@ -213,6 +214,26 @@ class CdekDeliveryTest(unittest.TestCase):
         self.api.get_order.side_effect = CdekError("CDEK_RATE_LIMIT", "Лимит")
         self.service.sync_pending([self.order, dict(self.order, id="124")], sleep=lambda _: None)
         self.assertEqual(self.api.get_order.call_count, 1)
+
+
+class TrackedCardsTest(unittest.TestCase):
+    def test_archive_is_not_enqueued_and_sales_cache_is_not_a_card(self):
+        with tempfile.TemporaryDirectory() as folder:
+            delivery = CdekDelivery(folder, client=mock.Mock(configured=True))
+            load_order = mock.Mock(return_value={"id": "123", "source": "tictactoy"})
+            self.assertEqual(tracked_cards(delivery, load_order), [])
+            load_order.assert_not_called()
+            delivery.client.get_order.return_value = shipment()
+            delivery.sync({"id": "123", "tracking": "1234567890"})
+            delivery.sync({"id": "a" * 64, "tracking": "1234567890"})
+            self.assertEqual(tracked_cards(delivery, load_order), [load_order.return_value])
+            load_order.assert_called_once_with("123")
+
+    def test_corrupt_cache_is_not_silently_ignored(self):
+        with tempfile.TemporaryDirectory() as folder:
+            Path(folder, "broken.json").write_text("broken", encoding="utf-8")
+            with self.assertRaises(CdekError):
+                tracked_cards(CdekDelivery(folder), mock.Mock())
 
 
 class CdekRoutesTest(unittest.TestCase):
