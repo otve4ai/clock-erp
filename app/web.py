@@ -4345,6 +4345,7 @@ CDEK_SALES = CdekSales(CDEK_DELIVERY)
 register_cdek_sales_routes(
     app, CDEK_SALES, lambda: api_sales_records(), can_view_orders,
     require_csrf_when_authenticated, lambda: (current_auth_user() or {}).get("id", "local"),
+    find_orders=lambda number: OrdersSnapshotStore().query({"q": number, "source": "tictactoy", "period": "all", "status": "all"})["rows"],
 )
 
 

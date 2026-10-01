@@ -32,8 +32,8 @@ LABELS = {
     "NOT_DELIVERED": ("Не вручён", "red"),
     "POSTOMAT_SEIZED": ("Возврат", "red"),
 }
-WORK = {"new": "Нужна реакция", "working": "В работе", "today": "Связаться сегодня",
-        "tomorrow": "Связаться завтра", "closed": "Возврат проверен"}
+WORK = {"new": "Нужна реакция", "working": "В работе", "closed": "Возврат проверен"}
+LEGACY_WORK = {"today": "new", "tomorrow": "new"}
 CATEGORIES = {"pvz": "Не забирают", "delay": "Задержки", "return": "Возвраты",
               "data": "Ошибки данных"}
 
@@ -125,7 +125,7 @@ class CdekSales:
             return {"version": 0, "work": "new", "note": "", "followup": "", "storage_until": ""}
         except (OSError, ValueError):
             raise CdekError("CDEK_REVIEW", "Не удалось прочитать отметки менеджера.") from None
-        if not isinstance(data, dict) or data.get("work") not in WORK or not isinstance(data.get("version"), int):
+        if not isinstance(data, dict) or data.get("work") not in set(WORK) | set(LEGACY_WORK) or not isinstance(data.get("version"), int):
             raise CdekError("CDEK_REVIEW", "Повреждены отметки менеджера.")
         for field in ("storage_until", "followup", "expected_delivery"):
             if data.get(field):
@@ -134,6 +134,8 @@ class CdekSales:
                         raise ValueError("Noncanonical date")
                 except (TypeError, ValueError):
                     raise CdekError("CDEK_REVIEW", "Повреждены даты в отметках менеджера.") from None
+        data["work"] = LEGACY_WORK.get(data["work"], data["work"])
+        data["followup"] = ""
         return data
 
     def save_review(self, shipment, payload, actor):
@@ -156,16 +158,14 @@ class CdekSales:
             version = int(payload.get("version", -1))
         except (ValueError, TypeError):
             raise CdekError("CDEK_FORM", "Обновите страницу перед сохранением.") from None
-        now = datetime.fromtimestamp(self.clock(), MOSCOW)
-        followup = (now.date() + timedelta(days=1 if work == "tomorrow" else 0)).isoformat() if work in ("today", "tomorrow") else ""
         with self.delivery.lock():
             previous = self.review(key)
             if previous["version"] != version:
                 raise CdekError("CDEK_CONFLICT", "Другой сотрудник изменил отметку. Обновите страницу.")
             snapshot = self.delivery.view(shipment)
             if work == "closed" and not (snapshot.get("is_return") and snapshot.get("status_code") in DELIVERED):
-                raise CdekError("CDEK_FORM", "Закрыть возврат можно после его получения по данным СДЭК.")
-            data = dict(version=version + 1, work=work, note=note, followup=followup,
+                raise CdekError("CDEK_FORM", "Подтвердить возврат можно после его получения по данным СДЭК.")
+            data = dict(version=version + 1, work=work, note=note, followup="",
                         storage_until=storage_until, expected_delivery=expected_delivery,
                         updated_at=self.clock(), actor=str(actor)[:100],
                         closed_event=snapshot.get("date_display", "") if work == "closed" else "")
@@ -203,7 +203,9 @@ class CdekSales:
             latest = events[0].get("epoch", now) if events else now
             age = max(0, int((now - latest) // DAY))
             is_delivered = code in DELIVERED and not data.get("is_return")
-            return_closed = review.get("work") == "closed" and review.get("closed_event") == data.get("date_display")
+            return_closed = (review.get("work") == "closed" and bool(review.get("closed_event"))
+                             and review.get("closed_event") == data.get("date_display")
+                             and data.get("is_return") and code in DELIVERED)
             if review_error:
                 add("data", 1, review_error, "Проверить хранилище отметок")
             if not data.get("configured"):
@@ -214,6 +216,7 @@ class CdekSales:
                 add("data", 1, "Нет трека" if not group["tracking"] else "Статус ещё не получен", "Проверить данные / обновить")
             elif label == "Нет данных":
                 add("data", 1, "Неизвестный или некорректный статус СДЭК", "Проверить накладную")
+            needs_reaction = False
             wait = "—"
             if not is_delivered and not return_closed:
                 if code in PICKUP and not data.get("is_return"):
@@ -224,6 +227,7 @@ class CdekSales:
                             break
                         start = min(start, event["epoch"])
                     days = max(0, int((now - start) // DAY))
+                    needs_reaction = days >= 7
                     wait = "{} сут. в ПВЗ".format(days)
                     if days >= self.pvz_warning:
                         add("pvz", 2 if days >= self.pvz_urgent else 1,
@@ -233,6 +237,7 @@ class CdekSales:
                         end = datetime.strptime(deadline, "%Y-%m-%d").replace(tzinfo=MOSCOW) + timedelta(days=1)
                         wait += " · до " + deadline
                         if end.timestamp() - now <= DAY:
+                            needs_reaction = True
                             add("pvz", 2, "Хранение заканчивается" if end.timestamp() > now else "Срок хранения истёк", "Согласовать получение / продление")
                     else:
                         wait += " · срок уточнить"
@@ -241,6 +246,7 @@ class CdekSales:
                     if age >= self.transit_days:
                         add("delay", 1, "Нет новых событий {} сут.".format(age), "Уточнить у СДЭК")
                 if label in {"Возврат", "Не вручён"}:
+                    needs_reaction = True
                     add("return", 1, "Возврат получен: нужна проверка" if code in DELIVERED else data.get("status") or label,
                         "Проверить возврат" if code in DELIVERED else "Уточнить причину / получение")
                 if code in {"REMOVED", "INVALID"}:
@@ -249,16 +255,13 @@ class CdekSales:
                     today = datetime.fromtimestamp(now, MOSCOW).date().isoformat()
                     if review["expected_delivery"] < today:
                         add("delay", 2, "Просрочена подтверждённая дата доставки", "Уточнить срок у СДЭК")
-                if review.get("followup"):
-                    today = datetime.fromtimestamp(now, MOSCOW).date().isoformat()
-                    if review["followup"] <= today:
-                        add("pvz" if code in PICKUP else "delay", 2 if review["followup"] < today else 1,
-                            "Просрочен контакт" if review["followup"] < today else "Связаться сегодня", "Связаться с получателем")
             issues.sort(key=lambda issue: -issue["priority"])
             effective_work = review.get("work", "new")
-            if review.get("followup") and review["followup"] <= datetime.fromtimestamp(now, MOSCOW).date().isoformat():
-                effective_work = "today"
-            result.append(dict(group, delivery=data, label=label, tone=tone, review=review,
+            if effective_work == "closed" and not return_closed:
+                effective_work = "new"
+            if effective_work == "new" and not needs_reaction:
+                effective_work = ""
+            result.append(dict(group, needs_reaction=needs_reaction, delivery=data, label=label, tone=tone, review=review,
                 review_error=review_error, issues=issues, priority=max([i["priority"] for i in issues] or [0]),
                 wait=wait, work=effective_work, delivered=is_delivered, event_epoch=latest,
                 checked_display=display_time(data.get("checked_at", 0)),
