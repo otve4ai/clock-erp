@@ -18,7 +18,7 @@ def sales_return(value):
     return value
 
 
-def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor):
+def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor, find_orders=None):
     def authorize():
         if not allowed():
             abort(403)
@@ -28,6 +28,21 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor):
         if not item:
             abort(404)
         return item
+
+    @app.get("/sales/cdek/order/<number>")
+    def cdek_sales_order(number):
+        authorize()
+        candidates = find_orders(number) if find_orders else []
+        matches = [order for order in candidates
+                   if str(order.get("number") or order.get("ACCOUNT_NUMBER") or "").strip() == number]
+        if not matches:
+            matches = [order for order in candidates
+                       if str(order.get("id") or order.get("ID") or "") == number]
+        if len(matches) == 1:
+            order_id = str(matches[0].get("id") or matches[0].get("ID") or "")
+            if order_id and all("0" <= char <= "9" for char in order_id):
+                return redirect(url_for("order_page", order_id=int(order_id)))
+        return redirect(url_for("orders_page", source="tictactoy", q=number, period="all", status="all"))
 
     @app.get("/sales/cdek")
     def cdek_sales_page():
