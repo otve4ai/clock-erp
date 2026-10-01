@@ -23,6 +23,13 @@ def sale(number="123", track="1234567890", **changes):
 
 
 class SalesDeliveryTest(unittest.TestCase):
+    def test_group_order_date_uses_earliest_valid_sale_date_in_moscow(self):
+        rows = [sale(created_at="bad"), sale(created_at="2026-09-30T22:30:00Z"),
+                sale(created_at="2026-09-29T12:00:00+03:00")]
+        self.assertEqual(group_sales(rows)[0]["order_date"], "2026-09-29")
+        self.assertEqual(group_sales(rows[:2])[0]["order_date"], "2026-10-01")
+        self.assertEqual(group_sales(rows[:1])[0]["order_date"], "")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -219,6 +226,38 @@ class CdekSalesRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Страница 2 из 3", response.get_data(as_text=True))
         self.assertIn("Все отправления · 60", response.get_data(as_text=True))
+
+    def test_order_sort_is_numeric_before_pagination_and_keeps_missing_last(self):
+        self.sales = [sale(str(i), str(10324000000+i), created_at="2026-09-30T12:00:00")
+                      for i in range(30, 0, -1)] + [sale("", "10324999999")]
+        html = self.client.get("/sales/cdek?mode=all&sort=order_asc").get_data(as_text=True)
+        self.assertLess(html.index(">2</a>"), html.index(">10</a>"))
+        self.assertNotIn(">26</a>", html)
+        self.assertIn("30.09.2026", html)
+        self.assertIn("sort=order_asc", html)
+        html = self.client.get("/sales/cdek?mode=all&sort=order_desc&page=2").get_data(as_text=True)
+        self.assertLess(html.index(">5</a>"), html.index(">1</a>"))
+        self.assertLess(html.index(">1</a>"), html.index(">Без номера заказа</a>"))
+        self.assertIn('name="sort" value="order_desc"', self.client.get(
+            "/sales/cdek?mode=all&sort=order_desc&shipment=" + shipment_id(self.sales[0])
+        ).get_data(as_text=True))
+
+    def test_unknown_sort_falls_back_to_priority(self):
+        html = self.client.get("/sales/cdek?sort=unknown").get_data(as_text=True)
+        self.assertIn('value="priority" selected', html)
+        self.assertIn("сначала срочные", html)
+
+    def test_order_date_sort_precedes_pagination_and_missing_dates_are_last(self):
+        self.sales = [sale(str(i), str(10324000000+i), created_at="2026-09-{:02d}".format(i))
+                      for i in range(1, 31)] + [sale("undated", "10324999999")]
+        for sort, first, second in (("date_desc", 30, 29), ("date_asc", 1, 2)):
+            html = self.client.get("/sales/cdek?mode=all&sort=" + sort).get_data(as_text=True)
+            self.assertLess(html.index(">{}</a>".format(first)), html.index(">{}</a>".format(second)))
+            self.assertNotIn(">undated</a>", html)
+            self.assertIn("sort=" + sort, html)
+            html = self.client.get("/sales/cdek?mode=all&page=2&sort=" + sort).get_data(as_text=True)
+            last = 1 if sort == "date_desc" else 30
+            self.assertLess(html.index(">{}</a>".format(last)), html.index(">undated</a>"))
 
     def test_auth_csrf_and_membership(self):
         group = self.seed()

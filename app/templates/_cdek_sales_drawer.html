@@ -1,0 +1,26 @@
+<dialog open class="cdek-drawer" aria-labelledby="cdek-drawer-title" data-shipment="{{ row.id }}">
+  <header class="cdek-drawer-head">
+    <div><span class="cdek-muted">Отправление СДЭК</span><h2 id="cdek-drawer-title">Заказ {{ row.orders|join(', ') or 'без номера' }}</h2><span class="cdek-muted">Накладная {{ row.delivery.cdek_number or row.tracking or 'не указана' }}</span></div>
+    <a class="cdek-button cdek-drawer-close" data-cdek-close href="{{ link(page=page) }}#shipment-{{ row.id }}" aria-label="Закрыть карточку" autofocus>×</a>
+  </header>
+  <div class="cdek-drawer-content">
+    {% if message %}<div class="cdek-notice" role="status">{{ message }}</div>{% endif %}
+    <section class="cdek-drawer-section">
+      <div class="cdek-heading"><span class="cdek-badge cdek-{{ row.tone }}">{{ row.label }}{% if row.stale %} !{% endif %}</span><span class="cdek-muted">{{ row.delivery.date_display or 'Дата статуса неизвестна' }} · МСК</span></div>
+      <p>{{ row.delivery.status or row.label }}{% if row.delivery.city %} · {{ row.delivery.city }}{% endif %}</p>
+      <div class="cdek-shipment-items">{{ row['items']|join('; ') }}</div>
+      <div class="cdek-refresh"><span class="cdek-muted">Проверено: {{ row.checked_display or 'ещё не проверено' }}</span><form method="post" action="{{ url_for('cdek_sales_sync',key=row.id) }}">{{ controls() }}<button class="cdek-secondary" type="submit" {% if not configured %}disabled{% endif %}>Обновить статус</button></form></div>
+    </section>
+    {% if row.issues %}<section class="cdek-action-summary"><h3>{{ 'Нужна срочная реакция' if row.priority==2 else 'Требует внимания' }}</h3>{% for issue in row.issues %}<p><strong>{{ issue.reason }}</strong><br>{{ issue.action }}</p>{% endfor %}</section>{% endif %}
+    <form id="cdek-manager-form" class="cdek-manager-form" method="post" action="{{ url_for('cdek_sales_review',key=row.id) }}">
+      {{ controls() }}<input type="hidden" name="version" value="{{ row.review.version }}">
+      <h3>Работа менеджера</h3>
+      <label>Состояние работы<select name="review_work">{% for key,label in work_labels.items() %}{% if key!='closed' or (row.delivery.is_return and row.delivery.status_code in ['DELIVERED','POSTOMAT_RECEIVED']) %}<option value="{{ key }}" {% if row.work==key %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}</select></label>
+      <label>Заметка<textarea name="note" maxlength="2000" placeholder="Что обсудили с клиентом и о чём договорились">{{ row.review.note }}</textarea></label>
+      <details class="cdek-dates" {% if row.review.storage_until or row.review.expected_delivery %}open{% endif %}><summary>Сроки хранения и доставки</summary><p class="cdek-muted">Заполняйте только даты, подтверждённые СДЭК.</p><div class="cdek-date-fields"><label>Хранение до<input type="date" name="storage_until" value="{{ row.review.storage_until or '' }}"></label><label>Доставка ожидается<input type="date" name="expected_delivery" value="{{ row.review.expected_delivery or '' }}"></label></div></details>
+      <span class="cdek-muted">Повторный контакт: {{ row.review.followup or 'не назначен' }}</span>
+    </form>
+    <details class="cdek-history"><summary>История доставки <span class="cdek-muted">{{ row.delivery.events|length if row.delivery.events else 0 }} событий</span></summary><ol class="cdek-timeline">{% for event in row.delivery.events or [] %}<li><strong>{{ event.name }}</strong><span>{{ event.date_display }}{% if event.city %} · {{ event.city }}{% endif %}</span></li>{% else %}<li>История ещё не получена</li>{% endfor %}</ol></details>
+  </div>
+  <footer class="cdek-drawer-footer"><a class="cdek-button" data-cdek-close href="{{ link(page=page) }}#shipment-{{ row.id }}">Закрыть</a><button type="submit" form="cdek-manager-form" {% if row.review_error %}disabled{% endif %}>Сохранить отметку</button></footer>
+</dialog>
