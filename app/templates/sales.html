@@ -9,6 +9,7 @@
         content="width=device-width, initial-scale=1"
     >
     <title>ТТТ ERP — Продажи</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/cdek-sales.css') }}">
 
     <style>
         * {
@@ -1720,6 +1721,12 @@
             </div>
 
             <div class="sales-page-actions erp-workspace-actions">
+                {% if active_source == 'tictactoy' %}
+                <a class="button button-secondary cdek-audit-link" href="{{ cdek_audit_url }}">
+                    <span class="cdek-dot cdek-{{ 'red' if cdek_summary.urgent else 'yellow' if cdek_summary.problems else 'green' }}" aria-hidden="true"></span>
+                    Сверка СДЭК · {{ cdek_summary.problems }} проблем
+                </a>
+                {% endif %}
                 <a
                     id="salesReportLink"
                     class="button sales-report-button button-secondary erp-secondary-action"
@@ -2440,6 +2447,10 @@
                                                 >
                                                     {{ value or "—" }}
                                                 </span>
+                                            {% elif column.key == "cdek_status" %}
+                                                {% if sale.cdek %}
+                                                <a class="cdek-badge cdek-{{ sale.cdek.tone }}" href="{{ sale.cdek_url }}" title="{{ sale.cdek.delivery.status or sale.cdek.label }}{% if sale.cdek.stale %} · данные требуют обновления{% endif %}">{{ sale.cdek.label }}{% if sale.cdek.stale %}<span aria-label="Данные требуют обновления">!</span>{% endif %}</a>
+                                                {% else %}—{% endif %}
                                             {% elif column.key == "created_at" %}
                                                 {{ render_erp_datetime(value) }}
                                             {% elif column.key == "product_name" %}
@@ -2710,7 +2721,9 @@
                                         <div class="mobile-erp-detail-row">
                                             <span>{{ column.label }}</span>
                                             <span>
-                                                {% if column.key == "note" %}
+                                                {% if column.key == "cdek_status" and sale.cdek %}
+                                                    <a class="cdek-badge cdek-{{ sale.cdek.tone }}" href="{{ sale.cdek_url }}">{{ sale.cdek.label }}{% if sale.cdek.stale %} !{% endif %}</a>
+                                                {% elif column.key == "note" %}
                                                     {{ sale[column.key] or "" }}
                                                 {% else %}
                                                     {{ sale[column.key] or "—" }}
@@ -5251,6 +5264,7 @@
             "order_status_label",
             "delivery_cost_display",
             "track_number",
+            "cdek_status",
             "barcode",
             "sticker_number",
             "recipient_name",
@@ -5283,6 +5297,7 @@
             created_at: 108,
             order_number: 132,
             track_number: 124,
+            cdek_status: 122,
             barcode: 128,
             source: 104,
             brand: 104,
@@ -5441,6 +5456,10 @@
                 order.splice(order.indexOf("article"), 1);
                 const productIndex = order.indexOf("product_name");
                 order.splice(productIndex + 1, 0, "article");
+            }
+            if ((!Array.isArray(value) || !value.includes("cdek_status")) && order.includes("cdek_status")) {
+                order.splice(order.indexOf("cdek_status"), 1);
+                order.splice(order.indexOf("track_number") + 1, 0, "cdek_status");
             }
             return [
                 ...pinnedColumns.filter(

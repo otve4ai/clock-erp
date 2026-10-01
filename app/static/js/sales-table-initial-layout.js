@@ -5,13 +5,13 @@
         "created_at", "order_number", "source", "product_name", "article",
         "brand", "category", "quantity_display", "unit_price_display",
         "commission", "order_status_label", "delivery_cost_display",
-        "track_number", "barcode", "sticker_number", "recipient_name",
+        "track_number", "cdek_status", "barcode", "sticker_number", "recipient_name",
         "platform", "country", "invoice_number", "region", "city",
         "payment_method", "note",
     ];
     const pinnedColumns = ["created_at", "order_number"];
     const defaultWidths = {
-        created_at: 108, order_number: 132, track_number: 124, barcode: 128,
+        created_at: 108, order_number: 132, track_number: 124, cdek_status: 122, barcode: 128,
         source: 104, brand: 104, category: 132, product_name: 300,
         article: 144, quantity_display: 96, unit_price_display: 124,
         commission: 260, order_status_label: 118,
@@ -77,6 +77,10 @@
         defaultOrder.forEach((key) => {
             if (!order.includes(key)) order.push(key);
         });
+        if (!sourceOrder.includes("cdek_status") && order.includes("cdek_status")) {
+            order.splice(order.indexOf("cdek_status"), 1);
+            order.splice(order.indexOf("track_number") + 1, 0, "cdek_status");
+        }
         if (!sourceHasArticle && order.includes("article")) {
             order.splice(order.indexOf("article"), 1);
             order.splice(order.indexOf("product_name") + 1, 0, "article");
