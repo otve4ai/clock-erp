@@ -1,0 +1,16 @@
+[Unit]
+Description=Vechasu CDEK payout reconciliation
+After=network.target
+ConditionPathExists=!/run/clock-erp-maintenance.json
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/clock-erp-current
+EnvironmentFile=/etc/clock-erp/clock-erp.env
+EnvironmentFile=/etc/clock-erp/cdek.env
+Environment=CDEK_PAYOUTS_DIR=/opt/clock-erp/instance/cdek/payouts
+ExecStart=/opt/clock-erp/venv/bin/python -m scripts.cdek_payouts_sync
+TimeoutStartSec=600
+Nice=10
+MemoryLimit=256M

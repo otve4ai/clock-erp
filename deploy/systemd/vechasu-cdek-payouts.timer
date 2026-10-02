@@ -1,0 +1,12 @@
+[Unit]
+Description=Vechasu CDEK payout reconciliation daily at 06:00 Moscow
+
+[Timer]
+# systemd 219: host timezone must be Europe/Moscow (verified at installation).
+OnCalendar=*-*-* 06:00:00
+AccuracySec=10s
+Persistent=true
+Unit=vechasu-cdek-payouts.service
+
+[Install]
+WantedBy=timers.target

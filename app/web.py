@@ -35,6 +35,8 @@ from app.cdek_routes import register_cdek_routes
 from app.services.cdek_delivery import CdekDelivery
 from app.services.cdek_sales import CdekSales, shipment_id
 from app.cdek_sales_routes import register_cdek_sales_routes
+from app.cdek_payouts_routes import register_cdek_payouts_routes
+from app.services.cdek_payouts import CdekPayouts, discover_references
 from app.clients.smsbliss import (
     SmsBlissClient,
     SmsBlissError,
@@ -4346,6 +4348,21 @@ register_cdek_sales_routes(
     app, CDEK_SALES, lambda: api_sales_records(), can_view_orders,
     require_csrf_when_authenticated, lambda: (current_auth_user() or {}).get("id", "local"),
     find_orders=lambda number: OrdersSnapshotStore().query({"q": number, "source": "tictactoy", "period": "all", "status": "all"})["rows"],
+)
+
+
+CDEK_PAYOUTS = CdekPayouts(
+    path=os.getenv("CDEK_PAYOUTS_DIR") or str(CDEK_DELIVERY.path / "payouts"),
+)
+
+
+def cdek_payout_references():
+    return discover_references(CDEK_DELIVERY, api_sales_records())
+
+
+register_cdek_payouts_routes(
+    app, CDEK_PAYOUTS, cdek_payout_references, can_view_orders,
+    require_csrf_when_authenticated,
 )
 
 

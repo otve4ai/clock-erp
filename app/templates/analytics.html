@@ -30,6 +30,7 @@
         </form>
 
         <nav class="analytics-tabs" aria-label="Подразделы аналитики">
+            <a href="{{ url_for('cdek_payouts_page') }}">Выплаты СДЭК ↗</a>
             {% for key,label in analytics.sections %}
             <a href="{{ url_for('analytics_page', section=key, from=analytics.filters.from, to=analytics.filters.to, channel=analytics.filters.channel, brand=analytics.filters.brand) }}" data-analytics-section="{{ key }}"{% if analytics.section == key %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
             {% endfor %}
