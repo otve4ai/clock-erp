@@ -128,6 +128,7 @@
         if (!micro) { const priority = node('span', `tm-priority tm-priority-${task.priority}`); priority.title = {low: 'Низкий', normal: 'Обычный', high: 'Высокий'}[task.priority]; row.append(priority); }
         row.append(assignee(task.assigned_to));
         const late = task.status !== 'done' && (micro ? Date.parse(task.micro_deadline_at) < now() : task.deadline_date && task.deadline_date < today());
+        if (micro) row.classList.toggle('tm-micro-late', !!late);
         const date = node('span', `tm-deadline${late ? ' tm-overdue' : ''}`, micro ? (task.status === 'done' ? 'Готово' : remaining(task.micro_deadline_at)) : task.deadline_date === today() ? 'Сегодня' : displayDate(task.deadline_date));
         date.title = micro ? displayInstant(task.micro_deadline_at) : displayDate(task.deadline_date); row.append(date);
         if (micro && task.status !== 'done') date.dataset.microDeadline = task.micro_deadline_at;
@@ -185,6 +186,8 @@
         return values;
     }
     function syncChrome() {
+        $('#tm-content-layout').classList.toggle('tm-projects-view', state.view === 'projects');
+        $('#tm-content-layout').classList.toggle('tm-micro-view', state.view === 'micro');
         const project = state.view === 'project'; const archive = state.view === 'archive'; const micros = state.view === 'micro';
         const hasFilters = !['inbox', 'projects'].includes(state.view);
         $('#tm-title').textContent = project ? state.project.name : viewNames[state.view];
@@ -210,6 +213,7 @@
         $$('[data-scope]').forEach(item => item.setAttribute('aria-pressed', String(state.scope === item.dataset.scope)));
         $$('.tm-nav [data-view]').forEach(item => { if (item.dataset.view === state.view) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current'); });
         if (project) {
+            $('#tm-project-current').textContent = state.project.name;
             $('#tm-project-settings').hidden = !state.project.permissions.manage;
             $('#tm-project-archive-label').textContent = state.project.archived_at ? 'Проект в архиве' : '';
             $$('[data-project-mode]').forEach(item => item.setAttribute('aria-pressed', String(item.dataset.projectMode === state.projectMode)));
@@ -243,13 +247,28 @@
     }
     function renderProjects(root, data) {
         if (!data.items.length) { empty(root, 'Проектов пока нет', 'Создайте проект для совместной работы.'); return; }
+        const grid = node('div', 'tm-project-grid');
         data.items.forEach(project => {
             state.projects.set(project.id, project);
-            const row = node('div', 'tm-inbox-row'); const content = node('div');
-            content.append(button(project.name, () => navigate('project', {project: project.id}), 'tm-link'), node('p', '', `Владелец: ${name(project.owner_id)}`));
-            row.append(content, node('span', 'tm-muted', `${project.counters.open} открыто · ${project.counters.in_progress} в работе`));
-            if (project.counters.overdue) row.append(node('span', 'tm-overdue', `${project.counters.overdue} просрочено`)); root.append(row);
+            const card = button('', () => navigate('project', {project: project.id}), 'tm-project-card');
+            const heading = node('span', 'tm-project-card-heading');
+            const mark = node('span', 'tm-project-mark', project.name.trim().slice(0, 1).toUpperCase());
+            mark.setAttribute('aria-hidden', 'true');
+            const arrow = node('span', 'tm-chevron', '›'); arrow.setAttribute('aria-hidden', 'true');
+            heading.append(mark, node('strong', 'tm-project-card-title', project.name));
+            const owner = node('span', 'tm-project-owner');
+            owner.append(node('span', '', 'Владелец'), assignee(project.owner_id));
+            const stats = node('span', 'tm-project-stats');
+            [['Открыто', project.counters.open], ['В работе', project.counters.in_progress]].forEach(([label, count]) => {
+                const stat = node('span', 'tm-project-stat');
+                stat.append(node('strong', '', count), node('span', '', label)); stats.append(stat);
+            });
+            if (project.counters.overdue) stats.append(node('span', 'tm-project-overdue', `Просрочено: ${project.counters.overdue}`));
+            if (project.archived_at) owner.append(node('span', 'tm-muted', 'В архиве'));
+            card.append(heading, owner, stats, arrow);
+            grid.append(card);
         });
+        root.append(grid);
     }
     function renderInbox(root, data) {
         if (!data.items.length) { empty(root, 'Входящих нет', 'Новые назначения появятся здесь.'); return; }
@@ -347,6 +366,13 @@
         state.filters = options.filters || {}; state.page = 0; state.search = options.search || ''; $('#tm-search').value = state.search;
         state.project = state.view === 'project' ? {id: Number(options.project)} : null; state.projectMode = 'list';
         if (state.view === 'project' && !(state.project.id > 0)) state.view = 'projects';
+        const back = $('#tm-back');
+        back.hidden = state.view === 'main';
+        back.dataset.target = state.view === 'project' ? 'projects' : 'main';
+        back.textContent = state.view === 'project' ? '← Все проекты' : '← Все задачи';
+        back.setAttribute('href', '?view=' + back.dataset.target);
+        $('#tm-project-path').hidden = state.view !== 'project';
+        $('#tm-project-current').textContent = 'Проект';
         $('#tm-filters').reset(); $('#tm-filters').hidden = true; $('#tm-filters-toggle').setAttribute('aria-expanded', 'false');
         $$('[data-period]').forEach(item => item.setAttribute('aria-pressed', String(item.dataset.period === 'all')));
         Object.entries(state.filters).forEach(([key, value]) => { const control = $(`[name="${key}"]`, $('#tm-filters')); if (control) control.value = value; });
@@ -371,6 +397,9 @@
     }
     async function initialize() {
         collapseMicro(microCollapsed);
+        $('#tm-back').addEventListener('click', event => { event.preventDefault(); navigate($('#tm-back').dataset.target); });
+        $('#tm-project-parent').addEventListener('click', event => { event.preventDefault(); navigate('projects'); });
+        $('#tm-project-home').addEventListener('click', event => { event.preventDefault(); navigate('main'); });
         $$('[data-view]').forEach(link => link.addEventListener('click', event => { event.preventDefault(); navigate(link.dataset.view); }));
         $$('[data-scope]').forEach(item => item.addEventListener('click', () => { state.scope = item.dataset.scope; state.page = 0; loadList(); }));
         $$('[data-micro-scope]').forEach(item => item.addEventListener('click', () => { state.microScope = item.dataset.microScope; microPreview().catch(error => showError(error, '#tm-micro-error')); }));
@@ -414,7 +443,11 @@
         document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(true); });
         const clockTimer = setInterval(() => {
             if (document.hidden) return;
-            $$('[data-micro-deadline]').forEach(item => { item.textContent = remaining(item.dataset.microDeadline); item.classList.toggle('tm-overdue', Date.parse(item.dataset.microDeadline) < now()); });
+            $$('[data-micro-deadline]').forEach(item => {
+                const late = Date.parse(item.dataset.microDeadline) < now();
+                item.textContent = remaining(item.dataset.microDeadline); item.classList.toggle('tm-overdue', late);
+                const row = item.closest('.tm-row-micro'); if (row) row.classList.toggle('tm-micro-late', late);
+            });
             if (state.businessDate && state.businessDate !== today()) refresh(true);
         }, 60000);
         window.addEventListener('pagehide', () => clearInterval(clockTimer), {once: true});
