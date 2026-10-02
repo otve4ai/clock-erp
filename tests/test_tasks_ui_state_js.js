@@ -141,8 +141,29 @@ async function projectCountersAfterStatus() {
     assert.equal(h.ui.state.activeProjects[0].counters.open, 0);
     assert.equal(h.element('#tm-project-preview').children[0].children[2].textContent, '0 открыто');
 }
+async function returnFromUnavailableProject() {
+    const h = harness(); await h.initialize();
+    const original = h.respond;
+    h.respond = url => url.startsWith('/projects/42') ? Promise.reject({status: 404, message: 'Not found'}) : original(url);
+    h.ui.navigate('project', {project: 42});
+    const back = h.element('#tm-back');
+    assert.equal(back.hidden, false);
+    assert.equal(back.textContent, '← Все проекты');
+    assert.equal(back.attributes.href, '?view=projects');
+    assert.equal(h.element('#tm-project-path').hidden, false);
+    await flush();
+    assert.equal(back.hidden, false, 'Return remains available after a failed direct project load');
+    h.element('#tm-project-parent').listeners.click({preventDefault() {}}); await flush();
+    assert.equal(h.ui.state.view, 'projects');
+    assert.equal(h.element('#tm-project-path').hidden, true);
+    assert.equal(back.textContent, '← Все задачи');
+    back.listeners.click({preventDefault() {}}); await flush();
+    assert.equal(h.ui.state.view, 'main');
+    assert.equal(back.hidden, true);
+}
 (async () => {
     await inboxFailure(); await searchNavigation(); await referencesOutOfOrder(false); await referencesOutOfOrder(true);
     await finalPolish(); await microRecovery(); await projectCountersAfterStatus();
-    console.log('Tasks UI state regressions: 7 checks PASS');
+    await returnFromUnavailableProject();
+    console.log('Tasks UI state regressions: 8 checks PASS');
 })().catch(error => { console.error(error); process.exitCode = 1; });

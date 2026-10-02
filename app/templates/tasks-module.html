@@ -11,6 +11,7 @@
 <body class="tasks-module-page">
 <div class="app">{% include "_sidebar.html" %}
 <main id="main-content" class="tm-main" tabindex="-1">
+    <a id="tm-back" class="tm-back" href="?view=main" hidden>← Все задачи</a>
     <header class="erp-workspace-header tm-header">
         <div class="erp-workspace-heading"><h1 id="tm-title">Задачи</h1><p id="tm-subtitle">Мои задачи, микрозадачи, проекты и работа команды</p></div>
         <div class="tm-header-actions"><label class="tm-search"><span aria-hidden="true">⌕</span><input id="tm-search" type="search" placeholder="Поиск по задачам…" aria-label="Поиск по задачам"></label><button class="tm-primary" id="tm-create">＋ Новая задача</button></div>
@@ -40,6 +41,11 @@
     <div id="tm-error" class="tm-error" role="alert" hidden><span></span><button id="tm-retry">Повторить</button></div>
     <div class="tm-content-layout" id="tm-content-layout">
         <section class="tm-workspace" aria-label="Рабочая область задач">
+            <nav id="tm-project-path" class="tm-project-path" aria-label="Навигация проекта" hidden>
+                <a id="tm-project-home" href="?view=main">Задачи</a><span aria-hidden="true">/</span>
+                <a id="tm-project-parent" href="?view=projects">Все проекты</a><span aria-hidden="true">/</span>
+                <span id="tm-project-current" aria-current="page">Проект</span>
+            </nav>
             <div class="tm-toolbar" id="tm-toolbar">
                 <div class="tm-scopes" id="tm-scopes" role="group" aria-label="Область задач">
                     {% for key,label in [('my','Мои'),('created','Поставленные мной'),('team','Команда'),('all','Все')] %}<button data-scope="{{ key }}">{{ label }}</button>{% endfor %}
