@@ -1,9 +1,10 @@
 """Read-only delivery reconciliation plus local manager annotations."""
 from urllib.parse import urlsplit
 
-from flask import abort, redirect, render_template, request, url_for
+from flask import jsonify, abort, redirect, render_template, request, url_for
 
 from app.clients.cdek import CdekError
+from app.services.cdek_sync import CdekSync
 from app.services.cdek_sales import CATEGORIES, WORK, group_sales, order_number_key
 
 
@@ -22,6 +23,21 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor, f
     def authorize():
         if not allowed():
             abort(403)
+
+    sync = CdekSync(service.delivery)
+
+    @app.route("/sales/cdek/sync-status", methods=["GET", "POST"])
+    def cdek_sales_sync_status():
+        authorize()
+        try:
+            if request.method == "POST":
+                csrf()
+                sync.start(lambda: group_sales(load_sales()), app)
+            result = sync.summary()
+            _, counts = service.summary(service.rows(load_sales()))
+            return jsonify(dict(result, counts=counts)), 202 if request.method == "POST" else 200
+        except CdekError as error:
+            return jsonify(message=str(error)), 409 if error.code == "CDEK_BUSY" else 503
 
     def selection(key):
         item = next((r for r in group_sales(load_sales()) if r["id"] == key), None)

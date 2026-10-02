@@ -1,8 +1,8 @@
 [Unit]
-Description=Vechasu CDEK delivery polling every ten minutes
+Description=Vechasu CDEK delivery polling every sixty minutes
 
 [Timer]
-OnCalendar=*-*-* *:00/10:00
+OnCalendar=*-*-* *:00:00
 AccuracySec=10s
 Persistent=true
 Unit=vechasu-cdek-sync.service
