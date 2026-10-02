@@ -114,7 +114,7 @@ class CdekDelivery:
             return {"configured": self.client.configured, "error": str(error)}
         data = dict(data)
         data["configured"] = self.client.configured
-        max_age = 90000 if data.get("status_code") in TERMINAL else 1200
+        max_age = 90000 if data.get("status_code") in TERMINAL else 7200
         data["stale"] = bool(data.get("checked_at") and self.clock() - data["checked_at"] > max_age)
         return data
 
@@ -192,7 +192,7 @@ class CdekDelivery:
             self._write(order_id, data)
             return data
 
-    def sync_pending(self, orders, limit=100, budget=180, sleep=time.sleep):
+    def sync_pending(self, orders, limit=100, budget=180, sleep=time.sleep, manual=False):
         """Fair, bounded polling; completed shipments are rechecked daily."""
         if not self.client.configured:
             raise CdekError("CDEK_NOT_CONFIGURED", "Ключ API СДЭК ещё не подключён к ERP.")
@@ -208,7 +208,9 @@ class CdekDelivery:
                 continue
             data = self.view(order)
             attempted = data.get("attempted_at", 0)
-            interval = 86400 if data.get("status_code") in TERMINAL else 3600 if data.get("error") else 600
+            interval = 86400 if data.get("status_code") in TERMINAL else 3600
+            if manual:
+                interval = 60
             if attempted and self.clock() - attempted < interval:
                 result["skipped"] += 1
             else:
@@ -227,4 +229,5 @@ class CdekDelivery:
                 if error.code in {"CDEK_UNAUTHORIZED", "CDEK_NETWORK", "CDEK_RATE_LIMIT", "CDEK_BUSY", "CDEK_CACHE"}:
                     break
             sleep(0.3)
+        result["remaining"] = max(0, len(candidates) - result["updated"] - result["errors"])
         return result

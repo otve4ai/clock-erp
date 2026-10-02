@@ -109,10 +109,10 @@ class SalesDeliveryTest(unittest.TestCase):
             with self.assertRaises(CdekError) as raised:
                 self.service.save_review(group, dict(version=0, work="new", **{field: "2026-1-1"}), "1")
             self.assertEqual(raised.exception.code, "CDEK_FORM")
-        self.service.save_review(group, dict(version=0, work="tomorrow", storage_until="2026-10-01"), "1")
+        self.service.save_review(group, dict(version=0, work="working", storage_until="2026-10-01"), "1")
         row = self.service.rows(self.sales)[0]
         self.assertEqual(row["priority"], 2)
-        self.assertEqual(row["review"]["followup"], "2026-10-02")
+        self.assertEqual(row["review"]["followup"], "")
         self.service.save_review(group, dict(version=1, work="working", storage_until="2026-10-10"), "1")
         self.assertEqual(self.service.rows(self.sales)[0]["priority"], 0)
 
@@ -135,25 +135,63 @@ class SalesDeliveryTest(unittest.TestCase):
         self.assertEqual(row["priority"], 2)
         self.assertIn("6 сут.", row["wait"])
 
-    def test_followup_becomes_due_without_hiding_problem(self):
+    def test_legacy_states_keep_notes_and_clear_followups(self):
         group = self.seed(age=0)
-        self.service.save_review(group, dict(version=0, work="tomorrow"), "1")
-        self.now += 2 * 86400
-        row = self.service.rows(self.sales)[0]
-        self.assertEqual(row["work"], "today")
-        self.assertEqual(row["priority"], 2)
+        self.service.review_path.mkdir(parents=True, exist_ok=True)
+        path = self.service.review_path / (group["id"] + ".json")
+        for old, expected in [("today", "new"), ("tomorrow", "new")]:
+            path.write_text(json.dumps(dict(version=3, work=old, note="Позвонили", followup="2026-09-01")), encoding="utf-8")
+            row = self.service.rows(self.sales)[0]
+            self.assertEqual(row["review"]["work"], expected)
+            self.assertEqual(row["review"]["note"], "Позвонили")
+            self.assertEqual(row["priority"], 0)
+            with self.assertRaises(CdekError):
+                self.service.save_review(group, dict(version=3, work=old), "1")
 
     def test_delivered_closes_pickup_problem_and_return_needs_confirmation(self):
         group = self.seed(age=6)
-        self.service.save_review(group, dict(version=0, work="today"), "1")
+        self.service.save_review(group, dict(version=0, work="new"), "1")
         self.now += 61
         self.seed("DELIVERED", age=0)
         self.assertEqual(self.service.rows(self.sales)[0]["issues"], [])
         self.now += 61
         self.seed("DELIVERED", age=0, is_return=True)
         self.assertEqual(self.service.rows(self.sales)[0]["label"], "Возврат")
-        self.service.save_review(group, dict(version=1, work="closed"), "1")
+        path = self.service.review_path / (group["id"] + ".json")
+        path.write_text(json.dumps(dict(version=2, work="closed", note="", closed_event=self.delivery.view(group)["date_display"])), encoding="utf-8")
         self.assertEqual(self.service.rows(self.sales)[0]["issues"], [])
+
+    def test_verified_return_leaves_problems_but_remains_in_all_and_can_reopen(self):
+        group = self.seed("DELIVERED", age=0, is_return=True)
+        self.service.save_review(group, dict(version=0, work="closed", note="Возврат осмотрен"), "1")
+        row = self.service.rows(self.sales)[0]
+        self.assertEqual(row["work"], "closed")
+        self.assertFalse(row["issues"])
+        active, counts = self.service.summary([row])
+        self.assertEqual(len(active), 1)
+        self.assertEqual(counts["problems"], 0)
+        self.service.save_review(group, dict(version=1, work="new"), "1")
+        self.assertTrue(self.service.rows(self.sales)[0]["issues"])
+
+    def test_reaction_rules_and_working_override(self):
+        for code, age, expected in [("ACCEPTED_AT_PICK_UP_POINT", 6, False),
+                                    ("ACCEPTED_AT_PICK_UP_POINT", 7, True),
+                                    ("SENT_TO_RECIPIENT_CITY", 8, False),
+                                    ("NOT_DELIVERED", 0, True), ("DELIVERED", 0, False)]:
+            self.now += 61
+            group = self.seed(code, age=age)
+            row = self.service.rows(self.sales)[0]
+            self.assertEqual(row["needs_reaction"], expected)
+            self.assertEqual(row["work"], "new" if expected else "")
+        self.now += 61
+        group = self.seed(age=0)
+        self.service.save_review(group, dict(version=0, work="new", storage_until="2026-10-01"), "1")
+        self.assertEqual(self.service.rows(self.sales)[0]["work"], "new")
+        self.service.save_review(group, dict(version=1, work="working"), "1")
+        self.assertEqual(self.service.rows(self.sales)[0]["work"], "working")
+        self.now += 61
+        self.seed("DELIVERED", age=0, is_return=True)
+        self.assertTrue(self.service.rows(self.sales)[0]["needs_reaction"])
 
     def test_cannot_close_undelivered_return(self):
         group = self.seed("NOT_DELIVERED")
@@ -206,8 +244,38 @@ class CdekSalesRoutesTest(unittest.TestCase):
         self.app.jinja_env.globals["csrf_token"] = lambda: "test-token"
         self.allowed = mock.Mock(return_value=True)
         self.csrf = mock.Mock()
-        register_cdek_sales_routes(self.app, self.service, lambda: self.sales, self.allowed, self.csrf, lambda: "employee")
+        self.find_orders = mock.Mock(return_value=[])
+        self.app.add_url_rule("/order/<int:order_id>", "order_page", lambda order_id: "order")
+        self.app.add_url_rule("/orders", "orders_page", lambda: "orders")
+        register_cdek_sales_routes(self.app, self.service, lambda: self.sales, self.allowed, self.csrf, lambda: "employee", find_orders=self.find_orders)
         self.client = self.app.test_client()
+
+    def test_manager_options_and_colored_states_match(self):
+        group = self.seed(age=7)
+        for state, tone, label in [("new", "red", "Нужна реакция"), ("working", "blue", "В работе")]:
+            version = self.service.review(group["id"])["version"]
+            self.service.save_review(group, dict(version=version, work=state), "1")
+            html = self.client.get("/sales/cdek?shipment=" + group["id"] + "&work=" + state).get_data(as_text=True)
+            self.assertIn('cdek-badge cdek-' + tone + '">' + label, html)
+            for removed in ("today", "tomorrow"):
+                self.assertNotIn('value="' + removed + '"', html)
+            self.assertNotIn("Повторный контакт", html)
+
+    def test_order_links_resolve_exact_number_without_assuming_it_is_id(self):
+        self.find_orders.return_value = [{"id": "99", "number": "123"}, {"id": "123", "number": "456"}]
+        response = self.client.get("/sales/cdek/order/123")
+        self.assertEqual(response.location, "/order/99")
+        self.find_orders.return_value = []
+        self.assertIn("/orders?source=tictactoy&q=123", self.client.get("/sales/cdek/order/123").location)
+        self.find_orders.return_value = [{"id": "99", "number": "123"}, {"id": "98", "number": "123"}]
+        self.assertIn("/orders?", self.client.get("/sales/cdek/order/123").location)
+        self.sales = [sale("123"), sale("456")]
+        html = self.client.get("/sales/cdek?mode=all").get_data(as_text=True)
+        self.assertIn('href="/sales/cdek/order/123"', html)
+        self.assertIn('href="/sales/cdek/order/456"', html)
+        self.assertIn('class="cdek-button cdek-open"', html)
+        self.allowed.return_value = False
+        self.assertEqual(self.client.get("/sales/cdek/order/123").status_code, 403)
 
     def test_page_uses_cache_only_filters_details_escapes_and_returns_to_sales(self):
         group = self.seed()
@@ -237,7 +305,7 @@ class CdekSalesRoutesTest(unittest.TestCase):
         self.assertIn("sort=order_asc", html)
         html = self.client.get("/sales/cdek?mode=all&sort=order_desc&page=2").get_data(as_text=True)
         self.assertLess(html.index(">5</a>"), html.index(">1</a>"))
-        self.assertLess(html.index(">1</a>"), html.index(">Без номера заказа</a>"))
+        self.assertLess(html.index(">1</a>"), html.index(">Без номера заказа</span>"))
         self.assertIn('name="sort" value="order_desc"', self.client.get(
             "/sales/cdek?mode=all&sort=order_desc&shipment=" + shipment_id(self.sales[0])
         ).get_data(as_text=True))
@@ -279,6 +347,17 @@ class CdekSalesRoutesTest(unittest.TestCase):
         response = self.client.post(url, data=form)
         self.assertEqual(response.status_code, 409)
         self.assertIn(b"unsaved &lt;note&gt;", response.data)
+
+    def test_batch_endpoint_auth_csrf_and_background_dispatch(self):
+        with mock.patch("app.cdek_sales_routes.CdekSync.start") as start:
+            response = self.client.post("/sales/cdek/sync-status", data={"csrf_token": "test"})
+            self.assertEqual(response.status_code, 202)
+            self.csrf.assert_called_once()
+            start.assert_called_once()
+            self.assertIn("counts", response.get_json())
+        self.allowed.return_value = False
+        self.assertEqual(self.client.get("/sales/cdek/sync-status").status_code, 403)
+        self.assertEqual(self.client.post("/sales/cdek/sync-status").status_code, 403)
 
     def test_safe_return_url(self):
         for target in ("https://evil.example", "//evil.example", "/sales\\evil", "/settings", "/sales\n"):

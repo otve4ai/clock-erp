@@ -1658,6 +1658,7 @@
     <noscript><style>.sales-table-card-initializing { visibility: visible !important; }</style></noscript>
     <link rel="stylesheet" href="{{ static_asset_url('css/sale-stock-notification.css') }}">
     <script defer src="{{ static_asset_url('js/sale-stock-notification.js') }}"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/sync-popover.css') }}">
 </head>
 
 <body class="sales-page sales-list-page">
@@ -1722,10 +1723,7 @@
 
             <div class="sales-page-actions erp-workspace-actions">
                 {% if active_source in ['all', 'tictactoy'] %}
-                <a class="button button-secondary cdek-audit-link" href="{{ cdek_audit_url }}">
-                    <span class="cdek-dot cdek-{{ 'red' if cdek_summary.urgent else 'yellow' if cdek_summary.problems else 'green' }}" aria-hidden="true"></span>
-                    Сверка СДЭК · {{ cdek_summary.problems }} проблем
-                </a>
+                {% include '_cdek_sync_indicator.html' %}
                 {% endif %}
                 <a
                     id="salesReportLink"
@@ -5350,6 +5348,7 @@
             created_at: 108,
             order_number: 118,
             track_number: 108,
+            cdek_status: 122,
             barcode: 112,
             source: 90,
             brand: 90,
@@ -9113,6 +9112,7 @@
     })();
 </script>
 {% endif %}
+<script src="{{ url_for('static', filename='js/cdek-sync.js') }}" defer></script>
 </body>
 {% if pagination_e2e %}<script src="{{ url_for('static', filename='js/pagination-e2e.js') }}"></script>{% endif %}
 </html>

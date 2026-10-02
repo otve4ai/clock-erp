@@ -58,3 +58,75 @@ html[data-theme] a.cdek-badge{color:var(--cdek-ink)}
 .cdek-rules{font-size:12px;color:var(--erp-muted);margin-top:16px}.cdek-rules li{margin:7px 0}.cdek-rules summary{cursor:pointer;color:var(--erp-text)}
 body.cdek-body{margin:0;background:var(--erp-canvas);font-family:var(--erp-font-family)}.cdek-body .app{display:flex;min-height:100vh}.cdek-body .main{flex:1;min-width:0}
 @media(max-width:700px){.cdek-page{padding:14px}.cdek-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.cdek-stat-problem{grid-column:1/-1}.cdek-detail-grid{grid-template-columns:1fr}.cdek-page input,.cdek-page select,.cdek-page textarea{font-size:16px}.cdek-toolbar>*{max-width:100%}}
+
+/* Match the shared Products workspace without changing delivery semantics. */
+.cdek-page{max-width:none;padding:24px 26px;font-size:13px;line-height:1.4}
+.cdek-page .erp-workspace-heading h1{font-size:clamp(22px,2vw,26px);margin:0}
+.cdek-stats.erp-workspace-metrics{--erp-workspace-metric-count:5;margin:16px 0 12px}
+.cdek-stat.erp-workspace-metric{min-height:70px;padding:10px 14px}
+.cdek-stat small{display:block;margin-top:4px;font-size:11px}
+.cdek-stat .erp-stat-value{margin:0;font-size:23px}
+.cdek-stat-problem.erp-workspace-metric{background:color-mix(in srgb,var(--erp-danger) 4%,var(--erp-surface))}
+.cdek-stat-problem .erp-stat-value{color:var(--erp-danger)}
+.cdek-panel{border:0;border-radius:0;background:transparent;overflow:visible}
+.cdek-mode{padding:0;margin-bottom:12px;min-height:44px}
+.cdek-mode nav{gap:4px;align-self:stretch}
+.cdek-mode nav a,html[data-theme] .cdek-mode nav a{display:inline-flex;align-items:center;padding:10px 14px;color:var(--erp-muted);font-weight:700;border-radius:8px 8px 0 0;box-shadow:none}
+.cdek-mode nav a[aria-current],html[data-theme] .cdek-mode nav a[aria-current]{color:var(--erp-primary);background:color-mix(in srgb,var(--erp-primary) 5%,var(--erp-surface));box-shadow:inset 0 -2px var(--erp-primary)}
+.cdek-mode>a,html[data-theme] .cdek-mode>a{padding:7px 11px;border:1px solid var(--erp-border);border-radius:8px;color:var(--erp-muted);font-weight:600;box-shadow:none}
+.cdek-mode>a[aria-current],html[data-theme] .cdek-mode>a[aria-current]{color:var(--erp-danger);border-color:var(--erp-danger);background:color-mix(in srgb,var(--erp-danger) 5%,var(--erp-surface))}
+.cdek-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) auto auto auto auto;gap:8px;padding:7px;margin:0 0 12px;border:1px solid var(--erp-border);border-radius:14px;background:var(--erp-surface);box-shadow:var(--erp-shadow)}
+.cdek-toolbar input,.cdek-toolbar select,.cdek-toolbar button{height:40px;min-height:40px;min-width:0;font-size:13px;border-radius:9px;box-sizing:border-box}
+.cdek-toolbar input{padding:0 12px}
+.cdek-toolbar select{padding:0 28px 0 10px;max-width:235px}
+.cdek-toolbar button{padding:0 16px;font-weight:700}
+.cdek-categories{gap:6px;padding:0;margin:0 0 16px}
+.cdek-categories a,html[data-theme] .cdek-categories a{padding:6px 11px;border:1px solid var(--erp-border);border-radius:8px;background:var(--erp-surface);color:var(--erp-muted);font-size:12px;font-weight:600;box-shadow:none}
+.cdek-categories a[aria-current],html[data-theme] .cdek-categories a[aria-current]{color:var(--erp-text);background:var(--erp-surface-muted);border-color:var(--erp-muted)}
+.cdek-scroll{border:1px solid var(--erp-border);border-radius:14px 14px 0 0;background:var(--erp-surface)}
+.cdek-table{font-size:13px;line-height:1.4;min-width:1000px;table-layout:auto}
+.cdek-table th{font-size:12px;font-weight:750;padding:13px 16px;white-space:nowrap}
+.cdek-table td{padding:12px 16px;height:64px;box-sizing:border-box}
+.cdek-table td small{font-size:11px;margin-top:5px}
+.cdek-manager-comment{min-width:180px;max-width:300px}
+.cdek-manager-comment>span{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;white-space:pre-line}
+.cdek-table td:first-child>a,html[data-theme] .cdek-table td:first-child>a{font-weight:700;color:var(--erp-text);text-decoration:none}
+.cdek-table td:first-child>a:hover,html[data-theme] .cdek-table td:first-child>a:hover{color:var(--erp-primary);text-decoration:underline}
+.cdek-table tbody tr:nth-child(even){background:color-mix(in srgb,var(--erp-surface-muted) 45%,var(--erp-surface))}
+.cdek-table tbody tr:hover{background:color-mix(in srgb,var(--erp-primary) 4%,var(--erp-surface))}
+.cdek-page .cdek-button{font-size:13px;font-weight:650;min-height:40px;padding:9px 13px;box-sizing:border-box;border-radius:9px}
+.cdek-table .cdek-button.cdek-open,html[data-theme] .cdek-table .cdek-button.cdek-open{min-height:32px;padding:6px 10px;font-size:12px;color:var(--erp-text)}
+.cdek-footer{border:1px solid var(--erp-border);border-top:0;border-radius:0 0 14px 14px;background:var(--erp-surface);font-size:12px;color:var(--erp-muted);padding:10px 16px}
+.cdek-footer .cdek-button{min-height:30px;padding:4px 10px}
+.cdek-notice{font-size:12px;line-height:1.5}
+@media(max-width:1200px){.cdek-toolbar{grid-template-columns:minmax(160px,1fr) minmax(160px,1fr) auto auto}.cdek-toolbar input[name="q"]{grid-column:1/-1}.cdek-toolbar select{max-width:none}}
+@media(max-width:700px){.cdek-page{padding:16px}.cdek-stats.erp-workspace-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.cdek-toolbar{grid-template-columns:1fr 1fr}.cdek-toolbar input,.cdek-toolbar select{font-size:16px;width:100%}.cdek-mode{gap:10px;padding-bottom:10px}.cdek-mode nav a{padding:10px}.cdek-heading.erp-workspace-header{align-items:flex-start}.cdek-table td{padding:10px 12px}.cdek-page .cdek-drawer-close{min-height:36px;padding:5px 9px;font-size:25px}}
+
+.cdek-sync-control{padding-right:0;border-right:0}
+.cdek-sync-control .product-site-sync-panel{width:min(460px,calc(100vw - 32px));right:0;z-index:var(--erp-z-dropdown,1200);max-height:calc(100dvh - 120px);overflow:auto}
+.cdek-sync-control .product-site-sync-panel[hidden]{display:none}
+.cdek-sync-feedback{font-size:12px;padding:0 11px 9px;color:var(--erp-muted,#64748b)}
+.cdek-sync-feedback:empty{display:none}
+.cdek-sync-control .product-site-sync-panel__footer{flex-wrap:wrap}
+@media(max-width:700px){.cdek-sync-control .product-site-sync-panel{position:fixed;left:12px;right:12px;top:100px;width:auto;max-width:none}}
+
+/* Navigation in the CDEK popover uses a secondary button in both themes. */
+.cdek-sync-control a.cdek-all-shipments,
+html[data-theme] .cdek-sync-control a.cdek-all-shipments{
+    background:var(--erp-surface,#fff);
+    color:var(--erp-text,#172033);
+    border:1px solid var(--erp-border-strong,#cbd5e1);
+    text-decoration:none;
+}
+.cdek-sync-control a.cdek-all-shipments:hover,
+html[data-theme] .cdek-sync-control a.cdek-all-shipments:hover{
+    background:var(--erp-surface-muted,#f8fafc);
+    color:var(--erp-text,#172033);
+}
+.cdek-sync-control a.cdek-all-shipments:focus-visible{
+    outline:2px solid var(--erp-primary,#2563eb);
+    outline-offset:2px;
+}
+
+.cdek-sync-control .product-site-sync-panel__header{flex-wrap:wrap}
+.cdek-sync-control .product-site-sync-panel__actions{margin-left:auto;flex-wrap:wrap}
