@@ -31,7 +31,7 @@
         invoice_number: 160,
     };
     const minimumWidths = {
-        created_at: 108, order_number: 118, track_number: 108, barcode: 112,
+        created_at: 108, order_number: 118, track_number: 108, cdek_status: 122, barcode: 112,
         source: 90, brand: 90, category: 108, product_name: 220,
         article: 108, quantity_display: 90, unit_price_display: 112,
         commission: 220, order_status_label: 104,

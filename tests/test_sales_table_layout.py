@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import subprocess
 import unittest
@@ -89,6 +90,29 @@ process.stdout.write(JSON.stringify(layout.computeColumnWidths(options)));
         })
         self.assertEqual(result["widths"], {"a": 250, "b": 120, "c": 100})
         self.assertTrue(result["overflow"])
+
+    def test_cdek_stays_visible_with_many_enabled_sales_columns(self):
+        # Exercise both real configurations: first paint and later resizing.
+        for path in (INITIAL_LAYOUT_SCRIPT, PROJECT_ROOT / "app/templates/sales.html"):
+            source = path.read_text(encoding="utf-8")
+            widths = {}
+            for name in ("defaultWidths", "minimumWidths"):
+                block = re.search(r"const " + name + r" = \{([^}]+)\}", source).group(1)
+                widths[name] = {
+                    key: int(value)
+                    for key, value in re.findall(r"(\w+):\s*(\d+)", block)
+                }
+            for container in (800, 1640):
+                with self.subTest(path=path.name, container=container):
+                    result = self.compute({
+                        "keys": list(widths["defaultWidths"]),
+                        "preferredWidths": widths["defaultWidths"],
+                        "minimumWidths": widths["minimumWidths"],
+                        "containerWidth": container,
+                        "actionWidth": 116,
+                    })
+                    self.assertGreaterEqual(result["widths"]["cdek_status"], 122)
+                    self.assertTrue(result["overflow"])
 
     def test_shared_native_controller_moves_only_requested_column(self):
         if not self.node:
