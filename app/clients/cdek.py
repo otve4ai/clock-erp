@@ -75,6 +75,30 @@ class CdekClient:
         self._token = token
         self._expires = self._clock() + max(0, lifetime - 60)
 
+    def get_registries(self, day):
+        """Payment registries for one payment date, using the existing credentials."""
+        from datetime import datetime
+        datetime.strptime(day, "%Y-%m-%d")
+        with self._lock:
+            for attempt in range(2):
+                self._authorize()
+                try:
+                    result = self._request("GET", "/registries", params={"date": day}, headers={
+                        "Accept": "application/json", "Authorization": "Bearer " + self._token,
+                    })
+                    break
+                except CdekError as error:
+                    if error.code != "CDEK_UNAUTHORIZED" or attempt:
+                        raise
+                    self._token = ""
+                    self._expires = 0
+        # CDEK returns an empty object on dates without registries.
+        if result == {}:
+            return []
+        if not isinstance(result.get("registries"), list):
+            raise CdekError("CDEK_RESPONSE", "Не удалось прочитать реестры перечислений.")
+        return result["registries"]
+
     def get_order(self, cdek_number="", im_number=""):
         """Fetch one shipment; explicit waybill takes precedence over shop number."""
         value = str(cdek_number or im_number or "").strip()
