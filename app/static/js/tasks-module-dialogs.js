@@ -31,10 +31,23 @@
         else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) { event.preventDefault(); last.focus(); }
         else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) { event.preventDefault(); first.focus(); }
     });
+    function fitDescription(control) {
+        control.style.height = 'auto';
+        const style = window.getComputedStyle(control);
+        const border = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+        control.style.height = `${Math.ceil(control.scrollHeight + border)}px`;
+    }
+    window.addEventListener('resize', () => {
+        if (!dialog.hidden) $$('textarea[name=description]', body).forEach(fitDescription);
+    });
     function field(form, name, label, type = 'text', value = '', wide = false) {
         const wrapper = node('label', `tm-field${wide ? ' tm-wide' : ''}`); const control = node(type === 'select' ? 'select' : type === 'textarea' ? 'textarea' : 'input');
         if (!['select', 'textarea'].includes(type)) control.type = type;
         control.name = name; control.value = value === null ? '' : value;
+        if (type === 'textarea' && name === 'description') {
+            control.rows = 5;
+            control.addEventListener('input', () => fitDescription(control));
+        }
         wrapper.append(node('span', '', label), control); form.append(wrapper); return control;
     }
     function options(select, values, selected) { Object.entries(values).forEach(([value, label]) => select.add(new Option(label, value))); select.value = selected; }
@@ -150,6 +163,7 @@
         if (task.permissions.edit) actions(form, 'Сохранить');
         else { const text = node('p', 'tm-muted tm-wide', task.deleted_at ? 'Задача удалена. Доступно чтение истории.' : 'У вас есть доступ к просмотру этой задачи.'); form.append(text); }
         body.append(form);
+        if (controls.description) fitDescription(controls.description);
         const meta = node('div', 'tm-details'); meta.append(node('div', '', `Поставил: ${ui.name(task.created_by)}`), node('div', '', `Создана: ${ui.displayInstant(task.created_at)}`));
         if (micro) meta.append(node('div', '', `Срок: ${ui.displayInstant(task.micro_deadline_at)}${task.status !== 'done' ? ` · ${ui.remaining(task.micro_deadline_at)}` : ''}`));
         if (task.completed_at) meta.append(node('div', '', `Завершена: ${ui.displayInstant(task.completed_at)}`)); body.append(meta);

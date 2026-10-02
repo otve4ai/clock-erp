@@ -161,9 +161,30 @@ async function returnFromUnavailableProject() {
     assert.equal(h.ui.state.view, 'main');
     assert.equal(back.hidden, true);
 }
+async function microPreviewCollapse() {
+    const h = harness(); await h.initialize(); await flush();
+    assert.equal(h.element('#tm-micro-body').hidden, true, 'Empty preview stays collapsed');
+    assert.equal(h.element('#tm-micro-add').hidden, false, 'Quick creation remains available');
+    const original = h.respond; let populated = true;
+    h.respond = url => url.startsWith('/microtasks?') ? Promise.resolve({items: populated ? [{
+        id: 20, title: 'Microtask', assigned_to: 1, status: 'new', permissions: {},
+        micro_deadline_at: new Date(Date.now() + 3600000).toISOString()
+    }] : [], total: populated ? 1 : 0}) : original(url);
+    await h.ui.refresh();
+    assert.equal(h.element('#tm-micro-body').hidden, false, 'Tasks expand the default preview');
+    h.element('#tm-micro-toggle').listeners.click(); await h.ui.refresh();
+    assert.equal(h.element('#tm-micro-body').hidden, true, 'Refresh respects manual collapse');
+    h.element('#tm-micro-toggle').listeners.click();
+    populated = false; await h.ui.refresh();
+    assert.equal(h.element('#tm-micro-body').hidden, true, 'Completing the last task collapses the preview');
+    populated = true; await h.ui.refresh();
+    assert.equal(h.element('#tm-micro-body').hidden, false, 'Automatic collapse does not overwrite user preference');
+    assert.equal(h.element('#tm-micro-toggle').attributes['aria-expanded'], 'true');
+}
 (async () => {
     await inboxFailure(); await searchNavigation(); await referencesOutOfOrder(false); await referencesOutOfOrder(true);
     await finalPolish(); await microRecovery(); await projectCountersAfterStatus();
     await returnFromUnavailableProject();
-    console.log('Tasks UI state regressions: 8 checks PASS');
+    await microPreviewCollapse();
+    console.log('Tasks UI state regressions: 9 checks PASS');
 })().catch(error => { console.error(error); process.exitCode = 1; });

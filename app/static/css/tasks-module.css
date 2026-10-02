@@ -39,8 +39,11 @@
 .tm-micro-heading { display:flex; align-items:center; gap:10px; min-height:29px; margin-bottom:6px; flex-wrap:wrap; }
 .tm-micro-heading h2 { display:flex; gap:9px; align-items:center; white-space:nowrap; }
 .tm-lightning { color:#e69b14; font-size:1em; font-weight:400; line-height:1; }
-.tm-micro-caption { min-width:0; }
-.tm-micro-caption .tm-muted { display:block; margin-top:3px; font-size:11px; line-height:1.4; }
+.tm-micro-caption { display:flex; align-items:baseline; gap:10px; min-width:0; max-width:100%; }
+.tm-micro-caption .tm-muted { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; line-height:1.4; }
+.tm-main #tm-micro-toggle { display:grid; place-items:center; flex:none; width:28px; height:28px; min-height:28px; padding:0; }
+#tm-micro-toggle > span { display:block; width:8px; height:8px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:translateY(-2px) rotate(45deg); }
+#tm-micro-toggle[aria-expanded=true] > span { transform:translateY(2px) rotate(225deg); }
 .tm-micro-scopes { display:flex; gap:4px; flex-wrap:wrap; }
 .tm-micro-scopes button { border:0; background:transparent; color:var(--erp-muted); min-height:25px; padding:4px; font-size:11px; }
 .tm-micro-scopes button[aria-pressed=true] { color:var(--erp-text); }
@@ -176,6 +179,7 @@
 .tm-field > span { font-size:12px; color:var(--erp-muted); }
 .tm-field input,.tm-field select,.tm-field textarea { width:100%; }
 .tm-field textarea { resize:vertical; min-height:95px; }
+.tm-dialog .tm-field textarea[name=description] { box-sizing:border-box; line-height:1.5; min-height:calc(7.5em + 18px); max-height:none; overflow-y:hidden; resize:none; }
 .tm-wide { grid-column:1/-1; }
 .tm-form-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; margin-top:5px; }
 .tm-details { margin:15px 0; color:var(--erp-muted); line-height:1.7; font-size:12px; }

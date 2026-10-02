@@ -151,19 +151,23 @@
         } finally { state.busy.delete(task.id); }
     }
     const changeStatus = (task, status) => mutateTask(task, `/tasks/${task.id}/status`, {status}, status === 'done' ? 'Задача завершена' : 'Статус изменён');
-    let microCollapsed = false;
-    try { microCollapsed = localStorage.getItem(`tasks-module:micro-collapsed:${boot.userId}`) === 'true'; } catch (_) { /* Storage may be disabled. */ }
-    function collapseMicro(value) {
+    let microCollapsed = true, microCollapsePreference = false;
+    try { microCollapsePreference = localStorage.getItem(`tasks-module:micro-collapsed:${boot.userId}`) === 'true'; } catch (_) { /* Storage may be disabled. */ }
+    function collapseMicro(value, persist = true) {
         microCollapsed = value; $('#tm-micro-body').hidden = value; $('#tm-micro-add').hidden = !value;
         $('#tm-micro-scopes').hidden = value; $('#tm-micro-toggle').setAttribute('aria-expanded', String(!value));
-        $('#tm-micro-toggle').setAttribute('aria-label', value ? 'Развернуть микрозадачи' : 'Свернуть микрозадачи'); $('#tm-micro-toggle').textContent = value ? '⌄' : '⌃';
-        try { localStorage.setItem(`tasks-module:micro-collapsed:${boot.userId}`, String(value)); } catch (_) { /* Optional preference. */ }
+        $('#tm-micro-toggle').setAttribute('aria-label', value ? 'Развернуть микрозадачи' : 'Свернуть микрозадачи');
+        if (persist) {
+            microCollapsePreference = value;
+            try { localStorage.setItem(`tasks-module:micro-collapsed:${boot.userId}`, String(value)); } catch (_) { /* Optional preference. */ }
+        }
     }
     async function microPreview() {
         const generation = ++state.microGeneration;
         try {
             const [list, summary] = await Promise.all([request('/microtasks', {scope: state.microScope, limit: 4}), request('/microtasks/summary')]);
             if (generation !== state.microGeneration) return;
+            collapseMicro(!list.items.length || microCollapsePreference, false);
             $('#tm-micro-error').hidden = true;
             const root = $('#tm-micro-list'); root.replaceChildren(...list.items.map(task => taskRow(task, true)));
             if (!list.items.length) empty(root, 'Нет активных микрозадач', 'Добавьте небольшое поручение на ближайшие 24 часа.');
@@ -396,7 +400,7 @@
         });
     }
     async function initialize() {
-        collapseMicro(microCollapsed);
+        collapseMicro(true, false);
         $('#tm-back').addEventListener('click', event => { event.preventDefault(); navigate($('#tm-back').dataset.target); });
         $('#tm-project-parent').addEventListener('click', event => { event.preventDefault(); navigate('projects'); });
         $('#tm-project-home').addEventListener('click', event => { event.preventDefault(); navigate('main'); });
