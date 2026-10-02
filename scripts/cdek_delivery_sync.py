@@ -8,6 +8,7 @@ from pathlib import Path
 from app.clients.cdek import CdekError
 from app.services.cdek_delivery import CdekDelivery
 from app.services.cdek_sales import group_sales
+from app.services.cdek_sync import CdekSync
 
 
 def tracked_cards(delivery, load_order):
@@ -57,7 +58,7 @@ def main():
             order["track_number"] = order["tracking"]
     try:
         # Sales use one cache per waybill; order-card caches remain compatible.
-        result = delivery.sync_pending(shipments + orders)
+        result = CdekSync(delivery).run(lambda: shipments + orders)
     except CdekError as error:
         print(json.dumps({"error": error.code, "message": str(error)}, ensure_ascii=True))
         return 1

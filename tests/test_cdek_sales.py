@@ -348,6 +348,17 @@ class CdekSalesRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn(b"unsaved &lt;note&gt;", response.data)
 
+    def test_batch_endpoint_auth_csrf_and_background_dispatch(self):
+        with mock.patch("app.cdek_sales_routes.CdekSync.start") as start:
+            response = self.client.post("/sales/cdek/sync-status", data={"csrf_token": "test"})
+            self.assertEqual(response.status_code, 202)
+            self.csrf.assert_called_once()
+            start.assert_called_once()
+            self.assertIn("counts", response.get_json())
+        self.allowed.return_value = False
+        self.assertEqual(self.client.get("/sales/cdek/sync-status").status_code, 403)
+        self.assertEqual(self.client.post("/sales/cdek/sync-status").status_code, 403)
+
     def test_safe_return_url(self):
         for target in ("https://evil.example", "//evil.example", "/sales\\evil", "/settings", "/sales\n"):
             self.assertEqual(sales_return(target), "/sales?source=tictactoy")

@@ -101,3 +101,32 @@ body.cdek-body{margin:0;background:var(--erp-canvas);font-family:var(--erp-font-
 .cdek-notice{font-size:12px;line-height:1.5}
 @media(max-width:1200px){.cdek-toolbar{grid-template-columns:minmax(160px,1fr) minmax(160px,1fr) auto auto}.cdek-toolbar input[name="q"]{grid-column:1/-1}.cdek-toolbar select{max-width:none}}
 @media(max-width:700px){.cdek-page{padding:16px}.cdek-stats.erp-workspace-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.cdek-toolbar{grid-template-columns:1fr 1fr}.cdek-toolbar input,.cdek-toolbar select{font-size:16px;width:100%}.cdek-mode{gap:10px;padding-bottom:10px}.cdek-mode nav a{padding:10px}.cdek-heading.erp-workspace-header{align-items:flex-start}.cdek-table td{padding:10px 12px}.cdek-page .cdek-drawer-close{min-height:36px;padding:5px 9px;font-size:25px}}
+
+.cdek-sync-control{padding-right:0;border-right:0}
+.cdek-sync-control .product-site-sync-panel{width:min(460px,calc(100vw - 32px));right:0;z-index:var(--erp-z-dropdown,1200);max-height:calc(100dvh - 120px);overflow:auto}
+.cdek-sync-control .product-site-sync-panel[hidden]{display:none}
+.cdek-sync-feedback{font-size:12px;padding:0 11px 9px;color:var(--erp-muted,#64748b)}
+.cdek-sync-feedback:empty{display:none}
+.cdek-sync-control .product-site-sync-panel__footer{flex-wrap:wrap}
+@media(max-width:700px){.cdek-sync-control .product-site-sync-panel{position:fixed;left:12px;right:12px;top:100px;width:auto;max-width:none}}
+
+/* Navigation in the CDEK popover uses a secondary button in both themes. */
+.cdek-sync-control a.cdek-all-shipments,
+html[data-theme] .cdek-sync-control a.cdek-all-shipments{
+    background:var(--erp-surface,#fff);
+    color:var(--erp-text,#172033);
+    border:1px solid var(--erp-border-strong,#cbd5e1);
+    text-decoration:none;
+}
+.cdek-sync-control a.cdek-all-shipments:hover,
+html[data-theme] .cdek-sync-control a.cdek-all-shipments:hover{
+    background:var(--erp-surface-muted,#f8fafc);
+    color:var(--erp-text,#172033);
+}
+.cdek-sync-control a.cdek-all-shipments:focus-visible{
+    outline:2px solid var(--erp-primary,#2563eb);
+    outline-offset:2px;
+}
+
+.cdek-sync-control .product-site-sync-panel__header{flex-wrap:wrap}
+.cdek-sync-control .product-site-sync-panel__actions{margin-left:auto;flex-wrap:wrap}
