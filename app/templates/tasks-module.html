@@ -24,9 +24,9 @@
     <section class="tm-micro" id="tm-micro" aria-labelledby="tm-micro-heading">
         <div class="tm-micro-heading"><div class="tm-micro-caption"><h2 id="tm-micro-heading"><span class="tm-lightning" aria-hidden="true">⚡</span> Микрозадачи · 24 ч</h2><span id="tm-micro-brief" class="tm-muted"></span></div>
             <div id="tm-micro-scopes" class="tm-micro-scopes"><button data-micro-scope="my">Мои <b data-micro-count="my_active">—</b></button><button data-micro-scope="created">Поставленные мной <b data-micro-count="created_active">—</b></button><button data-micro-scope="team">Команда <b data-micro-count="team_active">—</b></button></div>
-            <button id="tm-micro-add" class="tm-link" hidden>＋ Добавить</button><a class="tm-link tm-micro-all" href="?view=micro" data-view="micro">Все микрозадачи →</a><button id="tm-micro-toggle" class="tm-icon-button" aria-expanded="true" aria-controls="tm-micro-body" aria-label="Свернуть микрозадачи">⌃</button>
+            <button id="tm-micro-add" class="tm-link">＋ Добавить</button><a class="tm-link tm-micro-all" href="?view=micro" data-view="micro">Все микрозадачи →</a><button id="tm-micro-toggle" class="tm-icon-button" aria-expanded="false" aria-controls="tm-micro-body" aria-label="Развернуть микрозадачи"><span aria-hidden="true"></span></button>
         </div>
-        <div id="tm-micro-body">
+        <div id="tm-micro-body" hidden>
             <form id="tm-micro-form" class="tm-quick"><input name="title" required maxlength="500" placeholder="Быстро добавить микрозадачу…" aria-label="Название микрозадачи"><select name="assigned_to" aria-label="Исполнитель микрозадачи"></select><button type="submit" class="tm-micro-submit" aria-label="Добавить микрозадачу">＋</button></form>
             <div id="tm-micro-error" role="alert" class="tm-error" hidden></div>
             <div id="tm-micro-list" aria-live="polite"><p class="tm-loading">Загружаем микрозадачи…</p></div>
