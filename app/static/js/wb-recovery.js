@@ -41,6 +41,13 @@
             diagnostic.classList.toggle('warning', hasIssues);
             diagnostic.textContent = `Последняя успешная синхронизация: ${d.last_success_at || 'ещё не выполнялась'} · Последняя попытка: ${d.last_attempt_at || d.checked_at || '—'} · Результат: ${names[d.outcome] || 'неизвестен'} · Новых: ${d.new_orders || 0} · Обновлено статусов: ${d.statuses_updated || 0} · Восстановлено: ${d.recovered || 0} · Ошибок: ${d.error_count ?? (d.errors || []).length} · Возраст данных: ${age === null ? 'неизвестен' : age + ' мин.'}` + (stale ? ' · Внимание: нет успешной синхронизации за последние 15 минут.' : '') + (d.full_outcome && d.full_outcome !== 'success' ? ' · Глубокая проверка: ' + (names[d.full_outcome] || d.full_outcome) : '');
             const warning = root.querySelector('[data-wb-missing]');
+            const historyNote = root.querySelector('[data-wb-history-note]');
+            const historicalMissing = d.historical_status_missing || [];
+            if (historyNote) {
+                historyNote.hidden = !historicalMissing.length;
+                historyNote.textContent = historicalMissing.length
+                    ? `WB не вернул статусы завершённых заказов при последней проверке истории: ${historicalMissing.join(', ')}. Сохранённые статусы и даты их проверки оставлены прежними; повторим запрос при следующем обходе истории.` : '';
+            }
             const lines = (d.supplies || []).map(s => `${s.supply_id}: WB содержит ${s.wb_count}, ERP знала ${s.erp_count}, пропущено ${s.missing}.`);
             lines.push(...(d.errors || []).map(e => e.error));
             lines.push(...(d.full_errors || []).map(e => e.error));
