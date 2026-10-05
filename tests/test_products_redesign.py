@@ -69,7 +69,7 @@ class ProductsRedesignStructureTest(unittest.TestCase):
         products = self.source("warehouse.html")
         for label in (
             "Название товара", "Артикул товара", "Модель товара", "Цена товара",
-            "Остаток товара", "Складская ячейка товара", "Заменить фото товара",
+            "Остаток TTT", "Складская ячейка товара", "Заменить фото товара",
         ):
             self.assertIn('aria-label="{}"'.format(label), products)
 

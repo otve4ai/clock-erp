@@ -7194,9 +7194,13 @@ def get_catalog_stock_history(product_id=None, limit=5000):
             operation["label"] = "Ручная корректировка"
 
     catalog_operations = []
+    default_warehouse_name = "TTT"
     database = CatalogDatabase()
     try:
         with database.connect() as connection:
+            warehouse = connection.execute("SELECT name FROM erp_warehouses WHERE id='default'").fetchone()
+            if warehouse:
+                default_warehouse_name = warehouse["name"]
             batch_rows = connection.execute(
                 "SELECT id, product_id, operation_type, "
                 "stock_before, stock_after, stock_difference, "
@@ -7247,6 +7251,12 @@ def get_catalog_stock_history(product_id=None, limit=5000):
             catalog_operations.append(operation)
     except Exception:
         app.logger.exception("Failed to load catalog stock history")
+
+    # Legacy Excel/manual records predate warehouse selection and belong to TTT.
+    # Photo changes are shared product metadata, not stock movements.
+    for operation in manual_operations + catalog_operations:
+        operation["warehouse_id"] = "default"
+        operation["warehouse_name"] = default_warehouse_name
 
     try:
         sales_movements = SalesInventory().list_movements(
@@ -20985,6 +20995,13 @@ def api_bitrix_product_import(bitrix_id):
     prepared = None
     try:
         quantity = None if supply_id else single_import_quantity(payload.get("quantity"), action)
+        warehouse_id = payload.get("warehouse_id", "default")
+        if not supply_id:
+            from app.services.manual_receipts import ManualReceipts
+            if not isinstance(warehouse_id, str) or not warehouse_id:
+                raise ValueError("Выберите склад прихода.")
+            with database.connect() as connection:
+                ManualReceipts._warehouse(connection, warehouse_id)
         client = _bitrix_single_client()
         product = client.get_product(bitrix_id)
         if product is None:
@@ -21015,16 +21032,18 @@ def api_bitrix_product_import(bitrix_id):
         result = BitrixERPProductSync(database).apply_single(
             product, action, brand_id=brand_id, category_id=category_id,
             prepared_image=prepared, actor=current_audit_actor(), quantity=quantity,
+            warehouse_id=warehouse_id,
         )
         if result["status"] != "created":
             store.discard_prepared(prepared)
         WAREHOUSE_CACHE["items"] = []
         WAREHOUSE_CACHE["loaded_at"] = 0
+        saved_product = ExcelProductCatalog(database).get_product(result["erp_product_id"])
+        if "warehouse_stock" in result:
+            saved_product["stock"] = result["warehouse_stock"]
         return api_success({
             **result,
-            "product": serialize_api_product(
-                ExcelProductCatalog(database).get_product(result["erp_product_id"])
-            ),
+            "product": serialize_api_product(saved_product),
         }, 201 if result["status"] == "created" else 200)
     except (BitrixCatalogReadOnlyError, OSError):
         store.discard_prepared(prepared)
@@ -21501,6 +21520,19 @@ def api_product_movements(product_id):
         limit=limit,
     )
     return api_success(movements, total=len(movements), limit=limit)
+
+
+@app.route("/api/v1/products/<int:product_id>/warehouse-stocks", methods=["GET"])
+def api_product_warehouse_stocks(product_id):
+    from app.services.warehouse_transfers import product_stock_summary
+    product = SharedCatalog().get_product(product_id, include_archived=True)
+    if product is None:
+        return api_error("PRODUCT_NOT_FOUND", "Товар не найден.", 404)
+    with CatalogDatabase().connect() as connection:
+        stocks = product_stock_summary(connection, product_id)
+    response, status = api_success(stocks)
+    response.headers["Cache-Control"] = "no-store"
+    return response, status
 
 
 @app.route(

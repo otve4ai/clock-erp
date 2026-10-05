@@ -169,3 +169,31 @@ def distribution(connection, product_ids):
             item['label'] = '{}: {:g} шт.; в пути: {:g}'.format(item['name'], item['quantity'], item['in_transit'])
             result.setdefault(pid, []).append(item)
     return result
+
+
+def product_stock_summary(connection, product_id):
+    """Dense, read-only card view. Inbound transit is not available stock."""
+    balances = {row['id']: row for row in distribution(connection, [product_id]).get(product_id, [])}
+    component = connection.execute(
+        'SELECT physical_stock FROM erp_component_inventory WHERE product_id=?',
+        (product_id,),
+    ).fetchone()
+    warehouses = connection.execute(
+        "SELECT id,name,code,active FROM erp_warehouses "
+        "ORDER BY CASE WHEN id='default' THEN 0 ELSE 1 END,name,id"
+    ).fetchall()
+    result = []
+    for warehouse in warehouses:
+        wid = warehouse['id']
+        stock = balances.get(wid, {})
+        if not warehouse['active'] and not stock:
+            continue
+        confirmed = not (wid == 'default' and component is not None and component['physical_stock'] is None)
+        result.append({
+            'id': wid, 'name': warehouse['name'], 'code': warehouse['code'],
+            'active': bool(warehouse['active']),
+            'quantity': float(stock.get('quantity', 0)) if confirmed else None,
+            'in_transit': float(stock.get('in_transit', 0)),
+            'confirmed': confirmed,
+        })
+    return result

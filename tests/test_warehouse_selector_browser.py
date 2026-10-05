@@ -32,6 +32,15 @@ window.addEventListener('load', () => {
         assert(url.searchParams.get('sort_by') === 'stock', 'sort lost');
         assert(url.searchParams.get('per_page') === '100', 'page size lost');
         if (step) assert(!url.searchParams.has('page'), 'page not reset');
+        const mirror = select.parentElement.querySelector('.products-warehouse-select__value');
+        assert(mirror.textContent === select.selectedOptions[0].textContent, 'selected width caption stale');
+        const selectedStyle = getComputedStyle(select);
+        const measure = document.createElement('canvas').getContext('2d');
+        measure.font = selectedStyle.font;
+        const selectedWidth = measure.measureText(select.selectedOptions[0].textContent).width;
+        const actualWidth = select.getBoundingClientRect().width;
+        assert(actualWidth >= selectedWidth + 26 && actualWidth <= selectedWidth + 40,
+            'select must fit the current option, not the longest one');
         if (step < steps.length - 1) {
             sessionStorage.setItem('selectorStep', String(step + 1));
             select.value = steps[step + 1];
@@ -61,6 +70,17 @@ window.addEventListener('load', () => {
         canvas.font = style.font;
         assert(canvas.measureText(select.selectedOptions[0].textContent).width + 26 <= field.width,
             'long option text clipped');
+        document.getElementById('productsActionsMenu').hidden = false;
+        const exportItem = document.getElementById('openProductExport');
+        const transferItem = document.querySelector('#productsActionsMenu a[role="menuitem"]');
+        const exportStyle = getComputedStyle(exportItem);
+        const transferStyle = getComputedStyle(transferItem);
+        for (const property of ['paddingLeft', 'paddingRight', 'fontSize', 'fontWeight', 'lineHeight']) {
+            assert(exportStyle[property] === transferStyle[property], 'menu item differs: ' + property);
+        }
+        assert(transferStyle.textDecorationLine === 'none', 'transfer link underlined');
+        assert(Math.abs(exportItem.getBoundingClientRect().height - transferItem.getBoundingClientRect().height) <= 1,
+            'menu item heights differ');
         document.body.dataset.selectorCheck = 'pass';
     } catch (error) {
         document.body.dataset.selectorError = error.message;

@@ -226,10 +226,52 @@ class CatalogNormalizationTest(unittest.TestCase):
     def test_search_exact_bitrix_id_uses_direct_lookup(self):
         client = object.__new__(BitrixCatalogReadOnlyClient)
         product = normalize_product({"ID": 7, "NAME": "Watch"})
-        with mock.patch.object(client, "get_product", return_value=product) as get_product:
+        with mock.patch.object(client, "get_product", return_value=product) as get_product, \
+                mock.patch.object(client, "get_products_page", return_value={"products": []}):
             result = client.search_products("7")
         get_product.assert_called_once_with("7")
         self.assertEqual(result, [product])
+
+    def test_numeric_name_and_article_are_searched_including_inactive(self):
+        client = object.__new__(BitrixCatalogReadOnlyClient)
+        products = [
+            normalize_product({"ID": 4984, "NAME": "77471760", "ACTIVE": "N"}),
+            normalize_product({"ID": 4985, "NAME": "Watch", "ARTICLE": "77471760"}),
+            normalize_product({"ID": 4986, "NAME": "Unrelated"}),
+        ]
+        with mock.patch.object(client, "get_product", return_value=None) as direct, \
+                mock.patch.object(client, "get_products_page", return_value={"products": products}) as page:
+            result = client.search_products("77471760")
+        direct.assert_called_once_with("77471760")
+        self.assertTrue(page.call_args.kwargs["include_inactive"])
+        self.assertEqual([item["external_product_id"] for item in result], ["4985", "4984"])
+
+    def test_numeric_id_does_not_hide_numeric_names_and_is_not_duplicated(self):
+        client = object.__new__(BitrixCatalogReadOnlyClient)
+        direct = normalize_product({"ID": 123, "NAME": "123"})
+        other = normalize_product({"ID": 456, "NAME": "123"})
+        with mock.patch.object(client, "get_product", return_value=direct), \
+                mock.patch.object(client, "get_products_page", return_value={"products": [direct, other]}):
+            result = client.search_products("123", limit=2)
+            limited = client.search_products("123", limit=1)
+        self.assertEqual([item["external_product_id"] for item in result], ["123", "456"])
+        self.assertEqual(limited, [direct])
+
+    def test_zero_is_a_search_term_not_an_invalid_product_id(self):
+        client = object.__new__(BitrixCatalogReadOnlyClient)
+        with mock.patch.object(client, "get_product") as direct, \
+                mock.patch.object(client, "get_products_page", return_value={"products": []}) as page:
+            self.assertEqual(client.search_products("0"), [])
+        direct.assert_not_called()
+        page.assert_called_once()
+
+    def test_numeric_name_leading_zero_does_not_send_invalid_bitrix_id(self):
+        client = object.__new__(BitrixCatalogReadOnlyClient)
+        with mock.patch.object(client, "get_product", return_value=None) as direct, \
+                mock.patch.object(client, "get_products_page", return_value={"products": []}) as page:
+            client.search_products("00123")
+        direct.assert_called_once_with("123")
+        self.assertEqual(page.call_args.kwargs["query"], "00123")
 
     def test_export_endpoint_filters_search_by_name_and_article_code(self):
         endpoint = Path("bitrix/catalog-export.php").read_text(encoding="utf-8")
