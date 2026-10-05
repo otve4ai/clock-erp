@@ -1,5 +1,11 @@
 (() => {
     const warehouse = new URL(location.href).searchParams.get('warehouse_id') || 'default';
+    document.getElementById('warehouseSelector')?.addEventListener('change', event => {
+        const url = new window.URL(window.location.href);
+        url.searchParams.set('warehouse_id', event.currentTarget.value);
+        url.searchParams.delete('page');
+        window.location.assign(url.href);
+    });
     function preserveWarehouse(form) {
         if (!form.querySelector('[name="warehouse_id"]')) {
             const field = document.createElement('input');

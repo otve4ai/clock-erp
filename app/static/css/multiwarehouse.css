@@ -1,4 +1,40 @@
-#warehouseSelector {border:0;background:transparent;color:inherit;font:inherit;max-width:230px;}
+.products-workspace-actions .products-warehouse-select {
+    justify-content:flex-start;
+    gap:8px;
+    min-width:0;
+    max-width:100%;
+    height:var(--erp-control-height,40px);
+    padding:0 12px;
+}
+.products-warehouse-select__label {flex:0 0 auto;white-space:nowrap;}
+.products-warehouse-select #warehouseSelector {
+    flex:1 1 auto;
+    width:auto;
+    min-width:0;
+    max-width:none;
+    min-height:0;
+    height:100%;
+    margin:0;
+    padding:0 4px;
+    border:0;
+    border-radius:0 !important;
+    background:transparent !important;
+    color:var(--erp-text,#172b44);
+    font:inherit;
+    cursor:pointer;
+}
+/* Theme focus belongs to the whole labelled control, not a nested field. */
+.products-warehouse-select #warehouseSelector:focus {
+    outline:none !important;
+    box-shadow:none !important;
+}
+.products-workspace-actions .products-warehouse-select:focus-within {
+    outline:2px solid var(--theme-focus,var(--erp-primary,#2563eb));
+    outline-offset:-1px;
+}
+@media(max-width:767px) {
+    .products-workspace-actions .products-warehouse-select {grid-column:1 / -1;}
+}
 /* The warehouse selector can move the toolbar below the mobile fold. Keep
    column settings inside the viewport, including with a short screen. */
 @media (max-width:767px) {
