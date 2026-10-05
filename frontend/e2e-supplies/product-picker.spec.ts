@@ -239,13 +239,16 @@ test('Bitrix submit preserves payload, prevents double submission and redirects 
     button.click();
   });
   await expect(page.locator('#bitrixImportError')).toHaveText('Не удалось сохранить товар');
-  expect(submitted).toEqual([{ action: 'create', quantity: 0, brand_id: brand[0], category_id: category[0] }]);
+  expect(submitted).toEqual([{ action: 'create', quantity: 0, warehouse_id: 'default', brand_id: brand[0], category_id: category[0] }]);
   await expect(page.locator('#bitrixImportProduct')).toBeEnabled();
   await page.route('**/api/v1/bitrix-products/71001/import', (route) =>
-    route.fulfill({ status: 201, json: { data: { status: 'created', erp_product_id: 8345, product: { id: 8345, article: 'fashion-389-53-20-mm' } } } }),
+    route.fulfill({ status: 201, json: { data: { status: 'created', warehouse_id: 'default', erp_product_id: 8345, product: { id: 8345, article: 'fashion-389-53-20-mm' } } } }),
   );
   await page.locator('#bitrixImportProduct').click();
-  await expect(page).toHaveURL(/\/warehouse\?q=fashion-389-53-20-mm&notice=success/);
+  await expect(page).toHaveURL((url) => url.pathname === '/warehouse'
+    && url.searchParams.get('q') === 'fashion-389-53-20-mm'
+    && url.searchParams.get('warehouse_id') === 'default'
+    && url.searchParams.get('notice') === 'success');
 });
 
 test('old search and preview responses cannot replace newer Bitrix selection', async ({ page }) => {
