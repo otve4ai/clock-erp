@@ -12574,6 +12574,7 @@ def build_sales_report_records(
 
         automatic_sales.append({
             "id": operation_id,
+            "warehouse_id": str(operation.get("warehouse_id") or "default"),
             "archived_at": str(override.get("archived_at") or ""),
             "archived_by": str(override.get("archived_by") or ""),
             "sale_type": "automatic",
@@ -23452,6 +23453,9 @@ def api_sale_catalog_items():
 def normalize_api_sale_payload(payload, existing=None, require_catalog=False):
     payload = normalize_sale_edit_aliases(payload)
     existing = existing if isinstance(existing, dict) else {}
+    # Historical records without a warehouse belong to TTT. Editing metadata
+    # never re-routes an old sale using the defaults for a new channel sale.
+    warehouse_id = (existing.get("warehouse_id") or "default") if existing else sale_warehouse(payload)
     created_at = (
         str(existing.get("created_at") or "")
         if existing
@@ -23492,10 +23496,10 @@ def normalize_api_sale_payload(payload, existing=None, require_catalog=False):
         float(pricing["unit_price"])
         if pricing["unit_price"] is not None else None
     )
-    if product is not None and not existing.get("inventory_managed"):
+    if product is not None and not existing:
         from app.services.product_bundles import ProductBundles
         bundle = ProductBundles().get(product["id"])
-        product = SharedCatalog()._warehouse_projection([{**product, **bundle}], sale_warehouse({**existing, **payload}))[0]
+        product = SharedCatalog()._warehouse_projection([{**product, **bundle}], warehouse_id)[0]
         bundle = product
         available = bundle["available_to_assemble"] if bundle["is_bundle"] else (bundle.get("physical_stock") or 0) if bundle.get("is_physical_component") else float(product["stock"])
         if quantity > available:
@@ -23536,7 +23540,7 @@ def normalize_api_sale_payload(payload, existing=None, require_catalog=False):
         optional_fields["country"] = location_fields["country"]
     normalized = {
         "id": str(existing.get("id") or payload.get("id") or uuid.uuid4().hex),
-        "warehouse_id": sale_warehouse({**existing, **payload}),
+        "warehouse_id": warehouse_id,
         "created_at": created_at,
         "source": source,
         "product_id": product_id,

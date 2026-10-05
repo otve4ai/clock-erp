@@ -1,4 +1,14 @@
 #warehouseSelector {border:0;background:transparent;color:inherit;font:inherit;max-width:230px;}
+/* The warehouse selector can move the toolbar below the mobile fold. Keep
+   column settings inside the viewport, including with a short screen. */
+@media (max-width:767px) {
+    .warehouse-page .warehouse-column-settings .warehouse-column-settings-panel {
+        position:fixed;top:50%;left:50%;right:auto;
+        transform:translate(-50%,-50%);
+        max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);
+        overflow-y:auto;
+    }
+}
 .other-warehouse-dot {display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;width:20px;height:24px;padding:0;border:0;background:transparent;cursor:pointer;}
 .other-warehouse-dot span {display:block;width:8px;height:8px;border-radius:50%;background:var(--warehouse-dot);}
 .other-warehouse-dot.is-in-transit span {background:transparent;border:1px dashed var(--warehouse-dot);}

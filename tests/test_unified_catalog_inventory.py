@@ -4,6 +4,9 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
+
+import app.schema_migrations as migrations
 
 from app.catalog_db import CatalogDatabase
 from app.remove_product_collections_migration import apply_remove_collections_migration
@@ -709,6 +712,7 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
         sale_payload = {
             "id": "return-sale",
             "source": "Amazon",
+            "warehouse_id": "default",
             "created_at": "2026-07-30",
             "order_number": "AMZ-1",
         }
@@ -815,6 +819,7 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
             {
                 "id": "other-source",
                 "source": "Amazon",
+                "warehouse_id": "default",
                 "order_number": "42",
             },
             product["id"],
@@ -844,7 +849,14 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
         self.assertEqual(self.stock(product["id"]), 7)
 
     def test_old_movement_constraint_is_migrated_without_losing_rows(self):
-        product = self.create_product(stock=1)
+        self.tearDown()
+        # Build an actual pre-multiwarehouse database, not a current database
+        # with its required movement triggers silently removed by DROP TABLE.
+        with patch.object(migrations, "MIGRATIONS", migrations.MIGRATIONS[:-1]), patch.object(
+            migrations, "verify_complete_catalog_contract", return_value=True
+        ):
+            self.setUp()
+            product = self.create_product(stock=1)
         with self.database.connect() as connection:
             original_count = connection.execute(
                 "SELECT COUNT(*) FROM catalog_stock_movements"
@@ -877,6 +889,7 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
             apply_fresh_catalog_schema(connection)
             apply_remove_collections_migration(connection)
             apply_incoming_receipts_migration(connection)
+        migrations.apply_migrations(self.database.path, app_commit="legacy-movements-test")
         self.database.initialize()
 
         with self.database.connect() as connection:
@@ -892,20 +905,25 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
         self.assertEqual(self.stock(product["id"]), 1)
 
     def test_legacy_receipt_schema_is_migrated_without_losing_history(self):
-        product = self.create_product(name="Legacy Schema Product")
-        receipt = self.receipts.create_receipt(
-            {
-                "id": "legacy-schema-receipt",
-                "number": "PR-LEGACY-SCHEMA",
-                "receipt_date": "2026-07-30",
-            },
-            [{
-                "product_id": product["id"],
-                "quantity": 2,
-                "purchase_price": 1,
-            }],
-            idempotency_key="legacy-schema-once",
-        )
+        self.tearDown()
+        with patch.object(migrations, "MIGRATIONS", migrations.MIGRATIONS[:-1]), patch.object(
+            migrations, "verify_complete_catalog_contract", return_value=True
+        ):
+            self.setUp()
+            product = self.create_product(name="Legacy Schema Product")
+            receipt = self.receipts.create_receipt(
+                {
+                    "id": "legacy-schema-receipt",
+                    "number": "PR-LEGACY-SCHEMA",
+                    "receipt_date": "2026-07-30",
+                },
+                [{
+                    "product_id": product["id"],
+                    "quantity": 2,
+                    "purchase_price": 1,
+                }],
+                idempotency_key="legacy-schema-once",
+            )
         with self.database.connect() as connection:
             connection.commit()
             connection.execute("PRAGMA foreign_keys = OFF")
@@ -940,6 +958,7 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
             apply_fresh_catalog_schema(connection)
             apply_remove_collections_migration(connection)
             apply_incoming_receipts_migration(connection)
+        migrations.apply_migrations(self.database.path, app_commit="legacy-receipts-test")
         self.database.initialize()
 
         restored = self.receipts.get_receipt(receipt["id"])
@@ -1047,7 +1066,7 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
             product["id"],
         )
 
-    def test_delete_draft_removes_document_without_changing_stock(self):
+    def test_delete_draft_annuls_document_without_changing_stock(self):
         product = self.create_product(name="Draft Delete", stock=4)
         self.receipts.create_draft(
             {"id": "delete-draft", "number": "D-1", "receipt_date": "2026-09-10"},
@@ -1057,7 +1076,13 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
         self.assertEqual(preview["items"][0]["status"], "DRAFT_DELETE")
         self.receipts.delete_receipt("delete-draft", user_name="Максим")
         self.assertEqual(self.stock(product["id"]), 4)
-        self.assertFalse(self.receipts.exists("delete-draft"))
+        cancelled = self.receipts.get_receipt("delete-draft")
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(cancelled["items"][0]["quantity"], 3)
+        with self.database.connect() as connection:
+            self.assertEqual(connection.execute(
+                "SELECT COUNT(*) FROM catalog_stock_movements WHERE receipt_id = 'delete-draft'"
+            ).fetchone()[0], 0)
 
     def test_delete_preview_is_completely_read_only(self):
         product = self.create_product(name="Preview Read Only")
@@ -1104,11 +1129,17 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
         self.assertEqual(result["decreased_positions"], 2)
         self.assertEqual(self.stock(first["id"]), 2)
         self.assertEqual(self.stock(second["id"]), 5)
+        self.assertEqual(self.receipts.get_receipt("delete-posted")["status"], "cancelled")
         with self.database.connect() as connection:
             audit = connection.execute(
                 "SELECT * FROM erp_audit_events WHERE entity_id = 'delete-posted' "
-                "AND action = 'deleted'"
+                "AND action = 'cancelled'"
             ).fetchone()
+            deltas = connection.execute(
+                "SELECT quantity_delta FROM catalog_stock_movements "
+                "WHERE receipt_id = 'delete-posted' ORDER BY rowid"
+            ).fetchall()
+        self.assertEqual([row[0] for row in deltas], [3, 2, -3, -2])
         self.assertEqual(audit["actor_display_name_snapshot"], "Максим")
         details = json.loads(audit["metadata_json"])
         self.assertEqual(details["items"][0]["current_stock"], 5)
@@ -1135,7 +1166,7 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
         with self.database.connect() as connection:
             audit = connection.execute(
                 "SELECT metadata_json FROM erp_audit_events "
-                "WHERE entity_id = 'sale-skip' AND action = 'deleted'"
+                "WHERE entity_id = 'sale-skip' AND action = 'cancelled'"
             ).fetchone()
         skipped = json.loads(audit["metadata_json"])["items"][0]
         self.assertEqual(skipped["sale_ids"], ["later-sale"])
@@ -1167,7 +1198,7 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
         self.receipts.delete_receipt("active-sale-filter")
         self.assertEqual(self.stock(product["id"]), 1)
 
-    def test_all_positions_with_later_sales_are_skipped_but_receipt_is_deleted(self):
+    def test_all_positions_with_later_sales_are_skipped_but_receipt_is_annulled(self):
         first = self.create_product(name="All Skipped A")
         second = self.create_product(name="All Skipped B")
         self.receipts.create_receipt(
@@ -1193,7 +1224,13 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
         self.assertFalse(preview["has_conflicts"])
         self.receipts.delete_receipt("all-skipped")
         self.assertEqual((self.stock(first["id"]), self.stock(second["id"])), stock_before)
-        self.assertFalse(self.receipts.exists("all-skipped"))
+        self.assertEqual(self.receipts.get_receipt("all-skipped")["status"], "cancelled")
+        with self.database.connect() as connection:
+            deltas = connection.execute(
+                "SELECT quantity_delta FROM catalog_stock_movements "
+                "WHERE receipt_id = 'all-skipped' ORDER BY rowid"
+            ).fetchall()
+        self.assertEqual([row[0] for row in deltas], [2, 3])
 
     def test_mixed_delete_and_new_sale_between_preview_and_delete(self):
         first = self.create_product(name="No Sale")

@@ -164,7 +164,8 @@ def restore_brand(client, database, brand="Луч", apply=False,
             for result in card_results
         ):
             raise RuntimeError("Brand restore produced unresolved product matches")
-        # Restoring catalogue cards is not an opening-stock receipt.
+        # New cards retain the usual one-time TTT stock import. Existing cards
+        # are reconciled only: a repeated restore cannot undo ERP movements.
         stock_report = BitrixStockSync(database).synchronize(active, apply=False)
         image_report = ProductImageImporter(database, store).run(
             [_image_record(product) for product in active],

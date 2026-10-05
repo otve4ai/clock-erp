@@ -314,8 +314,15 @@ class ProductBundlesTest(unittest.TestCase):
 
     def test_additive_upgrade_of_existing_catalog_keeps_entire_product_row(self):
         import sqlite3
+        import app.schema_migrations as migrations
+        from unittest.mock import patch
         from app.schema_migrations import apply_migrations, BUNDLE_MIGRATION_ID, COMPONENT_MIGRATION_ID
-        product = self.create_product(17)
+        # Start from the actual pre-multiwarehouse schema. Dropping old tables
+        # from a current DB would silently drop newer triggers as well.
+        self.tearDown()
+        with patch.object(migrations, 'MIGRATIONS', migrations.MIGRATIONS[:-1]), patch.object(migrations, 'verify_complete_catalog_contract', return_value=True):
+            self.setUp()
+            product = self.create_product(17)
         with sqlite3.connect(str(self.database.path)) as connection:
             before = connection.execute('SELECT * FROM catalog_excel_products WHERE id=?', (product['id'],)).fetchone()
             for table in ('erp_physical_documents','erp_component_inventory_events','erp_bundle_transitions','erp_component_inventory'):

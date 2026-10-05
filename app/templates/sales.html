@@ -7734,7 +7734,12 @@
                     submitBlockedUntilProduct: submitButton.disabled,
                     description: description.textContent.trim()
                         === "Источник: " + label
-                            + ". Он сохранится вместе с продажей.",
+                            + ". Склад: " + (sourceKey === "amazon" ? "Гонконг" : "TTT") + ".",
+                    warehouseValue: document.getElementById("saleWarehouse").value
+                        === (sourceKey === "amazon" ? "hong-kong" : "default"),
+                    warehouseEnabled: !document.getElementById("saleWarehouse").disabled,
+                    warehouseScope: form.dataset.warehouseId
+                        === document.getElementById("saleWarehouse").value,
                     submitText: submitButton.textContent.trim()
                         === "Добавить продажу в " + label,
                     style: !(

@@ -5743,6 +5743,12 @@
                     )),
                     "columns-visible"
                 );
+                if (window.innerWidth <= 767) {
+                    const bounds = document.getElementById("warehouseColumnSettingsPanel").getBoundingClientRect();
+                    assert(bounds.top >= 0 && bounds.bottom <= window.innerHeight
+                        && bounds.left >= 0 && bounds.right <= window.innerWidth,
+                        "columns-mobile-viewport");
+                }
                 document.dispatchEvent(new KeyboardEvent(
                     "keydown",
                     {key: "Escape", bubbles: true}

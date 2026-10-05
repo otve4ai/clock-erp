@@ -410,6 +410,7 @@ class Stage2SalesApiTest(unittest.TestCase):
                 json={
                     "created_at": "2026-07-30",
                     "source": source,
+                    "warehouse_id": "default",  # These channel fixtures share TTT stock.
                     "product_id": str(self.product["id"]),
                     "quantity": 1,
                     "unit_price": 1000,
@@ -478,6 +479,7 @@ class Stage2SalesApiTest(unittest.TestCase):
                 json={
                     "created_at": "2026-07-30",
                     "source": source,
+                    "warehouse_id": "default",
                     "product_id": str(self.product["id"]),
                     "quantity": 1,
                     "unit_price": 1000,
@@ -528,6 +530,7 @@ class Stage2SalesApiTest(unittest.TestCase):
                 json={
                     "created_at": "2026-07-30",
                     "source": source,
+                    "warehouse_id": "default",
                     "product_id": str(self.product["id"]),
                     "quantity": 1,
                     "order_number": "NO-PRICE-{}".format(index),
@@ -591,6 +594,7 @@ class Stage2SalesApiTest(unittest.TestCase):
                 json={
                     "created_at": "2026-08-06",
                     "source": source,
+                    "warehouse_id": "default",
                     "product_id": str(self.product["id"]),
                     "quantity": 1,
                     "unit_price": 1000,
@@ -775,6 +779,7 @@ class Stage2SalesApiTest(unittest.TestCase):
             json={
                 "created_at": "2026-07-30T09:10",
                 "source": "Amazon",
+                "warehouse_id": "default",
                 "product_id": str(self.product["id"]),
                 "quantity": 1,
                 "unit_price": 900,
@@ -1044,6 +1049,12 @@ class Stage2SalesApiTest(unittest.TestCase):
         )
         web._cached_api_sales_records.cache_clear()
 
+        # The old sale was already conducted on TTT. Metadata edits must work
+        # even after all current stock has been sold; HK is also empty.
+        ExcelProductCatalog(CatalogDatabase(self.database_path)).update_product(
+            self.product["id"], stock=0, stock_reason="historical edit fixture"
+        )
+        before = self.sale_effects()
         response = self.client.patch(
             "/api/v1/sales/automatic-clear",
             json={
@@ -1061,6 +1072,12 @@ class Stage2SalesApiTest(unittest.TestCase):
         reopened = self.client.get(
             "/api/v1/sales/automatic-clear"
         ).get_json()["data"]
+        self.assertEqual(reopened["warehouse_id"], "default")
+        self.assertEqual(self.sale_effects(), before)
+        rejected = self.client.patch(
+            "/api/v1/sales/automatic-clear", json={"warehouse_id": "hong-kong"}
+        )
+        self.assertEqual(rejected.status_code, 409)
         for field in (
             "recipient_name", "country", "delivery_address", "platform",
             "invoice_number", "payment_method", "note",
