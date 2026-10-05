@@ -26,6 +26,7 @@ PAGE_SIZES = (20, 50, 100, 200)
 MAX_TEXT_LENGTH = 2000
 TEMPLATE_VARIABLES = {
     "client_name", "order_number", "order_status", "amount", "repair_number",
+    "tracking_number", "Накладная",
 }
 TERMINAL_STATUSES = {"delivered", "failed", "cancelled"}
 STATUS_LABELS = {
@@ -55,7 +56,7 @@ GSM_BASIC = (
 GSM_EXTENDED = "^{}\\[~]|€"
 PHONE_CHARS = re.compile(r"^[+\d\s().\- ]+$")
 CLIENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9-]{1,72}$")
-TEMPLATE_PATTERN = re.compile(r"\{([a-z_]+)\}")
+TEMPLATE_PATTERN = re.compile(r"\{([^{}]+)\}")
 
 
 class SmsValidationError(ValueError):
@@ -111,13 +112,20 @@ def sms_segments(text):
     return {"encoding": "GSM-7" if gsm else "Unicode", "units": units, "segments": segments}
 
 
-def render_template_text(body, values):
+def render_template_text(body, values, validate_only=False):
     body = str(body or "")
     variables = set(TEMPLATE_PATTERN.findall(body))
     unknown = variables - TEMPLATE_VARIABLES
     if unknown:
         raise SmsValidationError("Неизвестная переменная шаблона: {}".format(sorted(unknown)[0]))
     clean = {key: str((values or {}).get(key) or "") for key in TEMPLATE_VARIABLES}
+    tracking = str((values or {}).get("tracking_number") or "").strip()
+    if variables & {"tracking_number", "Накладная"} and not validate_only:
+        if not re.fullmatch(r"[0-9]{5,30}", tracking):
+            raise SmsValidationError("В выбранном заказе нет однозначной накладной СДЭК. Отправка невозможна.")
+    clean["tracking_number"] = clean["Накладная"] = tracking
+    if not clean["client_name"].strip():
+        body = re.sub(r"^\s*\{client_name\}\s*,?\s*", "", body)
     return TEMPLATE_PATTERN.sub(lambda match: clean.get(match.group(1), ""), body)
 
 
@@ -197,6 +205,8 @@ class SmsStore:
         body = str(payload.get("text") or "").strip()
         if not body:
             raise SmsValidationError("Введите текст сообщения")
+        if TEMPLATE_PATTERN.search(body):
+            raise SmsValidationError("В сообщении остались незаполненные переменные шаблона")
         if len(body) > MAX_TEXT_LENGTH:
             raise SmsValidationError("Текст SMS не должен превышать {} символов".format(MAX_TEXT_LENGTH))
         sender = str(payload.get("sender") or "").strip()
@@ -375,11 +385,19 @@ class SmsStore:
             rows = connection.execute(sql).fetchall()
         return [dict(row) for row in rows]
 
+    def render_saved_template(self, template_id, values):
+        """Read the current enabled template on every preview/send (including jobs)."""
+        template = next((row for row in self.templates(active_only=True)
+                         if str(row["id"]) == str(template_id)), None)
+        if template is None:
+            raise SmsValidationError("Шаблон недоступен.")
+        return render_template_text(template["message_text"], values)
+
     def save_template(self, template_id, name, body, active, actor):
         name, body = str(name or "").strip(), str(body or "").strip()
         if not name or len(name) > 120: raise SmsValidationError("Укажите название шаблона")
         if not body or len(body) > MAX_TEXT_LENGTH: raise SmsValidationError("Укажите корректный текст шаблона")
-        render_template_text(body, {})
+        render_template_text(body, {}, validate_only=True)
         now = utc_now()
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")

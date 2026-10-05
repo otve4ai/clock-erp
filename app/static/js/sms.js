@@ -32,8 +32,35 @@
   const composeForm = document.getElementById('smsComposeForm');
   const textArea = composeForm?.elements.text;
   const variables = {...(boot.compose || {})};
-  const renderVariables = body => body.replace(/\{(client_name|order_number|order_status|amount|repair_number)\}/g, (_, key) => String(variables[key] || ''));
-  const applySelectedTemplate = () => { const option = composeForm?.elements.template_id?.selectedOptions[0]; if (option?.dataset.body) { textArea.value = renderVariables(option.dataset.body); updatePreview(); } };
+  let previewVersion = 0;
+  const applySelectedTemplate = async () => {
+    const version = ++previewVersion;
+    const templateId = composeForm?.elements.template_id?.value;
+    const submit = composeForm.querySelector('[data-send-sms]');
+    const error = composeForm.querySelector('[data-compose-error]');
+    error.hidden = true;
+    textArea.readOnly = Boolean(templateId);
+    if (!templateId) { submit.disabled = false; return; }
+    submit.disabled = true;
+    textArea.value = '';
+    updatePreview();
+    try {
+      const response = await fetch('/api/v1/sms/templates/preview', {
+        method: 'POST', headers: {'Content-Type':'application/json','X-CSRF-Token':csrf},
+        body: JSON.stringify(Object.fromEntries(new FormData(composeForm).entries())),
+      });
+      const result = await response.json();
+      if (version !== previewVersion) return;
+      if (!response.ok) throw new Error(result.message || 'Не удалось заполнить шаблон');
+      textArea.value = result.data.text;
+      updatePreview();
+      submit.disabled = false;
+    } catch (failure) {
+      if (version !== previewVersion) return;
+      error.textContent = failure.message;
+      error.hidden = false;
+    }
+  };
   const updatePreview = () => { const text = textArea.value; const info = countSegments(text); composeForm.querySelector('[data-character-count]').textContent = `${[...text].length} символов`; composeForm.querySelector('[data-segment-count]').textContent = `${info.segments} SMS · ${info.encoding}`; composeForm.querySelector('[data-long-warning]').hidden = info.segments <= 1; composeForm.querySelector('[data-message-preview]').textContent = text || 'Текст сообщения появится здесь.'; };
   textArea?.addEventListener('input', updatePreview);
   composeForm?.elements.template_id?.addEventListener('change', applySelectedTemplate);
@@ -42,8 +69,8 @@
   const customerResults = composeForm?.querySelector('[data-customer-results]');
   let customerTimer;
   customerSearch?.addEventListener('input', () => { clearTimeout(customerTimer); const query = customerSearch.value.trim(); if (query.length < 2) { customerResults.hidden = true; return; } customerTimer = setTimeout(async () => { try { const response = await fetch(`/api/v1/sms/customers?q=${encodeURIComponent(query)}`); const payload = await response.json(); const rows = payload.data || []; customerResults.innerHTML = rows.map(row => `<button type="button" data-customer-id="${row.id}" data-name="${escapeHtml(row.name)}" data-phone="${escapeHtml(row.phone)}"><strong>${escapeHtml(row.name)}</strong><br><small>${escapeHtml(row.phone || 'Телефон не указан')}</small></button>`).join('') || '<button type="button" disabled>Ничего не найдено</button>'; customerResults.hidden = false; } catch { customerResults.hidden = true; } }, 300); });
-  const updateRelations = async customerId => { try { const response=await fetch(`/api/v1/sms/customers/${customerId}/relations`); const payload=await response.json(); if(!response.ok)return; const {orders,repairs}=payload.data; composeForm.elements.order_relation.innerHTML='<option value="">Без заказа</option>'+orders.map(row=>`<option value="${escapeHtml(row.id)}" data-number="${escapeHtml(row.number)}" data-status="${escapeHtml(row.status)}" data-amount="${escapeHtml(row.amount)}">Заказ №${escapeHtml(row.number)}</option>`).join(''); composeForm.elements.repair_relation.innerHTML='<option value="">Без ремонта</option>'+repairs.map(row=>`<option value="${escapeHtml(row.id)}" data-number="${escapeHtml(row.number)}">Ремонт №${escapeHtml(row.number)}</option>`).join(''); } catch {} };
-  customerResults?.addEventListener('click', event => { const button = event.target.closest('[data-customer-id]'); if (!button) return; composeForm.elements.customer_id.value = button.dataset.customerId; composeForm.elements.customer_name.value = button.dataset.name; variables.client_name=button.dataset.name; customerSearch.value = button.dataset.name; composeForm.elements.phone.value = button.dataset.phone; customerResults.hidden = true; updateRelations(button.dataset.customerId); applySelectedTemplate(); });
+  const updateRelations = async customerId => { try { const response=await fetch(`/api/v1/sms/customers/${customerId}/relations`); const payload=await response.json(); if(!response.ok || String(composeForm.elements.customer_id.value)!==String(customerId))return; const {orders,repairs}=payload.data; composeForm.elements.order_relation.innerHTML='<option value="">Без заказа</option>'+orders.map(row=>`<option value="${escapeHtml(row.id)}" data-number="${escapeHtml(row.number)}" data-status="${escapeHtml(row.status)}" data-amount="${escapeHtml(row.amount)}">Заказ №${escapeHtml(row.number)}</option>`).join(''); composeForm.elements.repair_relation.innerHTML='<option value="">Без ремонта</option>'+repairs.map(row=>`<option value="${escapeHtml(row.id)}" data-number="${escapeHtml(row.number)}">Ремонт №${escapeHtml(row.number)}</option>`).join(''); } catch {} };
+  customerResults?.addEventListener('click', event => { const button = event.target.closest('[data-customer-id]'); if (!button) return; composeForm.elements.customer_id.value = button.dataset.customerId; composeForm.elements.customer_name.value = button.dataset.name; variables.client_name=button.dataset.name; composeForm.elements.order_id.value=''; composeForm.elements.order_number.value=''; composeForm.elements.repair_id.value=''; composeForm.elements.repair_number.value=''; composeForm.elements.order_relation.innerHTML='<option value="">Без заказа</option>'; composeForm.elements.repair_relation.innerHTML='<option value="">Без ремонта</option>'; customerSearch.value = button.dataset.name; composeForm.elements.phone.value = button.dataset.phone; customerResults.hidden = true; updateRelations(button.dataset.customerId); applySelectedTemplate(); });
   composeForm?.elements.order_relation?.addEventListener('change', event => { const option=event.target.selectedOptions[0]; composeForm.elements.order_id.value=event.target.value; composeForm.elements.order_number.value=option?.dataset.number||''; variables.order_number=option?.dataset.number||''; variables.order_status=option?.dataset.status||''; variables.amount=option?.dataset.amount||''; applySelectedTemplate(); });
   composeForm?.elements.repair_relation?.addEventListener('change', event => { const option=event.target.selectedOptions[0]; composeForm.elements.repair_id.value=event.target.value; composeForm.elements.repair_number.value=option?.dataset.number||''; variables.repair_number=option?.dataset.number||''; applySelectedTemplate(); });
   composeForm?.addEventListener('submit', async event => {

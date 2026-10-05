@@ -1,8 +1,10 @@
 import json
+import gc
 import os
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
@@ -88,6 +90,30 @@ class FakeSession:
 
 
 class SmsDomainTests(unittest.TestCase):
+    def test_cdek_template_alias_missing_name_and_required_tracking(self):
+        body = "{client_name}, Ваш заказ TicTacToy.ru ожидает получения ❤ Трекинг {Накладная} Отследить cdek.ru."
+        self.assertTrue(render_template_text(body, {"tracking_number": "10313114965"}).startswith("Ваш заказ"))
+        self.assertTrue(render_template_text(body, {"client_name": "Вячеслав", "tracking_number": "10313114965"}).startswith("Вячеслав, Ваш"))
+        for value in ("", "1031,1032", "{Накладная}"):
+            with self.assertRaises(SmsValidationError):
+                render_template_text(body, {"tracking_number": value})
+
+    def test_saved_template_reads_edits_and_honors_disabled_state(self):
+        row = self.store.save_template(None, "СДЭК", "Трекинг {Накладная}", True, self.actor)
+        values = {"tracking_number": "10313114965"}
+        self.assertEqual(self.store.render_saved_template(row["id"], values), "Трекинг 10313114965")
+        self.store.save_template(row["id"], "СДЭК", "Получите заказ: {tracking_number}", True, self.actor)
+        self.assertEqual(self.store.render_saved_template(row["id"], values), "Получите заказ: 10313114965")
+        self.store.save_template(row["id"], "СДЭК", "Трекинг {Накладная}", False, self.actor)
+        with self.assertRaises(SmsValidationError):
+            self.store.render_saved_template(row["id"], values)
+
+    def test_unresolved_variables_never_reach_provider(self):
+        provider = FakeProvider()
+        with self.assertRaises(SmsValidationError):
+            SmsService(self.store, provider).send(self.payload(text="Трекинг {Накладная}"), self.actor)
+        self.assertEqual(provider.calls, 0)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.path = Path(self.temp.name) / "sms.db"
@@ -115,7 +141,7 @@ class SmsDomainTests(unittest.TestCase):
     def test_migration_is_repeatable_and_quick_check_passes(self):
         migrate_database(self.path)
         verify_database(self.path)
-        with sqlite3.connect(str(self.path)) as connection:
+        with closing(sqlite3.connect(str(self.path))) as connection:
             self.assertEqual(connection.execute("PRAGMA quick_check").fetchone()[0], "ok")
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM sms_templates").fetchone()[0], 5)
 
@@ -237,6 +263,49 @@ class SmsBlissClientTests(unittest.TestCase):
 
 
 class SmsWebTests(unittest.TestCase):
+    def test_cdek_preview_and_send_use_saved_template_and_source_order(self):
+        store = SmsStore(self.path)
+        row = store.save_template(None, "СДЭК", "{client_name}, Трекинг {Накладная}", True, {"id":"1", "name":"Тест"})
+        payload = {"client_message_id":"cdek-test", "phone":"+79991234567", "order_id":"551",
+                   "template_id":row["id"], "text":"FORGED", "client_name":"FORGED", "tracking_number":"99999"}
+        provider = FakeProvider()
+        order = {"id":"551", "number":"551", "customer":"Вячеслав", "tracking":"10313114965"}
+        with mock.patch.object(self.web, "OrdersSnapshotStore") as snapshots, mock.patch.object(self.web, "sms_client", return_value=provider):
+            snapshots.return_value.get.return_value = order
+            preview = self.client.post("/api/v1/sms/templates/preview", json=payload)
+            self.assertEqual(preview.status_code, 200)
+            self.assertEqual(preview.get_json()["data"]["text"], "Вячеслав, Трекинг 10313114965")
+            self.assertEqual(provider.calls, 0)
+            # An edit after preview must be picked up on send, rather than using browser text.
+            store.save_template(row["id"], "СДЭК", "{client_name}, получите заказ {tracking_number}", True, {"id":"1", "name":"Тест"})
+            result = self.client.post("/api/v1/sms/messages", json=payload)
+            self.assertEqual(result.status_code, 200)
+        self.assertEqual(store.get(client_message_id="cdek-test")["message_text"], "Вячеслав, получите заказ 10313114965")
+        self.assertEqual(provider.calls, 1)
+
+    def test_cdek_missing_source_tracking_cannot_use_browser_value(self):
+        row = SmsStore(self.path).save_template(None, "СДЭК", "Трек {Накладная}", True, {"id":"1", "name":"Тест"})
+        provider = FakeProvider()
+        with mock.patch.object(self.web, "OrdersSnapshotStore") as snapshots, mock.patch.object(self.web, "sms_client", return_value=provider), mock.patch.object(self.web, "api_sales_records", return_value=[]):
+            snapshots.return_value.get.return_value = {"id":"551", "customer":"Анна"}
+            for route in ("/api/v1/sms/templates/preview", "/api/v1/sms/messages"):
+                response = self.client.post(route, json={"order_id":"551", "template_id":row["id"], "tracking_number":"10313114965"})
+                self.assertEqual(response.status_code, 422)
+        self.assertEqual(provider.calls, 0)
+
+    def test_cdek_tracking_from_sales_rejects_ambiguous_shipments(self):
+        row = SmsStore(self.path).save_template(None, "СДЭК", "Трек {Накладная}", True, {"id":"1", "name":"Тест"})
+        sale = {"source":"tictactoy", "order_number":"551", "track_number":"10325754515"}
+        with mock.patch.object(self.web, "OrdersSnapshotStore") as snapshots, mock.patch.object(self.web, "api_sales_records") as sales:
+            snapshots.return_value.get.return_value = {"id":"551", "number":"551", "customer":"Анна"}
+            sales.return_value = [sale, dict(sale), dict(sale, source="wildberries", track_number="99999")]
+            payload = {"order_id":"551", "template_id":row["id"]}
+            result = self.client.post("/api/v1/sms/templates/preview", json=payload)
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.get_json()["data"]["text"], "Трек 10325754515")
+            sales.return_value.append(dict(sale, track_number="10313114965"))
+            self.assertEqual(self.client.post("/api/v1/sms/templates/preview", json=payload).status_code, 422)
+
     @classmethod
     def setUpClass(cls):
         cls.runtime = tempfile.TemporaryDirectory()
@@ -252,6 +321,7 @@ class SmsWebTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        gc.collect()  # Release SQLite connection cycles before Windows removes test files.
         cls.runtime.cleanup()
 
     def setUp(self):

@@ -69,7 +69,7 @@
             </section>
 
             <section data-sms-panel="templates" hidden>
-                <div class="sms-section-head"><div><h2>Шаблоны</h2><p>Переменные: <code>{client_name}</code>, <code>{order_number}</code>, <code>{order_status}</code>, <code>{amount}</code>, <code>{repair_number}</code>.</p></div>{% if permissions.manage_templates %}<button class="sms-button" type="button" data-new-template>Новый шаблон</button>{% endif %}</div>
+                <div class="sms-section-head"><div><h2>Шаблоны</h2><p>Переменные: <code>{client_name}</code>, <code>{order_number}</code>, <code>{order_status}</code>, <code>{amount}</code>, <code>{repair_number}</code>, <code>{tracking_number}</code> (или <code>{Накладная}</code>). Имя и накладная берутся из выбранного заказа; без накладной отправка такого шаблона недоступна.</p></div>{% if permissions.manage_templates %}<button class="sms-button" type="button" data-new-template>Новый шаблон</button>{% endif %}</div>
                 <div class="sms-template-grid">{% for template in templates %}<article class="sms-template-card {{ 'inactive' if not template.active }}" data-template-card data-id="{{ template.id }}" data-name="{{ template.name|e }}" data-text="{{ template.message_text|e }}" data-active="{{ template.active }}"><header><strong>{{ template.name }}</strong><span>{{ 'Активен' if template.active else 'Отключён' }}</span></header><p>{{ template.message_text }}</p><footer><small>Использован: {{ template.use_count }}</small>{% if permissions.manage_templates %}<button type="button" data-edit-template>Изменить</button><button type="button" data-delete-template>{{ 'Отключить' if template.use_count else 'Удалить' }}</button>{% endif %}</footer></article>{% endfor %}</div>
             </section>
 
