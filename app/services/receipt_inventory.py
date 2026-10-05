@@ -705,7 +705,7 @@ class ReceiptInventory:
             return self._delete_plan(connection, receipt_id)
 
     def delete_receipt(self, receipt_id, user_name="", failure_hook=None):
-        """Delete a receipt and apply its conservative stock rollback atomically."""
+        """Annul a receipt with compensating movements; keep its audit trail."""
         receipt_id = str(receipt_id or "").strip()
         self.database.initialize()
         with self.database.transaction() as connection:
@@ -729,39 +729,25 @@ class ReceiptInventory:
                     now,
                     ("receipt", receipt_id),
                 )
-                if plan.get("warehouse_id"):
-                    from app.services.manual_receipts import ManualReceipts
-                    warehouse = ManualReceipts._warehouse(
-                        connection, plan["warehouse_id"], active=False
-                    )
-                    warehouse_before = ManualReceipts._warehouse_balance(
-                        connection, warehouse, item["product_id"], now
-                    )
-                    if warehouse_before + 0.000001 < item["quantity"]:
-                        raise ReceiptInventoryError(
-                            "Поставку нельзя удалить: на выбранном складе недостаточно остатка."
-                        )
-                    ManualReceipts._set_warehouse_balance(
-                        connection, warehouse["id"], item["product_id"],
-                        warehouse_before - item["quantity"], now,
-                    )
+                connection.execute(
+                    "INSERT INTO catalog_stock_movements(id,product_id,movement_type,quantity_delta,stock_before,stock_after,receipt_id,"
+                    "idempotency_key,source_type,source_id,operation_kind,source,user_name,comment,created_at,warehouse_id) "
+                    "VALUES(?,?,'cancellation',?,?,?,?,?,'receipt',?,'annul','Приход',?,?,?,?)",
+                    (uuid.uuid4().hex, item['product_id'], -item['quantity'], item['current_stock'], item['stock_after'], receipt_id,
+                     'receipt-annul:{}:{}'.format(receipt_id,item['product_id']), receipt_id, user_name,
+                     'Аннулирование поставки #{}'.format(plan['number']), now, plan['warehouse_id'] or 'default'))
             connection.execute(
-                "DELETE FROM catalog_stock_movements WHERE receipt_id = ?",
-                (receipt_id,),
+                "UPDATE erp_receipts SET status='cancelled',cancelled_at=?,cancelled_by=?,cancellation_reason=?,updated_at=? WHERE id=?",
+                (now,user_name,'Аннулирование с сохранением истории; позиции с последующими продажами не сторнируются',now,receipt_id),
             )
-            connection.execute(
-                "DELETE FROM erp_receipt_items WHERE receipt_id = ?",
-                (receipt_id,),
-            )
-            connection.execute("DELETE FROM erp_receipts WHERE id = ?", (receipt_id,))
             AuditJournal(self.database).record(
                 "receipt",
                 receipt_id,
-                "deleted",
+                "cancelled",
                 "Поставка #{}".format(plan["number"]),
                 object_secondary=plan["name"],
                 before={"status": plan["receipt_status"]},
-                after={"status": "deleted"},
+                after={"status": "cancelled"},
                 metadata={
                     "number": plan["number"],
                     "name": plan["name"],
@@ -778,7 +764,7 @@ class ReceiptInventory:
                 actor_name=user_name,
                 actor_type="user" if user_name else "system",
                 occurred_at=now,
-                status="deleted",
+                status="cancelled",
                 source="Приход",
                 connection=connection,
             )
@@ -878,10 +864,11 @@ class ReceiptInventory:
                     "JOIN catalog_stock_movements sm ON sm.sale_id = s.id "
                     "AND sm.sale_item_id = si.id AND sm.movement_type = 'sale' "
                     "WHERE si.product_id = ? AND sm.rowid > ? "
+                    "AND s.warehouse_id = ? "
                     "AND s.status IN ('completed', 'partially_returned') "
                     "AND s.cancelled_at IS NULL AND s.deleted_at IS NULL "
                     "ORDER BY s.created_at, s.id",
-                    (row["product_id"], receipt_movement["movement_rowid"] or 0),
+                    (row["product_id"], receipt_movement["movement_rowid"] or 0, receipt['warehouse_id'] or 'default'),
                 ).fetchall()
                 for sale in sale_rows:
                     try:
@@ -977,7 +964,7 @@ class ReceiptInventory:
         self.database.initialize()
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT metadata_json FROM erp_receipts "
+                "SELECT metadata_json,warehouse_id,(SELECT name FROM erp_warehouses WHERE id=erp_receipts.warehouse_id) AS warehouse_name FROM erp_receipts "
                 "WHERE id LIKE 'sale-cancellation:%' AND status = 'posted' "
                 "ORDER BY created_at DESC"
             ).fetchall()
@@ -991,6 +978,7 @@ class ReceiptInventory:
                 isinstance(receipt, dict)
                 and receipt.get("automatic_type") == "sale_cancellation"
             ):
+                receipt.update(warehouse_id=row['warehouse_id'], warehouse_name=row['warehouse_name'])
                 receipts.append(receipt)
         return receipts
 
@@ -1093,9 +1081,12 @@ class ReceiptInventory:
         ).fetchall()
         if not items:
             raise ReceiptInventoryError("Добавьте хотя бы один товар.")
+        for item in items:
+            remember(connection, int(item['product_id']), ('receipt', receipt_id))
         products = cls._load_products(
             connection,
             [{"product_id": item["product_id"]} for item in items],
+            document=("receipt", receipt_id),
         )
         assert_products_unlocked(
             connection, products, ReceiptInventoryError
@@ -1186,7 +1177,7 @@ class ReceiptInventory:
         return prepared
 
     @staticmethod
-    def _load_products(connection, positions, include_archived=False, document=None):
+    def _load_products(connection, positions, include_archived=False, document=None, warehouse_id=None):
         product_ids = sorted({
             int(position["product_id"])
             for position in positions
@@ -1202,7 +1193,7 @@ class ReceiptInventory:
             product_ids,
         ).fetchall()
         try:
-            products = {int(row["id"]): overlay(connection, row, document=document) for row in rows}
+            products = {int(row["id"]): overlay(connection, row, document=document, warehouse_id=warehouse_id) for row in rows}
         except ValueError as error:
             raise ReceiptInventoryError(str(error))
         missing = [product_id for product_id in product_ids if product_id not in products]

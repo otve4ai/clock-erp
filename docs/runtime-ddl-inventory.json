@@ -70,7 +70,7 @@
     },
     {
       "file": "app/schema_migrations.py",
-      "sha256": "63f928a2dcf15cc7f7fcab326376ec95e866195d67b8dbee193cd51df7a83e34",
+      "sha256": "f0568c3fe47cdfdd68222981bfe04a70c2ceb3210987a24466b8ddbe6f54d65c",
       "owner": "migration-platform"
     },
     {
@@ -137,6 +137,18 @@
       "file": "app/catalog_required_strap_schema_manifest.json",
       "owner": "catalog-migrations",
       "sha256": "a432ab3190dd1414b1f19d7462453e6ebacd6f81ed708b551f4232da5d800cc1"
+    },
+    {
+      "file": "app/multiwarehouse_migration.py",
+      "owner": "migration-platform",
+      "reason": "Versioned multiwarehouse migration; no runtime DDL",
+      "sha256": "9c014f043f7225dd1759283a93c316975f1269b7cd2395aa3cd4b65d09d2c032"
+    },
+    {
+      "file": "app/catalog_multiwarehouse_schema_manifest.json",
+      "owner": "migration-platform",
+      "reason": "Versioned multiwarehouse migration; no runtime DDL",
+      "sha256": "b25c43e1ac5fceac88ccf34956df3e3d29eea66aae9eff43af907f8a8daa1ecf"
     }
   ],
   "ensure_functions": [],

@@ -23,7 +23,7 @@
 <table class="sales-table erp-data-table writeoff-table"><thead><tr>{% for label in ['Дата','Товар','Артикул','Бренд','Категория','Количество','Причина','Сотрудник','Комментарий','Действия'] %}<th>{{ label }}</th>{% endfor %}</tr></thead>
 <tbody>{% for row in writeoffs %}<tr>
 <td>{{ render_erp_datetime(row.created_at) }}</td>
-<td>{% if row.image_url %}<img src="{{ row.image_url }}" alt="" width="40" height="40" loading="lazy" style="object-fit:contain">{% endif %}{{ row.product_name }}</td>
+<td>{% if row.image_url %}<img src="{{ row.image_url }}" alt="" width="40" height="40" loading="lazy" style="object-fit:contain">{% endif %}{{ row.product_name }}<small style="display:block">{{ row.warehouse_name or 'TTT' }}</small></td>
 <td>{{ row.article or '—' }}</td><td>{{ row.brand or '—' }}</td><td>{{ row.category or '—' }}</td><td>−{{ row.quantity }}</td><td>{{ row.reason }}</td><td>{{ row.created_by_name or row.created_by }}</td><td style="white-space:normal;min-width:160px">{{ row.comment }}</td>
 <td>{% if row.status == 'cancelled' %}<span>Отменено</span><small style="display:block">{{ row.cancelled_by_name }} · {{ render_erp_datetime(row.cancelled_at) }}</small>{% else %}<button type="button" class="button button-secondary" data-cancel-writeoff="{{ row.id }}">Отменить списание</button>{% endif %}</td>
 </tr>{% else %}<tr><td colspan="10" class="writeoff-empty">Списаний по выбранным условиям нет.</td></tr>{% endfor %}</tbody></table>
@@ -35,6 +35,7 @@
 <form id="writeoffForm" class="modal-body sales-form-body" data-shared-catalog-scope data-catalog-option-images="false" data-catalog-in-stock="true">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <div class="manual-form-grid writeoff-form-grid">
+<div class="field field-wide"><label for="writeoffWarehouse">Склад списания</label><select id="writeoffWarehouse" class="control" name="warehouse_id">{% for warehouse in warehouses|default([]) %}<option value="{{ warehouse.id }}">{{ warehouse.name }}</option>{% endfor %}</select></div>
 <h3 class="erp-form-section-title field-wide sale-section-title">Товар</h3>
 <div class="field sale-catalog-field"><label for="writeoffBrandTrigger">Бренд</label>{{ render_catalog_combobox('writeoffBrand','product_brand',[],item_label='бренд',component_class='filter-combobox',shared_catalog_kind='brand',id_input_name='brand_id',clear_selection_on_search_clear=true) }}</div>
 <div class="field sale-catalog-field"><label for="writeoffCategoryTrigger">Категория</label>{{ render_catalog_combobox('writeoffCategory','product_category',[],item_label='категорию',component_class='filter-combobox',shared_catalog_kind='category',id_input_name='category_id',disabled=true,clear_selection_on_search_clear=true) }}</div>

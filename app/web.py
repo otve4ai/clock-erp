@@ -72,6 +72,7 @@ from app.services.bitrix_erp_product_sync import (
 )
 from app.services.bitrix_site_status import bitrix_site_status
 from app.services.bitrix_site_status_sync import BitrixSiteStatusSync
+from app.services.manual_receipts import ManualReceipts
 from app.services.audit_journal import AuditJournal
 from app.services.order_presentation import present_order, status_key, status_label, navigation_counts
 from app.services.service_vault import (
@@ -155,6 +156,7 @@ from app.services.sales_inventory import (
     positive_integer,
     sale_now_iso,
     validate_performed_sale_update,
+    sale_warehouse,
 )
 from app.services.sale_pricing import (
     calculate_sale_pricing,
@@ -2396,6 +2398,11 @@ def render_orders_page(
         WildberriesSales(SalesInventory(), None).find_sale(selected_order.get("wb_order_id"))
         if is_wildberries else get_order_conducted_sale(order_id)
     )
+    order_warehouses = ManualReceipts(SalesInventory().database).warehouses()
+    selected_warehouse = (conducted_sale or {}).get('warehouse_id') or request.args.get('warehouse_id', 'default')
+    if selected_warehouse not in {w['id'] for w in order_warehouses}:
+        abort(400, 'Склад не найден')
+    project_order_warehouse(order_mappings, selected_warehouse)
     sale_state = build_order_sale_state(
         selected_order or {}, order_mappings, conducted_sale,
         has_legacy_order_stock_writeoff(order_id),
@@ -2413,6 +2420,8 @@ def render_orders_page(
     order_geography = get_order_geography(selected_order or {})
     response = make_response(render_template(
         "orders.html",
+        warehouses=order_warehouses,
+        selected_warehouse=selected_warehouse,
         order_detail_only=request.headers.get("X-Order-Detail") == "1",
         orders=list_state["rows"],
         selected_order=selected_order,
@@ -3122,6 +3131,15 @@ def get_order_product_mapping(mapping_context, product):
     return mapping_context.get(order_product_mapping_key(product)) or {}
 
 
+def project_order_warehouse(mapping_context, warehouse_id):
+    if warehouse_id == 'default':
+        return
+    entries = [entry for entry in mapping_context.values() if entry.get('product')]
+    projected = SharedCatalog()._warehouse_projection([entry['product'] for entry in entries], warehouse_id)
+    for entry, product in zip(entries, projected):
+        entry['product'] = product
+
+
 def order_has_blocking_sync_issue(order):
     """Keep incomplete-card guards, except a missing Bitrix monetary total."""
     state = (order or {}).get("sync_state")
@@ -3378,7 +3396,7 @@ def resolve_wildberries_sale_products(order):
 SALE_STOCK_NOTIFICATION_SALT = "automatic-sale-stock-notification"
 
 
-def automatic_sale_stock_snapshot(inventory, product_ids):
+def automatic_sale_stock_snapshot(inventory, product_ids, warehouse_id='default'):
     """Read factual catalog stocks without participating in a sale write."""
     ids = []
     for value in product_ids:
@@ -3400,6 +3418,9 @@ def automatic_sale_stock_snapshot(inventory, product_ids):
             ),
             ids,
         ).fetchall()
+        if warehouse_id != 'default':
+            from app.services.component_inventory import balance
+            rows = [dict(row, stock=balance(connection, row['id'], warehouse_id=warehouse_id)) for row in rows]
     result = {}
     for row in rows:
         local_image_path = str(row["local_image_path"] or "").strip()
@@ -3422,9 +3443,9 @@ def automatic_sale_stock_snapshot(inventory, product_ids):
     return result
 
 
-def safe_automatic_sale_stock_snapshot(inventory, product_ids, order_id):
+def safe_automatic_sale_stock_snapshot(inventory, product_ids, order_id, warehouse_id='default'):
     try:
-        return automatic_sale_stock_snapshot(inventory, product_ids)
+        return automatic_sale_stock_snapshot(inventory, product_ids, warehouse_id)
     except Exception:
         app.logger.exception(
             "Automatic sale stock notification snapshot failed order_id=%s",
@@ -3536,11 +3557,16 @@ def wildberries_conduct_sale(wb_order_id):
     ):
         abort(403)
     wants_json = request.accept_mimetypes.best == "application/json"
+    warehouse_id = 'default'
     try:
         order = OrdersSnapshotStore().get("wb:" + str(wb_order_id))
         inventory = SalesInventory()
         service = WildberriesSales(inventory, resolve_wildberries_sale_products)
         existing = service.find_sale(wb_order_id)
+        warehouse_id = (existing or {}).get('warehouse_id') or request.form.get('warehouse_id', 'default')
+        if warehouse_id not in {w['id'] for w in ManualReceipts(inventory.database).warehouses()}:
+            warehouse_id = 'default'
+            raise SalesInventoryError('Склад не найден или отключён.')
         replacement = None
         if request.form.get("operation_mode") == "strap_replacement":
             replacement = order_strap_replacement_form(request.form, request.form.get("strap_line_index"))
@@ -3558,13 +3584,14 @@ def wildberries_conduct_sale(wb_order_id):
             replacement,
         )
         stock_before = (
-            safe_automatic_sale_stock_snapshot(inventory, product_ids, wb_order_id)
+            safe_automatic_sale_stock_snapshot(inventory, product_ids, wb_order_id, warehouse_id)
             if not existing else {}
         )
         sale = existing or service.conduct(
             order, current_sales_user_name(), current_audit_actor(), replacement,
             straps={index: request.form.get("required_strap_{}_product_id".format(index))
                     for index in range(len((order or {}).get("products") or []))},
+            warehouse_id=warehouse_id,
         )
         stock_notification = None
         if not existing:
@@ -3575,7 +3602,7 @@ def wildberries_conduct_sale(wb_order_id):
                     inventory, sale.get("id"), stock_before
                 ),
                 safe_automatic_sale_stock_snapshot(
-                    inventory, product_ids, wb_order_id
+                    inventory, product_ids, wb_order_id, warehouse_id
                 ),
             )
         WAREHOUSE_CACHE["items"] = []
@@ -3600,6 +3627,7 @@ def wildberries_conduct_sale(wb_order_id):
             return jsonify(ok=False, message=str(error), duplicate_matches=error.matches), 400
         return redirect(url_for(
             "wildberries_order_page", wb_order_id=wb_order_id, notice="error",
+            warehouse_id=warehouse_id,
             message=str(error), open_sale="1", open_strap="1",
             duplicate_matches=json.dumps(error.matches, ensure_ascii=False),
         ))
@@ -3611,7 +3639,7 @@ def wildberries_conduct_sale(wb_order_id):
     if wants_json:
         return jsonify(ok=False, message=message), 400
     return redirect(url_for("wildberries_order_page", wb_order_id=wb_order_id,
-                            notice="error", message=message, open_sale="1"))
+                            notice="error", message=message, open_sale="1", warehouse_id=warehouse_id))
 
 
 @app.route("/order/<int:order_id>/stock-writeoff", methods=["POST"])
@@ -3651,6 +3679,9 @@ def _conduct_order_sale(order_id):
 
     inventory = SalesInventory()
     sale_status_service = OrderStatusService(inventory.database)
+    warehouse_id = request.form.get('warehouse_id', 'default')
+    if warehouse_id not in {w['id'] for w in ManualReceipts(inventory.database).warehouses()}:
+        return redirect(url_for('order_page', order_id=order_id, notice='error', message='Склад не найден или отключён.'))
     existing_sale = inventory.find_active_sale("tictactoy", order_id)
     if existing_sale or is_order_stock_written_off(order_id):
         record_order_sale_attempt(
@@ -3658,7 +3689,7 @@ def _conduct_order_sale(order_id):
         )
         return redirect(url_for(
             "order_page",
-            order_id=order_id,
+            order_id=order_id, warehouse_id=warehouse_id,
             notice="error",
             message=(
                 "Заказ уже был проведён другим пользователем"
@@ -3681,7 +3712,7 @@ def _conduct_order_sale(order_id):
     if commission and commission not in SALE_COMMISSION_OPTIONS:
         return redirect(url_for(
             "order_page",
-            order_id=order_id,
+            order_id=order_id, warehouse_id=warehouse_id,
             notice="error",
             message="Выберите комиссию из списка",
             open_sale="1",
@@ -3710,7 +3741,7 @@ def _conduct_order_sale(order_id):
     except ValueError as error:
         return redirect(url_for(
             "order_page",
-            order_id=order_id,
+            order_id=order_id, warehouse_id=warehouse_id,
             notice="error",
             message=str(error),
             open_sale="1",
@@ -3721,7 +3752,7 @@ def _conduct_order_sale(order_id):
     if oversized_geography:
         return redirect(url_for(
             "order_page",
-            order_id=order_id,
+            order_id=order_id, warehouse_id=warehouse_id,
             notice="error",
             message="Страна, регион и населённый пункт должны быть не длиннее 255 символов",
             open_sale="1",
@@ -3735,7 +3766,7 @@ def _conduct_order_sale(order_id):
         )
         return redirect(url_for(
             "order_page",
-            order_id=order_id,
+            order_id=order_id, warehouse_id=warehouse_id,
             notice="error",
             message="Трекинг не должен быть длиннее 255 символов",
             open_sale="1",
@@ -3771,6 +3802,7 @@ def _conduct_order_sale(order_id):
     mapping_context = build_order_product_mapping_context(
         products, mappings=load_order_product_mappings(order_id)
     )
+    project_order_warehouse(mapping_context, warehouse_id)
     issues = []
     prepared_items = []
     required_by_product = {}
@@ -3903,7 +3935,7 @@ def _conduct_order_sale(order_id):
         )
         return redirect(url_for(
             "order_page",
-            order_id=order_id,
+            order_id=order_id, warehouse_id=warehouse_id,
             notice="error",
             message="Проведение невозможно: {}".format(" • ".join(issues)),
             open_sale="1",
@@ -3925,6 +3957,7 @@ def _conduct_order_sale(order_id):
     payload = {
         "id": uuid.uuid4().hex,
         "source": "tictactoy",
+        "warehouse_id": warehouse_id,
         "sale_type": "automatic",
         "order_number": str(order_number),
         "order_id": str(order_id),
@@ -3961,7 +3994,7 @@ def _conduct_order_sale(order_id):
         prepared_items, replacement
     )
     stock_before = safe_automatic_sale_stock_snapshot(
-        inventory, stock_product_ids, order_id
+        inventory, stock_product_ids, order_id, warehouse_id
     )
 
     try:
@@ -3992,7 +4025,7 @@ def _conduct_order_sale(order_id):
                     inventory, sale.get("id"), stock_before
                 ),
                 safe_automatic_sale_stock_snapshot(
-                    inventory, stock_product_ids, order_id
+                    inventory, stock_product_ids, order_id, warehouse_id
                 ),
             )
         redirect_arguments = {
@@ -4013,7 +4046,7 @@ def _conduct_order_sale(order_id):
             metadata={"matches": len(error.matches)},
         )
         return redirect(url_for(
-            "order_page", order_id=order_id, notice="error",
+            "order_page", order_id=order_id, warehouse_id=warehouse_id, notice="error",
             message=str(error), open_sale="1", open_strap="1",
             duplicate_matches=json.dumps(error.matches, ensure_ascii=False),
         ))
@@ -4031,7 +4064,7 @@ def _conduct_order_sale(order_id):
         )
         return redirect(url_for(
             "order_page",
-            order_id=order_id,
+            order_id=order_id, warehouse_id=warehouse_id,
             notice="error",
             message=(
                 "Продажа не проведена: {} Операция отменена, остатки и "
@@ -4045,7 +4078,7 @@ def _conduct_order_sale(order_id):
         app.logger.exception("Transactional Bitrix order sale failed: %s", order_id)
         return redirect(url_for(
             "order_page",
-            order_id=order_id,
+            order_id=order_id, warehouse_id=warehouse_id,
             notice="error",
             message=(
                 "Операция отменена, остатки и продажа не изменены."
@@ -5492,6 +5525,7 @@ def inventory_run_page():
             ))
     return render_template(
         "warehouse_inventory.html",
+        warehouses=ManualReceipts().warehouses(),
         inventory=inventory,
         items=items,
         active_inventories=service.list_active(),
@@ -5609,6 +5643,7 @@ def inventory_start_api():
             category_id=payload.get("category_id"),
             model_id=payload.get("model_id"),
             idempotency_key=payload.get("idempotency_key", ""),
+            warehouse_id=payload.get('warehouse_id', 'default'),
         )
         return {
             "ok": True,
@@ -5727,6 +5762,12 @@ def warehouse_page():
         request.headers.get("X-ERP-Partial") == "products-v1"
     )
     product_catalog = ExcelProductCatalog()
+    from app.services.manual_receipts import ManualReceipts
+    from app.services.warehouse_transfers import distribution
+    warehouses = ManualReceipts(product_catalog.database).warehouses()
+    selected_warehouse = request.args.get('warehouse_id', 'default')
+    if selected_warehouse not in {row['id'] for row in warehouses} | {'all'}:
+        abort(400, 'Склад не найден')
     tab_counts = product_catalog.stock_tab_counts()
     if not isinstance(tab_counts, dict):
         # Keeps route-level test doubles and extensions that predate tab counts
@@ -6055,6 +6096,7 @@ def warehouse_page():
         stock_state=stock_state,
         check_state=check_state if out_of_stock else "all",
         site_issue=site_issue,
+        warehouse_id=selected_warehouse,
     )
     catalog_stats = catalog.get("stats") or {}
     product_metrics = {
@@ -6064,6 +6106,11 @@ def warehouse_page():
         "units": format_stock_number(catalog_stats.get("total_stock") or 0),
     }
     items = build_excel_warehouse_items(catalog["items"])
+    with product_catalog.database.connect() as warehouse_connection:
+        stocks_by_warehouse = distribution(warehouse_connection, [item['id'] for item in items])
+    for item in items:
+        item['other_warehouses'] = [row for row in stocks_by_warehouse.get(int(item['id']), []) if row['id'] != selected_warehouse or row['in_transit']]
+        item['ttt_stock'] = next((row['quantity'] for row in stocks_by_warehouse.get(int(item['id']), []) if row['id'] == 'default'), 0)
     if out_of_stock:
         cycles = OutOfStockChecks().current_for_products(
             [item["id"] for item in items]
@@ -6195,6 +6242,8 @@ def warehouse_page():
         }
     rendered = render_template(
             "warehouse.html",
+            warehouses=warehouses,
+            selected_warehouse=selected_warehouse,
             partial_only=partial_requested,
             items=items,
             query=query,
@@ -6462,6 +6511,8 @@ def _safe_product_export_filename(value):
 @app.route("/app/products/export.xlsx", methods=["GET", "POST"])
 def warehouse_products_export():
     values = request.values
+    if values.get('warehouse_id', 'default') != 'default':
+        return jsonify(ok=False, message='В локальном первом этапе экспорт доступен только для TTT. Переключите склад на TTT.'), 422
     scope = (values.get("scope") or "filtered").strip()
     if scope not in {"filtered", "all"}:
         return jsonify(ok=False, message="Неизвестный режим экспорта."), 400
@@ -10784,7 +10835,7 @@ def build_sales_catalog_items(items):
     )
 
 
-def get_sale_catalog_product(product_id, items=None):
+def get_sale_catalog_product(product_id, items=None, warehouse_id=None):
     product_id = str(product_id or "").strip()
 
     if not product_id:
@@ -10792,9 +10843,11 @@ def get_sale_catalog_product(product_id, items=None):
 
     shared_catalog = SharedCatalog()
     shared_product = shared_catalog.get_product(product_id)
+    if shared_product is not None and warehouse_id is not None:
+        shared_product = shared_catalog._warehouse_projection([shared_product], warehouse_id)[0]
     if (
         shared_product is not None
-        and float(shared_product.get("stock") or 0) > 0
+        and (float(shared_product.get("stock") or 0) > 0 or shared_product.get('available_to_assemble', 0) > 0)
     ):
         return {
             **shared_product,
@@ -10811,6 +10864,8 @@ def get_sale_catalog_product(product_id, items=None):
         include_archived=True,
     )
     if historical_product is not None and not historical_product.get("active"):
+        return None
+    if warehouse_id not in (None, 'default'):
         return None
 
     catalog_items = build_sales_catalog_items(
@@ -11188,8 +11243,11 @@ def manual_sale_add():
     product_id = (
         request.form.get("product_id") or ""
     ).strip()
+    warehouse_id = sale_warehouse({'source': sale_source, 'warehouse_id': request.form.get('warehouse_id')})
     try:
-        catalog_product = get_sale_catalog_product(product_id)
+        catalog_product = get_sale_catalog_product(product_id, warehouse_id=warehouse_id)
+    except ValueError as error:
+        return redirect_to_sales(str(error), notice='error')
     except Exception:
         app.logger.exception(
             "Failed to load the product catalog for a manual sale"
@@ -11213,6 +11271,11 @@ def manual_sale_add():
 
     from app.services.product_bundles import ProductBundles
     bundle = ProductBundles().get(catalog_product["id"])
+    try:
+        projected = SharedCatalog()._warehouse_projection([{**catalog_product, **bundle}], warehouse_id)[0]
+    except ValueError as error:
+        return redirect_to_sales(str(error), notice='error')
+    catalog_product, bundle = projected, projected
     sale_available = bundle["available_to_assemble"] if bundle["is_bundle"] else (bundle.get("physical_stock") or 0) if bundle.get("is_physical_component") else catalog_product["stock"]
     if quantity > sale_available:
         return redirect_to_sales(
@@ -11229,6 +11292,7 @@ def manual_sale_add():
             or date.today().isoformat()
         ).strip(),
         "source": sale_source,
+        "warehouse_id": warehouse_id,
         "product_id": product_id,
         "product_name": catalog_product["name"],
         "article": sale_snapshot_text(catalog_product, "article"),
@@ -12823,6 +12887,7 @@ def build_sales_report_records(
             "deleted_at": str(stored_sale.get("deleted_at") or ""),
             "archived_at": str(stored_sale.get("archived_at") or ""),
             "archived_by": str(stored_sale.get("archived_by") or ""),
+            "warehouse_id": str(stored_sale.get("warehouse_id") or "default"),
             "sale_type": stored_sale_type,
             "sale_type_label": (
                 "Автоматическая"
@@ -14003,6 +14068,7 @@ def build_legacy_sales_page():
         manual_sales.append({
             "id": str(stored_sale.get("id") or ""),
             "is_manual": True,
+            "warehouse_id": str(stored_sale.get("warehouse_id") or "default"),
             "created_at": stored_sale.get("created_at") or "",
             "source": normalize_manual_sale_source(
                 stored_sale.get("source")
@@ -14112,6 +14178,7 @@ def build_legacy_sales_page():
         "sales.html",
         sales=sales,
         warehouse_items=warehouse_items,
+        warehouses=ManualReceipts().warehouses(),
         russian_regions=sorted(
             russian_region_cities.keys(),
             key=str.casefold,
@@ -14436,6 +14503,7 @@ def sales_page():
         "sales.html",
         sales=sales,
         pagination=pagination,
+        warehouses=ManualReceipts().warehouses(),
         source_tabs=source_tabs,
         cdek_summary=cdek_summary,
         cdek_audit_url=url_for("cdek_sales_page", back=request.full_path),
@@ -21632,6 +21700,7 @@ def api_catalog_options():
             ),
             product_kind=request.args.get("product_kind") or "",
             catalog_scope=(request.args.get("catalog_scope") or "").strip(),
+            warehouse_id=request.args.get('warehouse_id'),
         )
         if result is None:
             return api_error(
@@ -23221,6 +23290,7 @@ def serialize_api_sale(sale):
         "inventory_managed": bool(sale.get("inventory_managed")),
         "created_at": str(sale.get("created_at") or ""),
         "source": str(sale.get("source") or ""),
+        "warehouse_id": str(sale.get("warehouse_id") or "default"),
         "source_key": str(sale.get("source_key") or ""),
         "order_number": str(sale.get("order_number") or ""),
         "product_id": str(sale.get("product_id") or ""),
@@ -23425,6 +23495,8 @@ def normalize_api_sale_payload(payload, existing=None, require_catalog=False):
     if product is not None and not existing.get("inventory_managed"):
         from app.services.product_bundles import ProductBundles
         bundle = ProductBundles().get(product["id"])
+        product = SharedCatalog()._warehouse_projection([{**product, **bundle}], sale_warehouse({**existing, **payload}))[0]
+        bundle = product
         available = bundle["available_to_assemble"] if bundle["is_bundle"] else (bundle.get("physical_stock") or 0) if bundle.get("is_physical_component") else float(product["stock"])
         if quantity > available:
             raise InsufficientStockError(available)
@@ -23464,6 +23536,7 @@ def normalize_api_sale_payload(payload, existing=None, require_catalog=False):
         optional_fields["country"] = location_fields["country"]
     normalized = {
         "id": str(existing.get("id") or payload.get("id") or uuid.uuid4().hex),
+        "warehouse_id": sale_warehouse({**existing, **payload}),
         "created_at": created_at,
         "source": source,
         "product_id": product_id,
@@ -23561,6 +23634,7 @@ def normalize_api_sale_payload(payload, existing=None, require_catalog=False):
 @app.route("/api/v1/sales/catalog", methods=["GET"])
 def api_sales_catalog():
     limit = api_positive_int(request.args.get("limit"), 50, 200)
+    warehouse_id = sale_warehouse(request.args)
     items = SharedCatalog().list_products(
         query=request.args.get("q") or "",
         brand_id=request.args.get("brand_id"),
@@ -23568,6 +23642,7 @@ def api_sales_catalog():
         limit=limit,
         in_stock=True,
         include_assemblable=True,
+        warehouse_id=warehouse_id,
     )
     total = SharedCatalog().count_products(
         query=request.args.get("q") or "",
@@ -23575,6 +23650,7 @@ def api_sales_catalog():
         category_id=request.args.get("category_id"),
         in_stock=True,
         include_assemblable=True,
+        warehouse_id=warehouse_id,
     )
     return api_success(items, total=total, limit=limit)
 
@@ -25984,6 +26060,7 @@ def writeoff_page():
         product = products.get(str(row["product_id"]), {})
         row["image_url"] = product.get("local_image_url") or product.get("thumbnail_url") or product.get("image_url") or ""
     return render_template("sales.html", writeoff_mode=True, writeoffs=result["rows"],
+        warehouses=ManualReceipts().warehouses(),
         reasons=WRITEOFF_REASONS, active_source="writeoff",
         pagination=build_erp_pagination("sales_page",result["total"],result["page"],result["per_page"]),
         source_tabs=[dict(tab, url=url_for("sales_page",source=tab["key"]),active=False) for tab in SALES_SOURCE_TABS]+[

@@ -1333,6 +1333,12 @@ class SharedCatalog:
                 raise CatalogReferenceError(
                     "Состав категории изменился. Обновите подтверждение удаления."
                 )
+            from app.services.excel_product_catalog import ExcelProductCatalog
+            for product in connection.execute('SELECT id FROM catalog_excel_products WHERE category_id=? AND active=1', (category_id,)).fetchall():
+                try:
+                    ExcelProductCatalog._guard_other_warehouse_stock(connection, product['id'])
+                except ValueError as error:
+                    raise CatalogReferenceError(str(error))
             changed_at = utc_now()
             connection.execute(
                 "UPDATE catalog_excel_products SET active = 0, "
@@ -1611,6 +1617,7 @@ class SharedCatalog:
         include_inventory_locked=False,
         product_kind="",
         include_assemblable=False,
+        warehouse_id=None,
     ):
         where = []
         parameters = []
@@ -1632,7 +1639,18 @@ class SharedCatalog:
                 where.append("p.category_id = ?")
                 parameters.append(int(category_id))
         if in_stock:
-            if include_assemblable:
+            if warehouse_id not in (None, '', 'default'):
+                available = ("(NOT EXISTS(SELECT 1 FROM erp_product_bundles b WHERE b.product_id=p.id) "
+                             "AND EXISTS(SELECT 1 FROM erp_warehouse_stocks ws WHERE ws.product_id=p.id AND ws.warehouse_id=? AND ws.quantity>0))")
+                parameters.append(warehouse_id)
+                if include_assemblable:
+                    available += (" OR (EXISTS(SELECT 1 FROM erp_bundle_components bc WHERE bc.product_id=p.id) "
+                                  "AND NOT EXISTS(SELECT 1 FROM erp_bundle_components bc JOIN catalog_excel_products part ON part.id=bc.component_id "
+                                  "WHERE bc.product_id=p.id AND (part.active=0 OR COALESCE((SELECT ws.quantity FROM erp_warehouse_stocks ws "
+                                  "WHERE ws.product_id=bc.component_id AND ws.warehouse_id=?),0)<bc.quantity)))")
+                    parameters.append(warehouse_id)
+                where.append('(' + available + ')')
+            elif include_assemblable:
                 where.append(ASSEMBLABLE_STOCK_SQL)
             else:
                 where.append("p.stock > 0")
@@ -1660,6 +1678,7 @@ class SharedCatalog:
         include_inventory_locked=False,
         product_kind="",
         include_assemblable=False,
+        warehouse_id=None,
     ):
         self.database.initialize()
         where_sql, parameters = self._product_filter_sql(
@@ -1671,8 +1690,12 @@ class SharedCatalog:
             include_inventory_locked=include_inventory_locked,
             product_kind=product_kind,
             include_assemblable=include_assemblable,
+            warehouse_id=warehouse_id,
         )
         with self.database.connect() as connection:
+            if warehouse_id:
+                from app.services.component_inventory import document_warehouse
+                document_warehouse(connection, warehouse_id=warehouse_id)
             if catalog_search_key(query):
                 register_catalog_search(connection)
             return int(connection.execute(
@@ -1695,6 +1718,7 @@ class SharedCatalog:
         include_inventory_locked=False,
         product_kind="",
         include_assemblable=False,
+        warehouse_id=None,
     ):
         self.database.initialize()
         where_sql, parameters = self._product_filter_sql(
@@ -1706,6 +1730,7 @@ class SharedCatalog:
             include_inventory_locked=include_inventory_locked,
             product_kind=product_kind,
             include_assemblable=include_assemblable,
+            warehouse_id=warehouse_id,
         )
         parameters.append(max(1, min(int(limit), 200)))
         with self.database.connect() as connection:
@@ -1741,7 +1766,52 @@ class SharedCatalog:
         from app.services.product_bundles import ProductBundles
         bundles = ProductBundles(self.database).get_many([item["id"] for item in items])
         items = [{**item, **bundles.get(int(item["id"]), {})} for item in items]
+        return self._warehouse_projection(items, warehouse_id) if warehouse_id else items
+
+    def _warehouse_projection(self, items, warehouse_id):
+        from app.services.component_inventory import balance, document_warehouse
+        with self.database.connect() as c:
+            document_warehouse(c, warehouse_id=warehouse_id)
+            for item in items:
+                item['warehouse_id'] = warehouse_id
+                item['stock'] = balance(c, item['id'], require_initialized=False, warehouse_id=warehouse_id)
+                item['stock_display'] = format_stock_value(item['stock'])
+                if item.get('is_physical_component'):
+                    item['physical_stock'] = item['stock']
+                    if warehouse_id != 'default':
+                        item['physical_inventory_initialized'] = True
+                if item.get('is_bundle'):
+                    capacities = []
+                    for part in item['components']:
+                        part['stock'] = balance(c, part['component_id'], require_initialized=False, warehouse_id=warehouse_id)
+                        capacities.append(int(part['stock'] // part['quantity']) if part['active'] else 0)
+                    item['available_to_assemble'] = max(0, min(capacities or [0]))
         return items
+
+    def warehouse_options(self, kind, warehouse_id, query='', limit=200, brand_id=None, category_id=None,
+                          in_stock=False, include_assemblable=False, product_kind=''):
+        if kind == 'product':
+            arguments = dict(query=query, brand_id=brand_id, category_id=category_id, in_stock=in_stock,
+                             include_assemblable=include_assemblable, product_kind=product_kind, warehouse_id=warehouse_id)
+            return self.list_products(limit=limit, **arguments), self.count_products(**arguments)
+        if kind not in {'brand','category','model'}:
+            return None
+        self.database.initialize()
+        where, params = self._product_filter_sql(brand_id=brand_id if kind != 'brand' else None,
+            category_id=category_id if kind == 'model' else None, in_stock=in_stock,
+            include_assemblable=include_assemblable, product_kind=product_kind, warehouse_id=warehouse_id)
+        field = {'brand':'brand_id','category':'category_id','model':'model_id'}[kind]
+        table = {'brand':'erp_brands','category':'erp_categories','model':'erp_models'}[kind]
+        with self.database.connect() as c:
+            from app.services.component_inventory import document_warehouse
+            document_warehouse(c, warehouse_id=warehouse_id)
+            rows = c.execute('SELECT COALESCE(d.id,0) AS id,COALESCE(d.name,?) AS name,COUNT(*) AS product_count '
+                'FROM catalog_excel_products p LEFT JOIN erp_categories c ON c.id=p.category_id '
+                'LEFT JOIN {} d ON d.id=p.{} '.format(table,field) + where + ' GROUP BY d.id,d.name ORDER BY name',
+                ['Не указан'] + params).fetchall()
+        key = catalog_search_key(query)
+        items = [dict(row, count=row['product_count']) for row in rows if not key or catalog_search_key(row['name']).startswith(key)]
+        return items[:max(1,min(int(limit),200))], len(items)
 
     def legacy_links(self, entity_type, entity_ids):
         if entity_type not in {"sale", "receipt"}:

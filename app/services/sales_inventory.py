@@ -1,5 +1,5 @@
 """Transactional sales, returns and product stock movements."""
-from app.services.component_inventory import balance, write_balance, overlay, remember
+from app.services.component_inventory import balance, write_balance, overlay, remember, document_warehouse
 
 import json
 import math
@@ -33,6 +33,15 @@ from app.services.shared_catalog import (
 
 class SalesInventoryError(ValueError):
     pass
+
+
+def sale_warehouse(payload):
+    """Hong Kong pilot: Amazon defaults to HK; other channels retain TTT."""
+    explicit = (payload or {}).get('warehouse_id')
+    if explicit not in (None, ''):
+        return explicit
+    channel = str((payload or {}).get('source') or '').strip().casefold()
+    return {'amazon': 'hong-kong'}.get(channel, 'default')
 
 
 class InsufficientStockError(SalesInventoryError):
@@ -78,6 +87,7 @@ def validate_performed_sale_update(current, requested):
             )[:16],
         ),
         ("product_id", "Товар", lambda value: str(value or "").strip()),
+        ("warehouse_id", "Склад", lambda value: str(value or "default").strip()),
         (
             "product_name",
             "Название товара",
@@ -463,12 +473,15 @@ class SalesInventory:
                 product_ids.add(removed_id)
             if compositions(connection, product_ids):
                 raise SalesInventoryError("Сборный SKU проводится обычной продажей; замена ремешка для него недоступна.")
+            warehouse_id = document_warehouse(connection, warehouse_id=sale_warehouse(payload))
             products = {
                 product_id: self._product_snapshot(connection, product_id)
                 for product_id in product_ids
             }
             if any(value is None for value in products.values()):
                 raise SalesInventoryError("Один или несколько товаров отсутствуют или архивированы.")
+            for product_id, product in products.items():
+                product['stock'] = balance(connection, product_id, warehouse_id=warehouse_id)
             assert_products_unlocked(connection, product_ids, SalesInventoryError)
             if not product_matches_kind(products[base_id], PRODUCT_KIND_WATCH):
                 raise SalesInventoryError("В качестве часов-основы можно выбрать только часы.")
@@ -525,6 +538,7 @@ class SalesInventory:
             )
 
             stock_changes = []
+            connection.execute('UPDATE erp_sales SET warehouse_id=? WHERE id=?', (warehouse_id, sale_id))
             item_snapshots = []
 
             def move(product_id, delta, sale_item_id, kind, movement_type):
@@ -861,6 +875,8 @@ class SalesInventory:
             item_id = connection.execute(
                 "SELECT last_insert_rowid()"
             ).fetchone()[0]
+            warehouse_id = document_warehouse(connection, warehouse_id=sale_warehouse(payload))
+            connection.execute('UPDATE erp_sales SET warehouse_id=? WHERE id=?', (warehouse_id, sale_id))
             self._write_sale_stock(connection, product_id, quantity, sale_id,
                                    item_id, idempotency_key, source, user_name, inserted_at,
                                    stored_payload.get("order_number"))
@@ -1046,6 +1062,8 @@ class SalesInventory:
                     "{}:item:{}".format(idempotency_key, item["line_index"])
                     if idempotency_key else None
                 )
+                warehouse_id = document_warehouse(connection, warehouse_id=sale_warehouse(payload))
+                connection.execute('UPDATE erp_sales SET warehouse_id=? WHERE id=?', (warehouse_id, sale_id))
                 self._write_sale_stock(
                     connection, item["product_id"], item["quantity"], sale_id,
                     item_id, movement_key, source, user_name, inserted_at,
@@ -1939,12 +1957,12 @@ class SalesInventory:
             "idempotency_key, metadata_json, created_at, updated_at,operation_type,"
             "warehouse_id,posted_at,posted_by) "
             "VALUES (?, 'default', ?, ?, 'posted', ?, ?, ?, ?, ?, ?,"
-            "'sale_cancellation','default',?,?)",
+            "'sale_cancellation',?,?,?)",
             (
                 receipt_id, document_number, comment, cancelled_at[:10],
                 user_name, receipt_id,
                 json.dumps(metadata, ensure_ascii=False, sort_keys=True),
-                cancelled_at, cancelled_at, cancelled_at, user_name,
+                cancelled_at, cancelled_at, sale['warehouse_id'], cancelled_at, user_name,
             ),
         )
         connection.execute(
@@ -2400,6 +2418,7 @@ class SalesInventory:
         ]
         payload.update({
             "id": row["id"],
+            "warehouse_id": row['warehouse_id'] or 'default',
             "source": row["source"],
             "external_order_id": row["external_order_id"] or "",
             "created_at": row["created_at"],

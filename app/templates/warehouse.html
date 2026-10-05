@@ -8,6 +8,8 @@
     {% include "_favicon.html" %}
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ static_asset_url('css/multiwarehouse.css') }}">
+    <script defer src="{{ static_asset_url('js/multiwarehouse.js') }}"></script>
     <title>ТТТ ERP — Склад</title>
     {% if config.TESTING and request.args.get("products_workflow_e2e") == "1" %}
     <script>
@@ -71,7 +73,9 @@
                 export_filtered_url=export_filtered_url,
                 site_status_sync=site_status_sync,
                 can_sync_site_status=can_sync_site_status,
-                site_status_sync_csrf=site_status_sync_csrf
+                site_status_sync_csrf=site_status_sync_csrf,
+                warehouses=warehouses,
+                selected_warehouse=selected_warehouse
             ) }}
 
             {% if request.args.get("notice") and request.args.get("message") %}
@@ -224,6 +228,7 @@
 
             <div class="search-card erp-toolbar-card">
                 <form id="warehouseSearchForm" class="search-form erp-toolbar" method="get" action="/warehouse" data-erp-focus-mode-toolbar>
+                    <input type="hidden" name="warehouse_id" value="{{ selected_warehouse }}">
                     <input type="hidden" name="sort_by" value="{{ sort_by }}">
                     <input type="hidden" name="sort_dir" value="{{ sort_dir }}">
                     <input type="hidden" name="per_page" value="{{ per_page }}">
@@ -886,7 +891,7 @@
                                     </span>
                                 </th>
 
-                                <th data-column-key="site_status">На сайте</th>
+                                <th data-column-key="site_status">На сайте TTT</th>
 
                                 <th class="created-column" data-column-key="created">
                                     <span
@@ -983,6 +988,9 @@
 
                                     <td data-column-key="stock" class="{% if item.stock <= 0 %}stock-zero{% else %}stock-good{% endif %}">
                                         {{ item.stock_display }}
+                                        {% for warehouse in item.other_warehouses|default([]) %}
+                                        <button type="button" class="other-warehouse-dot{% if warehouse.transit_only %} is-in-transit{% endif %}" style="--warehouse-dot: {{ warehouse.color }}" title="{{ warehouse.label }}" aria-label="{{ warehouse.label }}" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden" aria-expanded="false"><span aria-hidden="true"></span></button><span class="warehouse-dot-detail" hidden>{{ warehouse.label }}</span>
+                                        {% endfor %}
                                     </td>
 
                                     <td data-column-key="site_status">
@@ -1042,7 +1050,7 @@
                                                     data-brand-id="{{ item.brand_id or '' }}"
                                                     data-category="{{ item.category|e }}"
                                                     data-category-id="{{ item.category_id or '' }}"
-                                                    data-stock="{{ item.stock_display|e }}"
+                                                    data-stock="{{ item.ttt_stock|default(item.stock_display)|e }}"
                                                     data-cell="{{ item.cell|e }}"
                                                     data-cell-source="{{ item.cell_source|e }}"
                                                     data-cell-source-label="{{ item.cell_source_label|e }}"
@@ -1555,7 +1563,7 @@
             </div>
 
             <div class="product-detail-card">
-                <div class="product-detail-label">Остаток</div>
+                <div class="product-detail-label">Остаток TTT</div>
                 <div id="detailStock" class="product-detail-value">—</div>
                 <div id="bundleAvailability" role="status"></div>
                 <input id="editStock" class="product-detail-input" type="number" min="0" step="1" aria-label="Остаток товара" required
@@ -3982,7 +3990,7 @@
         const warehouseTableColumnLabels = {
             photo: "Фото", name: "Название", model: "Модель", price: "Цена", article: "Артикул",
             brand: "Бренд", category: "Категория", stock: "Остаток",
-            site_status: "На сайте", created: "Добавлено", cell: "Ячейка", platform_checks: "Проверка отключения"
+            site_status: "На сайте TTT", created: "Добавлено", cell: "Ячейка", platform_checks: "Проверка отключения"
         };
         const warehouseTableMinimumWidths = {
             photo: 60, name: 196, model: 90, price: 72, article: 86, brand: 84,

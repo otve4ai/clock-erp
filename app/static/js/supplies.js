@@ -30,6 +30,8 @@
     initial_stock: "Начальный остаток",
     draft: "Черновик",
     posted: "Проведена",
+    cancelled: "Аннулирована",
+    transfer: "Перемещение",
   };
   let tab = new URLSearchParams(location.search).get("tab") || "all";
   let rows = [],
@@ -347,7 +349,7 @@
                 comment: esc(r.comment || "—"),
                 author: esc(r.created_by || "—"),
                 number: esc(r.number || "—"),
-                title: esc(r.title || "—"),
+                title: esc(r.title || "—") + ` · ${esc(r.warehouse_name || 'TTT')}`,
                 positions: number(r.position_count),
                 quantity: number(r.total_quantity),
                 status: labels[r.status] || esc(r.status || "—"),
@@ -359,7 +361,7 @@
                 author: esc(r.user_name || "—"),
                 time: valid ? date.toLocaleTimeString("ru-RU") : "—",
                 type: labels[r.source_type] || "Архивная запись",
-                document: esc(r.title || "—"),
+                document: esc(r.title || "—") + ` · ${esc(r.warehouse_name || 'TTT')}`,
                 brand: esc(r.brand || "—"),
                 category: esc(r.category || "—"),
                 photo: image(r.image_url),
@@ -387,6 +389,8 @@
     current = id ? await api("supplies/" + encodeURIComponent(id)) : null;
     items = current ? current.items.map((i) => ({ ...i })) : [];
     $("title").value = current?.title || "";
+    $("supply-warehouse").value = current?.warehouse_id || 'default';
+    $("supply-warehouse").disabled = Boolean(current);
     $("comment").value = current?.comment || "";
     $("supply-heading").textContent = current
       ? `Поставка ${current.number}`
@@ -431,6 +435,7 @@
         method: "POST",
         body: JSON.stringify({
           title: $("title").value,
+          warehouse_id: $("supply-warehouse").value,
           comment: $("comment").value,
         }),
       });
@@ -554,6 +559,7 @@
     const controller = new AbortController();
     searchController = controller;
     const parameters = new URLSearchParams({ type: "product", limit: "200" });
+    parameters.set('warehouse_id', current?.warehouse_id || $("supply-warehouse").value);
     const query = $("supply-product-search").value.trim();
     if (query) parameters.set("q", query);
     $("supply-search-status").textContent =
@@ -923,11 +929,11 @@
   }
   $("delete-supply").onclick = () => {
     $("delete-confirm-heading").textContent =
-      `Удалить поставку ${current.number}?`;
+      `Аннулировать поставку ${current.number}?`;
     $("delete-confirm-text").textContent =
       current.status === "draft"
-        ? "Вы собираетесь удалить черновик поставки. ERP проверит позиции и подтвердит, что складские остатки не изменятся."
-        : "Вы собираетесь удалить проведённую поставку. ERP проверит все позиции и покажет, как удаление повлияет на товары и продажи.";
+        ? "Черновик будет отменён без изменения остатков. История документа сохранится."
+        : "ERP покажет обратные движения по каждой позиции. Документ и история сохранятся; позиции с последующими продажами не сторнируются.";
     $("delete-confirm-message").hidden = true;
     $("delete-confirm-dialog").showModal();
   };
@@ -974,7 +980,7 @@
       $("delete-preview-dialog").close();
       $("supply-dialog").close();
       await load();
-      message("Поставка удалена. Остатки пересчитаны по результатам проверки.");
+      message("Поставка аннулирована. История сохранена, обратные движения записаны по результатам проверки.");
     } catch (error) {
       if (error.data) renderDeletePreview(error.data);
       $("delete-preview-message").textContent = error.message;

@@ -25,7 +25,7 @@
 <p>Поставки и приходные движения товаров</p>
 </div>
 <div class="actions">
-<label class="button">Импорт Excel<input type="file" id="excel" accept=".xlsx,.xlsm" hidden>
+<label class="button" title="Excel создаёт черновик на основном складе TTT; для Гонконга создайте новую поставку">Импорт Excel · TTT<input type="file" id="excel" accept=".xlsx,.xlsm" hidden>
 </label>
 <button id="new-supply" class="button primary erp-primary-action">+ Новая поставка</button>
 </div>
@@ -107,6 +107,7 @@
 </div>
 <label>Название<input id="title" maxlength="200" required>
 </label>
+<label for="supply-warehouse">Склад приёмки<select id="supply-warehouse">{% for warehouse in warehouses|default([]) %}<option value="{{ warehouse.id }}">{{ warehouse.name }}</option>{% endfor %}</select></label>
 <label>Комментарий<textarea id="comment" maxlength="2000">
 </textarea>
 </label>
@@ -138,17 +139,17 @@
 <div id="dialog-message" role="alert" aria-atomic="true" hidden>
 </div>
 <footer>
-<button id="delete-supply" class="button danger">Удалить поставку</button>
+<button id="delete-supply" class="button danger">Аннулировать поставку</button>
 <button id="save-supply" class="button">Сохранить черновик</button>
 <button id="post-supply" class="button primary erp-primary-action">Провести поставку</button>
 </footer>
 </dialog>
 <dialog id="delete-confirm-dialog" class="delete-confirm-dialog" aria-labelledby="delete-confirm-heading">
 <header>
-<div class="delete-confirm-title"><span class="delete-icon" aria-hidden="true">🗑</span><h2 id="delete-confirm-heading">Удалить поставку?</h2></div>
+<div class="delete-confirm-title"><span class="delete-icon" aria-hidden="true">🗑</span><h2 id="delete-confirm-heading">Аннулировать поставку?</h2></div>
 <button class="button" data-close-delete aria-label="Закрыть">×</button>
 </header>
-<p id="delete-confirm-text">Вы собираетесь удалить проведённую поставку. ERP проверит все позиции и покажет, как удаление повлияет на товары и продажи.</p>
+<p id="delete-confirm-text">ERP проверит позиции и покажет изменение остатков. Документ и история движений сохранятся.</p>
 <div id="delete-confirm-message" role="alert" hidden></div>
 <footer>
 <button class="button" data-close-delete>Отмена</button>
@@ -157,13 +158,13 @@
 </dialog>
 <dialog id="delete-preview-dialog" class="delete-preview-dialog" aria-labelledby="delete-preview-heading">
 <header>
-<div><h2 id="delete-preview-heading">Что произойдёт после удаления</h2><p>Мы проверили все позиции этой поставки и показали, как удаление повлияет на остатки товаров.</p></div>
+<div><h2 id="delete-preview-heading">Что произойдёт после аннулирования</h2><p>Проверьте изменение остатков по каждой позиции поставки.</p></div>
 <button class="button" data-close-preview aria-label="Закрыть">×</button>
 </header>
 <div id="delete-preview-warning" class="delete-warning" hidden></div>
 <div class="table-scroll delete-preview-table">
-<table aria-label="Проверка позиций перед удалением поставки">
-<thead><tr><th>Товар</th><th>Было принято</th><th>Текущий остаток</th><th>После удаления</th><th>Статус</th></tr></thead>
+<table aria-label="Проверка позиций перед аннулированием поставки">
+<thead><tr><th>Товар</th><th>Было принято</th><th>Текущий остаток</th><th>После аннулирования</th><th>Статус</th></tr></thead>
 <tbody id="delete-preview-items"></tbody>
 </table>
 </div>
@@ -173,11 +174,11 @@
 <div><strong id="delete-total-quantity">0</strong><span>шт.<br>со склада</span></div>
 <div><strong id="delete-total-skipped">0</strong><span>позиций<br>пропущено</span></div>
 </section>
-<div class="delete-info">После удаления поставки запись о ней будет удалена из списка. Это действие будет зафиксировано в журнале системы.</div>
+<div class="delete-info">Документ и исходные движения сохранятся. Уменьшение остатков будет записано отдельными обратными движениями. Позиции с последующими продажами не сторнируются; они указаны выше.</div>
 <div id="delete-preview-message" role="alert" hidden></div>
 <footer class="delete-preview-actions">
 <button class="button" data-close-preview>Отмена</button>
-<button id="confirm-delete" class="button danger">Удалить поставку</button>
+<button id="confirm-delete" class="button danger">Аннулировать поставку</button>
 </footer>
 </dialog>
 <dialog id="add-item-dialog" class="product-picker" aria-labelledby="add-item-heading">

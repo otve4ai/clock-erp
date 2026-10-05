@@ -57,7 +57,9 @@ class RestoreBitrixBrandTest(unittest.TestCase):
         )
 
         self.assertEqual(first["imported"], 1)
-        self.assertEqual(first["stock_mismatch"], 0)
+        self.assertEqual(first["stock_mismatch"], 1)
+        self.assertEqual(first['status'], 'reconciliation_required')
+        self.assertEqual(first['stock_report']['updated'], 0)
         self.assertEqual(first["other_brands_changed"], 0)
         self.assertEqual(second["imported"], 0)
         self.assertEqual(second["duplicates_skipped"], 1)
@@ -72,7 +74,7 @@ class RestoreBitrixBrandTest(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(
             [tuple(row) for row in rows],
-            [("Луч", 7, "10", "731959996")],
+            [("Луч", 0, "10", "731959996")],
         )
         self.assertEqual(rows[0]["excel_article"], "731959996")
         self.assertEqual(brand, "Луч")

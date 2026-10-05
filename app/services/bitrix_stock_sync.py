@@ -1,13 +1,12 @@
-"""Atomic synchronization of Bitrix catalog quantity into existing ERP cards."""
+"""Read-only reconciliation of site quantity against ERP-owned TTT stock."""
 
 import math
-import uuid
 from datetime import datetime, timezone
 
 from app.catalog_db import CatalogDatabase
-from app.services.audit_journal import AuditJournal
 from app.services.bitrix_erp_product_sync import BitrixERPProductSync
 from app.services.inventory_lock import assert_no_active_inventory
+from app.services.component_inventory import balance
 from app.services.protected_catalog_brands import (
     canonical_protected_brand,
     protected_brand_rows,
@@ -50,6 +49,11 @@ class BitrixStockSync:
         self.card_sync = BitrixERPProductSync(self.database)
 
     def synchronize(self, products, apply=False, source_generated_at=""):
+        if apply:
+            raise ValueError(
+                "ERP — источник остатков. Перезапись из Bitrix отключена; "
+                "используйте сверку без --apply и складские документы ERP."
+            )
         products = list(products)
         if not self.database.exists():
             raise ValueError("ERP catalog database does not exist")
@@ -124,7 +128,7 @@ class BitrixStockSync:
                     report["protected_by_brand"].setdefault(protected_name, 0)
                     report["protected_by_brand"][protected_name] += 1
                     continue
-                stock_before = float(existing["stock"] or 0)
+                stock_before = balance(connection, existing['id'], require_initialized=False)
                 delta = quantity - stock_before
                 direction = (
                     "increased" if delta > 0
@@ -151,18 +155,6 @@ class BitrixStockSync:
                     report["braun"]["matched"] += 1
                     if len(report["braun"]["examples"]) < 12:
                         report["braun"]["examples"].append(result)
-                if apply and delta:
-                    self._apply_adjustment(
-                        connection,
-                        existing,
-                        product,
-                        stock_before,
-                        quantity,
-                        delta,
-                        run_id,
-                        source_generated_at,
-                    )
-                    report["updated"] += 1
             protected_after = protected_state_digest(connection)
             report["protected_unchanged"] = protected_before == protected_after
             if not report["protected_unchanged"]:
@@ -173,60 +165,8 @@ class BitrixStockSync:
     @staticmethod
     def _apply_adjustment(connection, existing, product, stock_before,
                           stock_after, delta, run_id, source_generated_at):
-        now = utc_now()
-        product_id = int(existing["id"])
-        external_id = _text(product.get("external_product_id"))
-        connection.execute(
-            "UPDATE catalog_excel_products SET stock = ?, "
-            "stock_source = 'bitrix_catalog_quantity', updated_at = ? WHERE id = ?",
-            (stock_after, now, product_id),
-        )
-        connection.execute(
-            "INSERT INTO catalog_excel_manual_stock_operations ("
-            "id, product_id, stock_before, stock_after, stock_difference, reason, created_at"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                str(uuid.uuid4()), product_id, stock_before, stock_after, delta,
-                "Синхронизация остатка из {} (Bitrix ID {})".format(
-                    SOURCE_FIELD, external_id
-                ),
-                now,
-            ),
-        )
-        connection.execute(
-            "INSERT INTO catalog_stock_movements ("
-            "id, product_id, movement_type, quantity_delta, stock_before, stock_after, "
-            "idempotency_key, source_type, source_id, operation_kind, source, comment, "
-            "created_at) VALUES (?, ?, 'manual_adjustment', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                str(uuid.uuid4()), product_id, delta, stock_before, stock_after,
-                "{}:{}".format(run_id, product_id),
-                "bitrix_catalog", external_id, "quantity_sync", SOURCE_FIELD,
-                "Фактический остаток сайта; generated_at={}".format(
-                    source_generated_at or "unknown"
-                ),
-                now,
-            ),
-        )
-        AuditJournal().record(
-            "product",
-            product_id,
-            "updated",
-            existing["excel_name_raw"],
-            object_secondary=existing["excel_article"] or "",
-            before={"stock": stock_before},
-            after={"stock": stock_after},
-            metadata={
-                "brand": existing["excel_brand"],
-                "article": existing["excel_article"],
-                "bitrix_product_id": external_id,
-                "source_field": SOURCE_FIELD,
-                "run_id": run_id,
-            },
-            actor_type="system",
-            source="bitrix_catalog_quantity",
-            connection=connection,
-        )
+        # Also guard legacy direct callers; no integration may undo a transfer.
+        raise ValueError("Перезапись остатков ERP из Bitrix отключена.")
 
     @staticmethod
     def _item(product, reason, candidate_ids=None, stock_before=None,
@@ -253,6 +193,9 @@ class BitrixStockSync:
 
         return {
             "status": "running",
+            "stock_authority": "erp",
+            "warehouse_id": "default",
+            "read_only": True,
             "mode": "apply" if apply else "dry_run",
             "run_id": run_id,
             "source": {

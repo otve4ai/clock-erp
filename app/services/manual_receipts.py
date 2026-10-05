@@ -95,11 +95,7 @@ class ManualReceipts:
 
     @staticmethod
     def _set_warehouse_balance(connection, warehouse_id, product_id, quantity, now):
-        connection.execute(
-            "UPDATE erp_warehouse_stocks SET quantity=?,updated_at=? "
-            "WHERE warehouse_id=? AND product_id=?",
-            (quantity, now, warehouse_id, int(product_id)),
-        )
+        write_balance(connection, product_id, quantity, 'receipt', now, warehouse_id=warehouse_id)
 
     def create(self, warehouse_id, reason_code, items, comment="", actor="", key=""):
         prepared = self._positions(items)
@@ -119,8 +115,11 @@ class ManualReceipts:
                     (idempotency,),
                 ).fetchone()
                 if existing:
-                    return self._get(connection, existing[0])
-            products = ReceiptInventory._load_products(connection, prepared)
+                    previous = self._get(connection, existing[0])
+                    if previous['warehouse_id'] != warehouse['id']:
+                        raise ManualReceiptError('Ключ операции уже использован для другого склада.')
+                    return previous
+            products = ReceiptInventory._load_products(connection, prepared, warehouse_id=warehouse['id'])
             number = self._next_number(connection)
             metadata = {
                 "operation_type": "manual_receipt",
@@ -155,7 +154,7 @@ class ManualReceipts:
         with self.database.transaction() as connection:
             row = self._row(connection, receipt_id, draft=True)
             warehouse = self._warehouse(connection, warehouse_id)
-            products = ReceiptInventory._load_products(connection, prepared)
+            products = ReceiptInventory._load_products(connection, prepared, warehouse_id=warehouse['id'])
             connection.execute("UPDATE erp_receipt_items SET active=0 WHERE receipt_id=?", (receipt_id,))
             ReceiptInventory._insert_items(connection, receipt_id, prepared, products, now)
             connection.execute(
@@ -196,25 +195,17 @@ class ManualReceipts:
             if not items:
                 raise ManualReceiptError("Добавьте хотя бы один товар.")
             products = ReceiptInventory._load_products(
-                connection, [{"product_id": item["product_id"]} for item in items]
+                connection, [{"product_id": item["product_id"]} for item in items], warehouse_id=warehouse['id']
             )
             assert_products_unlocked(connection, products, ManualReceiptError)
             for item in items:
                 product_id = int(item["product_id"])
                 quantity = float(item["quantity"])
-                if not warehouse["is_default"]:
-                    default_warehouse = connection.execute(
-                        "SELECT * FROM erp_warehouses WHERE active=1 AND is_default=1"
-                    ).fetchone()
-                    if default_warehouse is None:
-                        raise ManualReceiptError("Основной склад не настроен.")
-                    self._warehouse_balance(connection, default_warehouse, product_id, now)
                 warehouse_before = self._warehouse_balance(connection, warehouse, product_id, now)
                 warehouse_after = warehouse_before + quantity
-                total_before = balance(connection, product_id, ("receipt", receipt_id), False)
+                total_before = warehouse_before
                 total_after = total_before + quantity
                 self._set_warehouse_balance(connection, warehouse["id"], product_id, warehouse_after, now)
-                write_balance(connection, product_id, total_after, "manual_receipt", now, ("receipt", receipt_id))
                 connection.execute(
                     "INSERT INTO catalog_stock_movements "
                     "(id,product_id,movement_type,quantity_delta,stock_before,stock_after,receipt_id,"
@@ -270,11 +261,10 @@ class ManualReceipts:
                             int(quantity) if quantity.is_integer() else quantity,
                         )
                     )
-                total_before = balance(connection, product_id, ("receipt", receipt_id), False)
+                total_before = available
                 if total_before + 0.000001 < quantity:
                     raise ManualReceiptError("Невозможно отменить приход: суммарного остатка недостаточно.")
                 self._set_warehouse_balance(connection, warehouse["id"], product_id, available - quantity, now)
-                write_balance(connection, product_id, total_before - quantity, "manual_receipt_cancel", now, ("receipt", receipt_id))
                 connection.execute(
                     "INSERT INTO catalog_stock_movements "
                     "(id,product_id,movement_type,quantity_delta,stock_before,stock_after,receipt_id,"

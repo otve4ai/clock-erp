@@ -1,5 +1,5 @@
 """Transactional brand inventory documents built on the canonical stock ledger."""
-from app.services.component_inventory import write_balance, physical, overlay, remember, PHYSICAL_STOCK_SQL
+from app.services.component_inventory import balance, document_warehouse, write_balance, physical, overlay, remember, PHYSICAL_STOCK_SQL
 
 import re
 import uuid
@@ -160,6 +160,10 @@ class BrandInventory:
             "NOT EXISTS(SELECT 1 FROM erp_product_bundles b WHERE b.product_id=p.id)",
         ]
         parameters = [int(scope["brand"]["id"])]
+        warehouse_id = scope.get('warehouse_id', 'default')
+        if warehouse_id != 'default':
+            where.append('EXISTS(SELECT 1 FROM erp_warehouse_stocks ws WHERE ws.product_id=p.id AND ws.warehouse_id=?)')
+            parameters.append(warehouse_id)
         if scope["category"]:
             category_sql, category_parameters = BrandInventory._category_predicate(
                 scope["category"]
@@ -169,30 +173,35 @@ class BrandInventory:
         if scope["model"]:
             where.append("p.model_id = ?")
             parameters.append(int(scope["model"]["id"]))
-        return connection.execute(
+        rows = connection.execute(
             'SELECT p.id, CAST(' + PHYSICAL_STOCK_SQL + ' AS INTEGER) AS stock, ' + PHYSICAL_STOCK_SQL + ' AS raw_stock, '
             "p.excel_name_raw, "
             "p.excel_article, p.brand_id, p.category_id, p.model_id, "
             "p.excel_brand, p.excel_category, p.model, p.bitrix_thumbnail_url, "
             "COALESCE((SELECT MAX(m.rowid) FROM catalog_stock_movements m "
-            "WHERE m.product_id = p.id), 0) AS movement_rowid "
+            "WHERE m.product_id = p.id AND COALESCE(m.warehouse_id,'default')=?), 0) AS movement_rowid "
             "FROM catalog_excel_products p WHERE " + " AND ".join(where) +
             " ORDER BY p.id",
-            parameters,
+            [warehouse_id] + parameters,
         ).fetchall()
+        result = [dict(row) for row in rows]
+        for row in result:
+            if warehouse_id != 'default':
+                row['raw_stock'] = row['stock'] = balance(connection, row['id'], warehouse_id=warehouse_id)
+        return result
 
     @staticmethod
-    def _latest_movement_rowid(connection, product_id):
+    def _latest_movement_rowid(connection, product_id, warehouse_id='default'):
         return int(connection.execute(
-            "SELECT COALESCE(MAX(rowid), 0) FROM catalog_stock_movements WHERE product_id = ?",
-            (int(product_id),),
+            "SELECT COALESCE(MAX(rowid), 0) FROM catalog_stock_movements WHERE product_id = ? AND COALESCE(warehouse_id,'default') = ?",
+            (int(product_id), warehouse_id),
         ).fetchone()[0])
 
     @staticmethod
     def _session(connection, session_id, active=False):
         row = connection.execute(
-            "SELECT s.*, b.name AS brand_name FROM erp_inventory_sessions s "
-            "JOIN erp_brands b ON b.id = s.brand_id WHERE s.id = ?",
+            "SELECT s.*, b.name AS brand_name, w.name AS warehouse_name FROM erp_inventory_sessions s "
+            "JOIN erp_brands b ON b.id = s.brand_id JOIN erp_warehouses w ON w.id=COALESCE(s.warehouse_id,'default') WHERE s.id = ?",
             (str(session_id),),
         ).fetchone()
         if row is None:
@@ -202,19 +211,23 @@ class BrandInventory:
         return row
 
     def start(self, brand_id, user_name="", category_id=None, model_id=None,
-              idempotency_key=""):
+              idempotency_key="", warehouse_id='default'):
         self.initialize()
         now = utc_now()
         idempotency_key = str(idempotency_key or "").strip() or None
         with self.database.transaction() as connection:
+            warehouse_id = document_warehouse(connection, warehouse_id=warehouse_id)
             if idempotency_key:
                 repeated = connection.execute(
-                    "SELECT id FROM erp_inventory_sessions WHERE idempotency_key = ?",
+                    "SELECT id, warehouse_id FROM erp_inventory_sessions WHERE idempotency_key = ?",
                     (idempotency_key,),
                 ).fetchone()
                 if repeated:
+                    if (repeated['warehouse_id'] or 'default') != warehouse_id:
+                        raise InventoryConflict('Ключ операции уже использован для другого склада.')
                     return self._detail(connection, repeated["id"]), False
             scope = self._scope(connection, brand_id, category_id, model_id)
+            scope['warehouse_id'] = warehouse_id
             brand = scope["brand"]
             products = self._snapshot_products(connection, scope)
             if not products:
@@ -239,7 +252,7 @@ class BrandInventory:
                     )
             product_ids = [int(row["id"]) for row in products]
             conflicts = connection.execute(
-                "SELECT s.id, s.scope_type, s.brand_id, s.category_id, s.model_id, "
+                "SELECT s.id, s.scope_type, s.brand_id, s.category_id, s.model_id, s.warehouse_id, "
                 "s.scope_brand_name, s.scope_category_name, s.scope_model_name, "
                 "i.product_id "
                 "FROM erp_inventory_items i JOIN erp_inventory_sessions s "
@@ -261,7 +274,8 @@ class BrandInventory:
                 overlap = next(iter(overlapping_sessions.values()))
                 conflict = overlap["session"]
                 same_scope = (
-                    (conflict["scope_type"] or "brand") == scope["type"]
+                    (conflict['warehouse_id'] or 'default') == warehouse_id
+                    and (conflict["scope_type"] or "brand") == scope["type"]
                     and int(conflict["brand_id"]) == int(brand["id"])
                     and (conflict["category_id"] or None) == (
                         scope["category"]["id"] if scope["category"] else None
@@ -305,6 +319,7 @@ class BrandInventory:
                  scope["model"]["name"] if scope["model"] else None,
                  user_name or None, now, len(products), now),
             )
+            connection.execute('UPDATE erp_inventory_sessions SET warehouse_id=? WHERE id=?', (warehouse_id, session_id))
             for product in products:
                 remember(connection, product["id"], ("inventory", session_id))
                 connection.execute(
@@ -333,6 +348,7 @@ class BrandInventory:
                     "model_id": scope["model"]["id"] if scope["model"] else None,
                     "scope_label": scope["label"],
                     "positions": len(products),
+                    "warehouse_id": warehouse_id,
                 },
                 actor_id=user_name, actor_name=user_name,
                 actor_type="user" if user_name else "system",
@@ -376,6 +392,7 @@ class BrandInventory:
     def _history_rows(connection):
         rows = connection.execute(
             "SELECT s.*, b.name AS brand_name, c.name AS category_name, "
+            "(SELECT name FROM erp_warehouses WHERE id=COALESCE(s.warehouse_id,'default')) AS warehouse_name, "
             "mo.name AS model_name, COUNT(i.id) AS total_positions, "
             "COALESCE(SUM(CASE WHEN i.status IN "
             "('confirmed','adjusted','added','missing') THEN 1 ELSE 0 END),0) "
@@ -411,6 +428,8 @@ class BrandInventory:
                 item.get("completed_by") or item.get("cancelled_by")
                 or item.get("started_by") or ""
             )
+            if item.get('warehouse_id') not in (None, 'default'):
+                item['scope_label'] = '{} · {}'.format(item['warehouse_name'], item['scope_label'])
             result.append(item)
         return result
 
@@ -483,7 +502,7 @@ class BrandInventory:
         }
 
     def brand_summary(self):
-        """Return every catalog brand and its latest completed saved document."""
+        """TTT control summary; a Hong Kong count does not certify TTT."""
         self.initialize()
         with self.database.connect() as connection:
             histories = self._history_rows(connection)
@@ -494,6 +513,8 @@ class BrandInventory:
         latest = {}
         active = set()
         for item in histories:
+            if item.get('warehouse_id') not in (None, 'default'):
+                continue
             brand_id = int(item["brand_id"])
             if item["status"] == "active":
                 active.add(brand_id)
@@ -565,7 +586,7 @@ class BrandInventory:
     def list_items(self, session_id, query="", category_id=None, limit=250, offset=0):
         self.initialize()
         with self.database.connect() as connection:
-            self._session(connection, session_id)
+            session = self._session(connection, session_id)
             where = ["i.session_id = ?", "i.status IN ('pending', 'conflict', 'error')"]
             params = [str(session_id)]
             query = str(query or "").strip()
@@ -603,7 +624,12 @@ class BrandInventory:
                     " AND ".join(where)
                 ), params + [limit, offset],
             ).fetchall()
-            return [self._item_dict(row) for row in rows]
+            result = [self._item_dict(row) for row in rows]
+            if session['warehouse_id'] != 'default':
+                for row in result:
+                    row['current_stock'] = balance(connection, row['product_id'], document=('inventory', session_id))
+                    row['physical_inventory_initialized'] = True
+            return result
 
     def refresh_conflict(self, session_id, item_id):
         self.initialize()
@@ -619,7 +645,7 @@ class BrandInventory:
                 "snapshot_at = ?, snapshot_movement_rowid = ?, error_message = NULL "
                 "WHERE id = ?",
                 (int(product["stock"]), now,
-                 self._latest_movement_rowid(connection, product["id"]), item["id"]),
+                 self._latest_movement_rowid(connection, product["id"], document_warehouse(connection, ('inventory', session_id))), item["id"]),
             )
             return {
                 "item_id": item["id"], "system_stock": int(product["stock"]),
@@ -650,7 +676,7 @@ class BrandInventory:
                 return self._confirmation_result(item, repeated=True)
             if item["status"] == "conflict":
                 raise InventoryConflict("Товар изменился после начала инвентаризации — перепроверьте")
-            latest = self._latest_movement_rowid(connection, product["id"])
+            latest = self._latest_movement_rowid(connection, product["id"], document_warehouse(connection, ('inventory', session_id)))
             current = int(product["stock"])
             if latest > int(item["snapshot_movement_rowid"]) or current != int(item["snapshot_stock"]):
                 connection.execute(
@@ -892,11 +918,15 @@ class BrandInventory:
                 'SELECT i.*, ' + PHYSICAL_STOCK_SQL + ' AS stock, '
                 "p.id AS inventory_product_id, "
                 "COALESCE((SELECT MAX(m.rowid) FROM catalog_stock_movements m "
-                "WHERE m.product_id = p.id), 0) AS current_movement_rowid "
+                "WHERE m.product_id = p.id AND COALESCE(m.warehouse_id,'default')=?), 0) AS current_movement_rowid "
                 "FROM erp_inventory_items i JOIN catalog_excel_products p "
                 "ON p.id = i.product_id WHERE i.session_id = ? AND i.status IN "
-                "('pending', 'conflict', 'error') ORDER BY i.id", (session["id"],)
+                "('pending', 'conflict', 'error') ORDER BY i.id", (session['warehouse_id'] or 'default', session["id"])
             ).fetchall()
+            pending = [dict(row) for row in pending]
+            for row in pending:
+                if session['warehouse_id'] != 'default':
+                    row['stock'] = balance(connection, row['product_id'], document=('inventory', session_id))
             conflicts = [row for row in pending if row["status"] == "conflict"]
             for row in pending:
                 if row["status"] != "pending":
@@ -979,8 +1009,9 @@ class BrandInventory:
                             key, status, failure_hook=None, refresh_totals=True):
         current = int(product["stock"])
         delta = actual - current
+        warehouse_id = document_warehouse(connection, ('inventory', item['session_id']))
         remember(connection, product["id"], ("inventory", item["session_id"]))
-        if physical(connection, product["id"]):
+        if warehouse_id == 'default' and physical(connection, product["id"]):
             timestamp = utc_now()
             old = connection.execute("SELECT physical_stock FROM erp_component_inventory WHERE product_id=?", (product["id"],)).fetchone()[0]
             connection.execute("INSERT INTO erp_component_inventory_events(product_id,stock_before,stock_after,actor,reason,created_at) VALUES (?,?,?,?,?,?)", (product["id"],old,actual,user_name,"Инвентаризация " + str(item["session_id"]),timestamp))
@@ -989,17 +1020,17 @@ class BrandInventory:
         now = utc_now()
         if delta:
             movement_id = str(uuid.uuid4())
-            cursor = write_balance(connection, product["id"], actual, "inventory", now)
+            cursor = write_balance(connection, product["id"], actual, "inventory", now, document=('inventory', item['session_id']))
             if cursor.rowcount != 1:
                 raise InventoryConflict("Остаток изменился во время проведения — перепроверьте")
             connection.execute(
                 "INSERT INTO catalog_stock_movements (id, product_id, movement_type, "
                 "quantity_delta, stock_before, stock_after, idempotency_key, tenant_id, "
                 "source_type, source_id, source_line_id, operation_kind, source, user_name, "
-                "comment, created_at) VALUES (?, ?, 'inventory_adjustment', ?, ?, ?, ?, "
-                "'default', 'inventory', ?, ?, 'adjust', 'Vechasu ERP', ?, 'Инвентаризация', ?)",
+                "comment, created_at, warehouse_id) VALUES (?, ?, 'inventory_adjustment', ?, ?, ?, ?, "
+                "'default', 'inventory', ?, ?, 'adjust', 'Vechasu ERP', ?, 'Инвентаризация', ?, ?)",
                 (movement_id, product["id"], delta, current, actual, key, item["session_id"],
-                 item["id"], user_name or None, now),
+                 item["id"], user_name or None, now, warehouse_id),
             )
         if failure_hook:
             failure_hook(connection)
@@ -1045,7 +1076,7 @@ class BrandInventory:
         ).fetchone()
         if product is None:
             raise InventoryError("Товар не найден.")
-        return item, overlay(connection, product, require_initialized=False)
+        return item, overlay(connection, product, document=('inventory', session_id), require_initialized=False)
 
     def _detail(self, connection, session_id):
         row = self._session(connection, session_id)

@@ -77,20 +77,19 @@ class SupplyTest(unittest.TestCase):
         result = self.engine.delete(draft['id'], 'Максим')
         self.assertEqual(result['decreased_quantity'], 5)
         self.assertEqual(self.stock(product), 3)
-        with self.assertRaises(SupplyError):
-            self.engine.get(draft['id'])
+        self.assertEqual(self.engine.get(draft['id'])['status'], 'cancelled')
         with self.db.connect() as connection:
             actions = [row[0] for row in connection.execute(
                 "SELECT action FROM erp_audit_events WHERE entity_type='receipt' AND entity_id=? ORDER BY id",
                 (draft['id'],),
             )]
             movements = connection.execute(
-                'SELECT COUNT(*) FROM catalog_stock_movements WHERE receipt_id=? OR source_id=?',
+                'SELECT COUNT(*), SUM(quantity_delta) FROM catalog_stock_movements WHERE receipt_id=? OR source_id=?',
                 (draft['id'], draft['id']),
-            ).fetchone()[0]
+            ).fetchone()
         self.assertIn('updated', actions)
-        self.assertIn('deleted', actions)
-        self.assertEqual(movements, 0)
+        self.assertIn('cancelled', actions)
+        self.assertEqual(tuple(movements), (2, 0))
 
     def test_later_sale_keeps_current_stock_when_supply_is_deleted(self):
         product = self.product(3)

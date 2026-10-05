@@ -2946,6 +2946,12 @@
                 <input id="saleEditId" type="hidden" disabled>
                 <input id="manualSaleRequestId" type="hidden" name="idempotency_key">
                 <input id="saleSource" type="hidden" name="source">
+                <div class="field">
+                    <label for="saleWarehouse">Склад списания</label>
+                    <select id="saleWarehouse" name="warehouse_id" disabled>
+                        {% for warehouse in warehouses|default([]) %}<option value="{{ warehouse.id }}">{{ warehouse.name }}</option>{% endfor %}
+                    </select>
+                </div>
                 <input
                     id="product_name"
                     type="hidden"
@@ -5868,6 +5874,12 @@
 
     function showSaleForm(sourceKey) {
         const isEditing = manualSaleForm.dataset.editing === "1";
+        const previousWarehouse = manualSaleForm.dataset.warehouseId;
+        manualSaleForm.dataset.warehouseId = isEditing ? (editingSale?.warehouse_id || 'default') : ({amazon:'hong-kong'}[sourceKey] || 'default');
+        const warehouseSelect = document.getElementById('saleWarehouse');
+        warehouseSelect.value = manualSaleForm.dataset.warehouseId;
+        warehouseSelect.disabled = isEditing;
+        if (!isEditing && previousWarehouse && previousWarehouse !== warehouseSelect.value) resetProductFilters();
         saleSourceInput.value = sourceLabels[sourceKey];
         saleFormFields.disabled = false;
         manualSaleForm.classList.remove("is-hidden");
@@ -5894,7 +5906,7 @@
             isEditing
                 ? "Дата, бренд, категория, товар, количество, номер заказа и стоимость доставки защищены от изменения. Цену и доступные данные продажи можно редактировать"
                 : "Источник: " + sourceLabels[sourceKey]
-                    + ". Он сохранится вместе с продажей.";
+                    + ". Склад: " + ({'hong-kong':'Гонконг',default:'TTT'}[manualSaleForm.dataset.warehouseId] || manualSaleForm.dataset.warehouseId) + ".";
         saleSubmitButton.textContent = isEditing
             ? "Сохранить изменения"
             : "Добавить продажу в " + sourceLabels[sourceKey];
@@ -5935,6 +5947,7 @@
     }
 
     function clearSaleFormSource() {
+        document.getElementById('saleWarehouse').disabled = true;
         saleSourceInput.value = "";
         saleFormFields.disabled = true;
         modalTitle.textContent = "Добавить продажу";
@@ -6265,6 +6278,15 @@
         saleCompositionItems.replaceChildren();
         renderSaleProductPhoto(null);
     }
+
+    document.getElementById('saleWarehouse').addEventListener('change', event => {
+        if (manualSaleForm.dataset.editing === '1') return;
+        manualSaleForm.dataset.warehouseId = event.target.value;
+        manualSaleRequestId.value = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+        resetProductFilters();
+        modalDescription.textContent = `Источник: ${saleSourceInput.value}. Склад: ${event.target.selectedOptions[0]?.textContent || ''}.`;
+        validateSaleQuantity();
+    });
 
     function renderSaleComposition(components = []) {
         saleCompositionItems.replaceChildren();

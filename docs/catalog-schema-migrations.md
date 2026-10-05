@@ -1,5 +1,11 @@
 # Catalog schema migrations
 
+Локальное дополнение 2026-10-04 (ещё не production): ordered migration
+`2026-10-04-multiwarehouse-v1`, отдельный delta-manifest и TTT-only поля
+совместимости. Условия сверки/отката и непройденные preflight-проверки:
+[multiwarehouse-local.md](multiwarehouse-local.md). Исторический baseline ниже
+не является подтверждением готовности этого нового перехода.
+
 Статус: PR catalog runtime-DDL, baseline `82152be7cc1ff7be2c61795d4eeee3d055a48eb8`.
 
 ## Результат

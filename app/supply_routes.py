@@ -8,6 +8,7 @@ from app.services.receipt_inventory import ReceiptInventory, ReceiptInventoryErr
 from app.services.manual_receipts import ManualReceipts, ManualReceiptError, REASONS
 from app.services.excel_receipt_import import ExcelDraftError, MAX_EXCEL_FILE_SIZE
 from app.clients.bitrix_catalog import BitrixCatalogReadOnlyError
+from app.services.warehouse_transfers import WarehouseTransfers
 
 
 def register_supply_routes(w):
@@ -49,7 +50,35 @@ def register_supply_routes(w):
 
     @guarded
     def page():
-        return render_template('supplies.html')
+        return render_template('supplies.html', warehouses=ManualReceipts().warehouses())
+
+    @app.route('/warehouse/transfers')
+    @guarded
+    def transfers_page():
+        return render_template('warehouse_transfers.html', warehouses=ManualReceipts().warehouses())
+
+    @app.route('/api/v1/receipts/transfers', methods=['GET', 'POST'])
+    @guarded
+    def transfers():
+        engine = WarehouseTransfers()
+        if request.method == 'GET':
+            return jsonify(ok=True, data=engine.list())
+        p = request.get_json(silent=True)
+        if not isinstance(p, dict):
+            raise ValueError('Некорректное перемещение.')
+        return jsonify(ok=True, data=engine.create(p.get('from_warehouse_id'), p.get('to_warehouse_id'), p.get('items'), request.headers.get('Idempotency-Key'), actor(), p.get('comment'))), 201
+
+    @app.route('/api/v1/receipts/transfers/<identity>/<action>', methods=['POST'])
+    @guarded
+    def transfer_action(identity, action):
+        return jsonify(ok=True, data=WarehouseTransfers().transition(identity, action, actor()))
+
+    @app.route('/api/v1/receipts/transfers/products')
+    @guarded
+    def transfer_products():
+        from app.services.excel_product_catalog import ExcelProductCatalog
+        result = ExcelProductCatalog().list_products(query=request.args.get('q', ''), warehouse_id=request.args.get('warehouse_id', 'default'), per_page=30, include_facets=False, include_cell_item_names=False)
+        return jsonify(ok=True, data=[{'id': p['id'], 'name': p['excel_name_raw'], 'article': p.get('excel_article'), 'stock': p['stock']} for p in result['items']])
 
     @app.route('/api/v1/receipts/supplies', methods=['GET', 'POST'])
     @guarded
@@ -121,7 +150,7 @@ def register_supply_routes(w):
                 'source_type': 'sale_cancellation', 'number': row.get('number'),
                 'title': row.get('number'), 'comment': row.get('note') or '',
                 'created_at': row.get('created_at') or row.get('receipt_date') or '',
-                'created_by': row.get('user_name') or '', 'warehouse_name': 'Основной склад',
+                'created_by': row.get('user_name') or '', 'warehouse_name': row.get('warehouse_name') or 'Основной TTT',
                 'position_count': row.get('positions_count') or len(row.get('positions') or []),
                 'total_quantity': row.get('total_quantity') or sum(float(item.get('quantity') or 0) for item in row.get('positions') or []),
                 'status': row.get('status') or 'posted', 'items': row.get('positions') or [],

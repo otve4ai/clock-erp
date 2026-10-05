@@ -48,6 +48,12 @@
         if (available === null) quantity.removeAttribute('max'); else quantity.max = String(available);
         validateQuantity();
     };
+    form.dataset.warehouseId = form.elements.warehouse_id.value;
+    form.elements.warehouse_id.addEventListener('change', event => {
+        form.dataset.warehouseId = event.target.value;
+        window.restoreSharedCatalogCascade(form, {brandId:'',brandLabel:'',categoryId:'',categoryLabel:'',productId:'',productLabel:''});
+        showProduct(null);
+    });
     form.addEventListener('catalog-combobox:change', (event) => {
         if (event.target.matches('[data-shared-catalog-kind]')) showProduct(null);
     });
@@ -73,7 +79,7 @@
     }
     form.addEventListener('submit',async (event) => {
         event.preventDefault(); error.textContent = '';
-        const payload = {product_id:form.elements.product_id.value,quantity:form.elements.quantity.value,reason:reason.value,comment:form.elements.comment.value};
+        const payload = {warehouse_id:form.elements.warehouse_id.value,product_id:form.elements.product_id.value,quantity:form.elements.quantity.value,reason:reason.value,comment:form.elements.comment.value};
         if (!payload.product_id || available === null) { error.textContent = 'Выберите товар.'; return; }
         if (!validateQuantity()) return;
         const next = JSON.stringify(payload);

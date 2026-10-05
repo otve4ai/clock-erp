@@ -20,7 +20,7 @@ class ManualReceiptTest(unittest.TestCase):
         self.supplies = SupplyEngine(self.db)
         with self.db.transaction() as connection:
             connection.execute(
-                "INSERT INTO erp_warehouses(id,code,name,active,is_default,created_at,updated_at) "
+                "INSERT OR IGNORE INTO erp_warehouses(id,code,name,active,is_default,created_at,updated_at) "
                 "VALUES('hong-kong','HK','Гонконг',1,0,'2026-09-23','2026-09-23')"
             )
 
@@ -41,6 +41,7 @@ class ManualReceiptTest(unittest.TestCase):
         return int(product["id"])
 
     def total(self, product_id):
+        # Compatibility stock now means TTT only; HK never changes it.
         with self.db.connect() as connection:
             return float(connection.execute(
                 "SELECT stock FROM catalog_excel_products WHERE id=?", (product_id,)
@@ -83,7 +84,7 @@ class ManualReceiptTest(unittest.TestCase):
         posted = self.manual.post(receipt["id"], "Poster")
         self.manual.post(receipt["id"], "Poster")
         self.assertEqual(posted["status"], "posted")
-        self.assertEqual((self.total(first), self.total(second)), (15, 6))
+        self.assertEqual((self.total(first), self.total(second)), (10, 4))
         self.assertEqual((self.warehouse("hong-kong", first), self.warehouse("hong-kong", second)), (5, 2))
         self.assertEqual(self.warehouse("default", first), 10)
         with self.db.connect() as connection:
@@ -105,7 +106,7 @@ class ManualReceiptTest(unittest.TestCase):
             ]
             for future in futures:
                 future.result()
-        self.assertEqual(self.total(product), 18)
+        self.assertEqual(self.total(product), 10)
         self.assertEqual(self.warehouse("hong-kong", product), 8)
 
     def test_cancel_reverses_once_and_blocks_insufficient_warehouse_stock(self):
@@ -119,7 +120,7 @@ class ManualReceiptTest(unittest.TestCase):
             )
         with self.assertRaisesRegex(ManualReceiptError, "доступно 1"):
             self.manual.cancel(receipt["id"])
-        self.assertEqual(self.total(product), 15)
+        self.assertEqual(self.total(product), 10)
         with self.db.transaction() as connection:
             connection.execute(
                 "UPDATE erp_warehouse_stocks SET quantity=5 "

@@ -119,34 +119,15 @@ class BitrixStockSyncTest(unittest.TestCase):
         self.assertEqual(report["braun"]["examples"][0]["bitrix_stock"], 7)
         self.assertTrue(report["protected_unchanged"])
 
-    def test_apply_updates_stock_with_three_audit_layers_and_is_idempotent(self):
-        first = BitrixStockSync(self.database).synchronize(
-            self.products, apply=True, source_generated_at="source-time"
-        )
-        second = BitrixStockSync(self.database).synchronize(
-            self.products, apply=True, source_generated_at="source-time"
-        )
-        self.assertEqual((first["updated"], second["updated"]), (2, 0))
-        with self.database.connect() as connection:
-            stocks = dict(connection.execute(
-                "SELECT bitrix_external_product_id, stock FROM catalog_excel_products "
-                "WHERE bitrix_external_product_id IN ('1','2','3','4')"
-            ).fetchall())
-            manual_count = connection.execute(
-                "SELECT COUNT(*) FROM catalog_excel_manual_stock_operations "
-                "WHERE reason LIKE 'Синхронизация остатка из %'"
-            ).fetchone()[0]
-            movement_count = connection.execute(
-                "SELECT COUNT(*) FROM catalog_stock_movements "
-                "WHERE source_type = 'bitrix_catalog' AND operation_kind = 'quantity_sync'"
-            ).fetchone()[0]
-            audit_count = connection.execute(
-                "SELECT COUNT(*) FROM erp_audit_events "
-                "WHERE entity_type = 'product' AND source_snapshot = 'bitrix_catalog_quantity'"
-            ).fetchone()[0]
-        self.assertEqual(stocks, {"1": 7, "2": 6, "3": 4, "4": 8})
-        self.assertEqual((manual_count, movement_count, audit_count), (2, 2, 2))
-        self.assertTrue(first["protected_unchanged"])
+    def test_apply_is_rejected_without_any_stock_or_audit_changes(self):
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'ERP — источник остатков'):
+            BitrixStockSync(self.database).synchronize(self.products, apply=True)
+        self.assertEqual(self.path.read_bytes(), before)
+        client = FakeClient(self.products)
+        with self.assertRaisesRegex(ValueError, '--apply отключён'):
+            sync_bitrix_stock(client, self.database, apply=True)
+        self.assertEqual(self.path.read_bytes(), before)
 
     def test_script_creates_verified_backup_before_dry_run(self):
         report = sync_bitrix_stock(

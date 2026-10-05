@@ -186,6 +186,8 @@ class ReceiptRecovery:
         candidate_count,
         mode,
     ):
+        if receipt['warehouse_id'] not in (None, 'default'):
+            raise ReceiptRecoveryError('Восстановление старого прихода поддерживает только TTT. Для другого склада нужна отдельная проверка документа.')
         items = connection.execute(
             "SELECT i.*, p.excel_name_raw AS product_name, p.stock, p.active "
             "FROM erp_receipt_items i "

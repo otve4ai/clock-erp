@@ -25,7 +25,7 @@ class WarehouseSiteStatusTest(unittest.TestCase):
         template = (ROOT / "app/templates/warehouse.html").read_text(
             encoding="utf-8"
         )
-        self.assertIn('data-column-key="site_status">На сайте</th>', template)
+        self.assertIn('data-column-key="site_status">На сайте TTT</th>', template)
         self.assertIn("{{ item.site_status_label }}", template)
         self.assertNotIn('type="checkbox" data-site-status', template)
 

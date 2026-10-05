@@ -1219,6 +1219,7 @@
         const kind = combobox?.dataset.sharedCatalogKind || "";
         return [
             kind,
+            scope?.dataset.warehouseId || 'default',
             kind === "brand" ? "" : selectedSharedCatalogId(
                 sharedCatalogCombobox(scope, "brand")
             ),
@@ -1613,6 +1614,9 @@
         }
         if (scope?.dataset.catalogScope) {
             parameters.set("catalog_scope", scope.dataset.catalogScope);
+        }
+        if (scope?.dataset.warehouseId) {
+            parameters.set('warehouse_id', scope.dataset.warehouseId);
         }
         if (scope?.dataset.productKind) {
             parameters.set("product_kind", scope.dataset.productKind);

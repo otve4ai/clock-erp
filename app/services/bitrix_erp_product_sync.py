@@ -850,6 +850,8 @@ class BitrixERPProductSync:
             "excel_row", "stock", "cell", "stock_source", "file_sha256",
             "moysklad_sync_status", "created_at", "updated_at",
         ) + tuple(values)
+        # Preserve the initial-import workflow. Only a new card receives site
+        # quantity; the compatibility field and trigger belong to TTT alone.
         exact_stock = self._exact_stock(product)
         if exact_stock is None:
             exact_stock = 0.0

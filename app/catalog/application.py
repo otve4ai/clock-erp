@@ -289,8 +289,13 @@ class CatalogApplication:
         available_for_sale=False,
         product_kind="",
         catalog_scope="",
+        warehouse_id=None,
     ):
         catalog = self._shared_catalog_factory()
+        if warehouse_id not in (None, '', 'default'):
+            return catalog.warehouse_options(kind, warehouse_id, query=query, limit=limit,
+                brand_id=brand_id, category_id=category_id, in_stock=in_stock or available_for_sale,
+                include_assemblable=available_for_sale, product_kind=product_kind or ('strap' if catalog_scope == 'straps' else ''))
         if kind == "brand":
             items = (
                 catalog.list_strap_brands(
