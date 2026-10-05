@@ -6,8 +6,9 @@
     </div>
     <div class="erp-workspace-actions products-workspace-actions">
         {% if warehouses %}
-        <label class="products-workspace-button">Склад:
-            <select id="warehouseSelector" aria-label="Склад" onchange="const u=new URL(location.href);u.searchParams.set('warehouse_id',this.value);u.searchParams.delete('page');location.assign(u.href)">
+        <label class="products-workspace-button products-warehouse-select">
+            <span class="products-warehouse-select__label">Склад:</span>
+            <select id="warehouseSelector" aria-label="Склад">
             {% for warehouse in warehouses %}<option value="{{ warehouse.id }}"{% if selected_warehouse == warehouse.id %} selected{% endif %}>{{ warehouse.name }}</option>{% endfor %}
             <option value="all"{% if selected_warehouse == 'all' %} selected{% endif %}>Все склады (с учётом пути)</option>
             </select>
