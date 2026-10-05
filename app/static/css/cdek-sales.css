@@ -35,7 +35,7 @@ html[data-theme] a.cdek-badge{color:var(--cdek-ink)}
 .cdek-table th[aria-sort="ascending"],.cdek-table th[aria-sort="descending"]{color:var(--erp-text)}
 .cdek-table th a:focus-visible{outline:2px solid var(--erp-primary);outline-offset:4px}
 .cdek-table td{border-top:1px solid var(--erp-border);padding:10px 12px;vertical-align:middle}.cdek-table td small{display:block;margin-top:4px;color:var(--erp-muted);font-size:11px}
-.cdek-table .cdek-critical{background:color-mix(in srgb,var(--erp-danger) 4%,var(--erp-surface))}.cdek-critical td:first-child{border-left:3px solid var(--erp-danger)}.cdek-warning td:first-child{border-left:3px solid var(--erp-warning)}
+.cdek-table .cdek-critical{background:color-mix(in srgb,var(--erp-danger) 4%,var(--erp-surface))}.cdek-critical td:first-child{box-shadow:inset 3px 0 var(--erp-danger)}.cdek-warning td:first-child{box-shadow:inset 3px 0 var(--erp-warning)}
 .cdek-critical .cdek-reason{color:var(--erp-danger);font-weight:650}.cdek-table a{color:var(--erp-primary)}
 .cdek-drawer-visible{overflow:hidden}
 .cdek-drawer{position:fixed;inset:0 0 0 auto;margin:0;width:min(560px,100vw);height:100dvh;max-width:100vw;max-height:100dvh;padding:0;border:0;border-left:1px solid var(--erp-border);background:var(--erp-surface,#fff);color:var(--erp-text);box-shadow:-12px 0 40px #0f172a26;font:14px var(--erp-font-family);box-sizing:border-box;overflow:hidden}
@@ -130,3 +130,14 @@ html[data-theme] .cdek-sync-control a.cdek-all-shipments:hover{
 
 .cdek-sync-control .product-site-sync-panel__header{flex-wrap:wrap}
 .cdek-sync-control .product-site-sync-panel__actions{margin-left:auto;flex-wrap:wrap}
+
+/* Keep table edges and cell insets aligned, including highlighted rows. */
+.cdek-page .cdek-table{width:100%;margin:0;border-spacing:0}
+.cdek-page .cdek-table th,.cdek-page .cdek-table td{padding-left:16px;padding-right:16px}
+.cdek-heading-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.cdek-heading-actions [data-cdek-sync]{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.cdek-heading-actions [data-cdek-feedback]{font-size:12px;color:var(--erp-muted);max-width:360px}
+.cdek-heading-actions button:disabled{opacity:.6;cursor:wait}
+a.cdek-stat,html[data-theme] a.cdek-stat{color:var(--erp-text);text-decoration:none}
+a.cdek-stat:hover,a.cdek-stat[aria-current]{border-color:var(--erp-primary);background:var(--erp-surface-muted)}
+a.cdek-stat:focus-visible{outline:2px solid var(--erp-primary);outline-offset:3px}
