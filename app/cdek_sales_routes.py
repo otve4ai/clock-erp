@@ -71,6 +71,9 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor, f
             all_rows.append(selected)
         mode = "all" if args.get("mode") == "all" else "problems"
         category = args.get("category", "") if args.get("category", "") in CATEGORIES else ""
+        status = args.get("status", "")
+        if status not in {"В пути", "В ПВЗ", "У курьера", "Вручён"}:
+            status = ""
         work = args.get("work", "") if args.get("work", "") in WORK else ""
         urgent = args.get("urgent") == "1"
         query = str(args.get("q") or "").strip()[:255]
@@ -83,6 +86,7 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor, f
         except (ValueError, TypeError):
             page, size = 1, 25
         rows = [r for r in all_rows if (mode == "all" or r["issues"])
+                and (not status or r["label"] == status)
                 and (not category or any(i["category"] == category for i in r["issues"]))
                 and (not work or r["work"] == work)
                 and (not urgent or r["priority"] == 2)
@@ -99,14 +103,14 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor, f
         pages = max(1, (total + size - 1) // size)
         page = min(page, pages)
         back = sales_return(args.get("back"))
-        params = dict(mode=mode, category=category, work=work, urgent="1" if urgent else "", q=query, per_page=size, back=back, sort=sort)
+        params = dict(mode=mode, status=status, category=category, work=work, urgent="1" if urgent else "", q=query, per_page=size, back=back, sort=sort)
         def link(**changes):
             values = dict(params, page=1)
             values.update(changes)
             return url_for("cdek_sales_page", **{k: v for k, v in values.items() if v != ""})
         return render_template("cdek_sales.html", rows=rows[(page-1)*size:page*size], counts=counts,
             categories=CATEGORIES, category_counts={k: sum(any(i["category"] == k for i in r["issues"]) for r in all_rows) for k in CATEGORIES},
-            work_labels=WORK, mode=mode, category=category, work=work, urgent=urgent, query=query,
+            work_labels=WORK, mode=mode, status=status, category=category, work=work, urgent=urgent, query=query,
             total=total, page=page, pages=pages, size=size, back=back, link=link, sort=sort,
             selected=args.get("shipment", ""), message=args.get("message", ""),
             configured=service.delivery.client.configured,
@@ -114,7 +118,7 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor, f
 
     def finish(key, message):
         # Only preserve recognized list controls; never accept arbitrary redirects.
-        params = {k: request.form.get(k, "") for k in ("mode", "category", "work", "urgent", "q", "per_page", "page", "sort")}
+        params = {k: request.form.get(k, "") for k in ("mode", "status", "category", "work", "urgent", "q", "per_page", "page", "sort")}
         params.update(back=sales_return(request.form.get("back")), shipment=key, message=message)
         return redirect(url_for("cdek_sales_page", **params))
 

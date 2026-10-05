@@ -6,8 +6,10 @@
     const panel = root.querySelector('#cdekSyncPanel');
     const run = root.querySelector('[data-cdek-run]');
     const feedback = root.querySelector('[data-cdek-feedback]');
+    const inline = root.hasAttribute('data-cdek-inline');
+    let reloadAfterRun = false;
     let timer, loading = false, running = false;
-    const put = (key, value) => { root.querySelector('[data-cdek-' + key + ']').textContent = value; };
+    const put = (key, value) => { const target = root.querySelector('[data-cdek-' + key + ']'); if (target) target.textContent = value; };
     function show(open) {
         panel.hidden = !open;
         toggle.setAttribute('aria-expanded', String(open));
@@ -29,7 +31,13 @@
             if (response.redirected) throw new Error('Сессия завершена. Обновите страницу.');
             const data = await response.json();
             if (!response.ok) throw new Error(data.message || 'Не удалось получить состояние СДЭК.');
+            const wasRunning = running;
             running = data.outcome === 'running';
+            if (inline && (manual || running)) reloadAfterRun = true;
+            if (inline && reloadAfterRun && !running && (manual || wasRunning)) {
+                window.location.reload();
+                return;
+            }
             const count = data.counts.problems;
             root.dataset.syncState = running ? 'running' : !data.configured || data.outcome === 'error' ? 'error' : count || data.counts.stale || data.outcome === 'partial' ? 'attention' : data.outcome === 'unknown' ? 'unknown' : 'success';
             put('label', running ? 'Сверка СДЭК · обновление…' : 'Сверка СДЭК · ' + count + ' проблем');
@@ -37,7 +45,7 @@
             put('attempt', data.last_attempt_display || '—');
             put('success', 'Последняя успешная: ' + (data.last_success_display || '—') + ' МСК');
             put('problems', count);
-            feedback.textContent = data.message || '';
+            feedback.textContent = running ? 'Обновляем статусы СДЭК…' : data.message || '';
             run.dataset.configured = String(data.configured);
         } catch (error) {
             feedback.textContent = error instanceof SyntaxError ? 'Не удалось получить состояние СДЭК.' : error.message;
@@ -46,8 +54,13 @@
             loading = false;
             run.disabled = running || run.dataset.configured === 'false';
             clearTimeout(timer);
-            if (!panel.hidden) timer = setTimeout(refresh, running ? 2000 : 15000);
+            if (inline || !panel.hidden) timer = setTimeout(refresh, running ? 2000 : 15000);
         }
+    }
+    if (inline) {
+        run.addEventListener('click', () => refresh(true));
+        refresh();
+        return;
     }
     toggle.addEventListener('click', () => show(panel.hidden));
     run.addEventListener('click', () => refresh(true));

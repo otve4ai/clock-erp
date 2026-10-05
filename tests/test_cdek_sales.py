@@ -250,6 +250,49 @@ class CdekSalesRoutesTest(unittest.TestCase):
         register_cdek_sales_routes(self.app, self.service, lambda: self.sales, self.allowed, self.csrf, lambda: "employee", find_orders=self.find_orders)
         self.client = self.app.test_client()
 
+    def test_all_mode_has_no_selected_problem_and_metrics_reset_filters(self):
+        from html.parser import HTMLParser
+        from urllib.parse import urlsplit, parse_qs
+
+        class Links(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.links = []
+            def handle_starttag(self, tag, attrs):
+                if tag == "a":
+                    self.links.append(dict(attrs))
+
+        self.seed(age=0)
+        self.sales.append(sale("456", "9876543210"))
+        html = self.client.get("/sales/cdek?mode=all&q=missing&work=working&urgent=1").get_data(as_text=True)
+        links = Links()
+        links.feed(html)
+        metrics = [a for a in links.links if "cdek-stat" in a.get("class", "")]
+        self.assertEqual(len(metrics), 5)
+        for a in metrics:
+            params = parse_qs(urlsplit(a["href"]).query)
+            for cleared in ("q", "work", "urgent", "category"):
+                self.assertNotIn(cleared, params)
+            result = self.client.get(a["href"]).get_data(as_text=True)
+            expected = 1 if params.get("status") == ["В ПВЗ"] or params.get("mode") == ["problems"] else 0
+            self.assertIn("Найдено " + str(expected), result)
+        categories = html.split('aria-label="Тип проблемы">', 1)[1].split('</nav>', 1)[0]
+        self.assertNotIn('aria-current=', categories)
+        self.assertIn('data-cdek-inline', html)
+        self.assertIn('js/cdek-sync.js', html)
+
+    def test_status_filter_survives_sort_pagination_and_review(self):
+        group = self.seed(age=0)
+        self.sales.append(sale("456", "9876543210"))
+        html = self.client.get("/sales/cdek", query_string={"mode": "all", "status": "В ПВЗ", "shipment": group["id"]}).get_data(as_text=True)
+        self.assertIn('>123</a>', html)
+        self.assertNotIn('>456</a>', html)
+        self.assertIn('name="status" value="В ПВЗ"', html)
+        response = self.client.post("/sales/cdek/" + group["id"] + "/review", data={"mode": "all", "status": "В ПВЗ", "version": "0", "review_work": "working"})
+        from urllib.parse import urlsplit, parse_qs
+        self.assertEqual(parse_qs(urlsplit(response.location).query)["status"], ["В ПВЗ"])
+        self.assertIn("Найдено 2", self.client.get("/sales/cdek?mode=all&status=invalid").get_data(as_text=True))
+
     def test_manager_options_and_colored_states_match(self):
         group = self.seed(age=7)
         for state, tone, label in [("new", "red", "Нужна реакция"), ("working", "blue", "В работе")]:
