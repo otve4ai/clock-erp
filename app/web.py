@@ -25169,6 +25169,17 @@ def validated_sms_payload(values):
             payload["client_name"] = str(order.get("first_name") or order.get("customer") or "").strip()
         else:
             payload["client_name"] = ""
+        if not payload["tracking_number"]:
+            tracks = {
+                str(sale.get("track_number") or "").strip()
+                for sale in api_sales_records()
+                if str(sale.get("source_key") or sale.get("source") or "").strip().lower()
+                in {"tictactoy", "битрикс", "заказ битрикс"}
+                and str(sale.get("order_number") or "").strip() == str(payload["order_number"]).strip()
+                and str(sale.get("track_number") or "").strip()
+            }
+            if len(tracks) == 1:
+                payload["tracking_number"] = tracks.pop()
     repair_id = str(payload.get("repair_id") or "").strip()
     if repair_id:
         operation = next((row for row in operations if row.get("operation_type") == "repair" and repair_id in {str(row.get("external_id") or ""), str(row.get("local_ref") or "")}), None)

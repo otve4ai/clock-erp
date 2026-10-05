@@ -286,12 +286,25 @@ class SmsWebTests(unittest.TestCase):
     def test_cdek_missing_source_tracking_cannot_use_browser_value(self):
         row = SmsStore(self.path).save_template(None, "СДЭК", "Трек {Накладная}", True, {"id":"1", "name":"Тест"})
         provider = FakeProvider()
-        with mock.patch.object(self.web, "OrdersSnapshotStore") as snapshots, mock.patch.object(self.web, "sms_client", return_value=provider):
+        with mock.patch.object(self.web, "OrdersSnapshotStore") as snapshots, mock.patch.object(self.web, "sms_client", return_value=provider), mock.patch.object(self.web, "api_sales_records", return_value=[]):
             snapshots.return_value.get.return_value = {"id":"551", "customer":"Анна"}
             for route in ("/api/v1/sms/templates/preview", "/api/v1/sms/messages"):
                 response = self.client.post(route, json={"order_id":"551", "template_id":row["id"], "tracking_number":"10313114965"})
                 self.assertEqual(response.status_code, 422)
         self.assertEqual(provider.calls, 0)
+
+    def test_cdek_tracking_from_sales_rejects_ambiguous_shipments(self):
+        row = SmsStore(self.path).save_template(None, "СДЭК", "Трек {Накладная}", True, {"id":"1", "name":"Тест"})
+        sale = {"source":"tictactoy", "order_number":"551", "track_number":"10325754515"}
+        with mock.patch.object(self.web, "OrdersSnapshotStore") as snapshots, mock.patch.object(self.web, "api_sales_records") as sales:
+            snapshots.return_value.get.return_value = {"id":"551", "number":"551", "customer":"Анна"}
+            sales.return_value = [sale, dict(sale), dict(sale, source="wildberries", track_number="99999")]
+            payload = {"order_id":"551", "template_id":row["id"]}
+            result = self.client.post("/api/v1/sms/templates/preview", json=payload)
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.get_json()["data"]["text"], "Трек 10325754515")
+            sales.return_value.append(dict(sale, track_number="10313114965"))
+            self.assertEqual(self.client.post("/api/v1/sms/templates/preview", json=payload).status_code, 422)
 
     @classmethod
     def setUpClass(cls):
