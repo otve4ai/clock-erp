@@ -4123,8 +4123,11 @@ body.edit-drawer-open:has(.app.sidebar-collapsed) #drawerBackdrop {
 
 .products-add-menu { position: relative; }
 .products-add-menu-list { position:absolute;right:0;top:calc(100% + 6px);z-index:80;min-width:210px;padding:6px;border:1px solid #d8e0ea;border-radius:10px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,.16); }
-.products-add-menu-list button { width:100%;padding:9px 10px;border:0;border-radius:7px;background:transparent;text-align:left;cursor:pointer; }
-.products-add-menu-list button:hover { background:#f1f5f9; }
+.products-add-menu-list > [role="menuitem"] { display:block;box-sizing:border-box;width:100%;margin:0;padding:9px 10px;border:0;border-radius:7px;background:transparent;color:var(--erp-text,#172b44);font:inherit;line-height:1.4;text-align:left;text-decoration:none;cursor:pointer; }
+.products-add-menu-list > [role="menuitem"]:not(:disabled):hover,
+.products-add-menu-list > [role="menuitem"]:not(:disabled):focus-visible { background:var(--erp-surface-muted,#f1f5f9); }
+.products-add-menu-list > [role="menuitem"]:focus-visible { outline:2px solid var(--erp-primary,#2563eb);outline-offset:-2px; }
+.products-add-menu-list > [role="menuitem"]:disabled { opacity:.5;cursor:not-allowed; }
 .bitrix-import-dialog { display:flex;flex-direction:column;width:min(720px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:hidden; }
 .bitrix-import-dialog > .modal-header { flex:0 0 auto; }
 .bitrix-import-body { display:grid;gap:14px;padding:18px;overflow-y:auto;overscroll-behavior:contain; }

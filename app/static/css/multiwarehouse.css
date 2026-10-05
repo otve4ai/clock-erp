@@ -7,9 +7,16 @@
     padding:0 12px;
 }
 .products-warehouse-select__label {flex:0 0 auto;white-space:nowrap;}
+/* The hidden selected caption sizes the native select, not its longest option. */
+.products-warehouse-select__field {position:relative;flex:0 1 auto;min-width:0;height:100%;}
+.products-warehouse-select__value {
+    display:block;visibility:hidden;white-space:pre;overflow:hidden;
+    padding:0 30px 0 4px;font:inherit;
+}
 .products-warehouse-select #warehouseSelector {
-    flex:1 1 auto;
-    width:auto;
+    position:absolute;
+    inset:0;
+    width:100%;
     min-width:0;
     max-width:none;
     min-height:0;
@@ -62,3 +69,40 @@
 .transfer-workspace td,.transfer-workspace th {padding:12px;border-bottom:1px solid #dbe3ef;text-align:left;}
 .transfer-workspace form {display:flex;gap:12px;flex-wrap:wrap;align-items:end;}
 .transfer-workspace label {display:flex;flex-direction:column;gap:4px;}
+
+/* Keep the existing product card; only its stock cell becomes warehouse-aware. */
+#editDrawer .product-inline-form .product-warehouse-card #detailStock.product-warehouse-stocks {
+    display:grid;align-items:stretch;gap:6px;width:100%;font-weight:400;
+}
+#editDrawer .product-warehouse-card #detailStock::before {display:none;}
+#editDrawer .product-warehouse-stock {
+    display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;
+    padding:6px 8px;border:1px solid transparent;border-radius:7px;
+}
+#editDrawer .product-warehouse-stock.is-selected {
+    background:var(--erp-primary-soft,#eff6ff);border-color:var(--erp-border,#dbe4f0);
+}
+#editDrawer .product-warehouse-stock__name {overflow-wrap:anywhere;}
+#editDrawer .product-warehouse-stock__quantity {text-align:right;}
+#editDrawer .product-warehouse-stock__note,
+#editDrawer .product-warehouse-stock__transit {
+    grid-column:1 / -1;font-size:11px;color:var(--erp-muted,#64748b);
+}
+#editDrawer .product-warehouse-edit-label {margin-top:10px;font-size:12px;}
+#editDrawer .product-warehouse-others {min-width:0;}
+#editDrawer .product-warehouse-others__summary {
+    padding:4px 8px;font-size:12px;font-weight:600;
+    color:var(--erp-primary,#2563eb);cursor:pointer;overflow-wrap:anywhere;
+}
+#editDrawer .product-warehouse-others__list {
+    max-height:200px;overflow-y:auto;overscroll-behavior:contain;
+    margin-top:4px;border:1px solid var(--erp-border,#dbe4f0);border-radius:7px;
+}
+#editDrawer .product-warehouse-others__summary:focus-visible,
+#editDrawer .product-warehouse-others__list:focus-visible {
+    outline:2px solid var(--erp-primary,#2563eb);outline-offset:1px;border-radius:4px;
+}
+.product-stock-history-entry {
+    display:flex;flex-direction:column;gap:3px;padding:10px 0;
+    border-bottom:1px solid var(--erp-border,#e5e7eb);overflow-wrap:anywhere;
+}

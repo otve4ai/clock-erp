@@ -693,6 +693,17 @@
                                 <input id="bitrixProductSearch" type="search" autocomplete="off" placeholder="Название, артикул или Bitrix ID" aria-label="Поиск товара в Bitrix">
                             </div>
                             <div id="bitrixProductStatus" class="picker-status" role="status" aria-live="polite">Введите минимум 2 символа или Bitrix ID</div>
+                            <div class="bitrix-taxonomy picker-taxonomy">
+                                {% if selected_warehouse == 'all' %}
+                                <label>Склад прихода<select id="bitrixImportWarehouse" required>
+                                    <option value="">Выберите склад</option>
+                                    {% for warehouse in warehouses %}<option value="{{ warehouse.id }}">{{ warehouse.name }}</option>{% endfor %}
+                                </select></label>
+                                {% else %}
+                                <input id="bitrixImportWarehouse" type="hidden" value="{{ selected_warehouse }}">
+                                <span>Склад прихода: {% for warehouse in warehouses %}{% if warehouse.id == selected_warehouse %}<strong>{{ warehouse.name }}</strong>{% endif %}{% endfor %}</span>
+                                {% endif %}
+                            </div>
                         </div>
                         <div class="picker-columns">
                             <section class="picker-results-panel">
@@ -1562,11 +1573,12 @@
                 </div>
             </div>
 
-            <div class="product-detail-card">
-                <div class="product-detail-label">Остаток TTT</div>
-                <div id="detailStock" class="product-detail-value">—</div>
+            <div class="product-detail-card product-warehouse-card">
+                <div class="product-detail-label">Остатки по складам</div>
+                <div id="detailStock" class="product-warehouse-stocks" role="status" aria-live="polite">—</div>
                 <div id="bundleAvailability" role="status"></div>
-                <input id="editStock" class="product-detail-input" type="number" min="0" step="1" aria-label="Остаток товара" required
+                <label for="editStock" class="product-detail-input product-warehouse-edit-label">Корректировка остатка TTT</label>
+                <input id="editStock" class="product-detail-input" type="number" min="0" step="1" aria-label="Остаток TTT" required
                     {% if current_user and current_user.role != "admin" %}readonly aria-readonly="true"{% else %}name="stock"{% endif %}>
             </div>
 
@@ -1652,93 +1664,12 @@
 
     <script src="{{ url_for('static', filename='js/catalog-combobox.js', v='catalog-combobox-20260824-product-hierarchy') }}"></script>
     <script src="{{ url_for('static', filename='js/toolbar-popover-coordinator.js') }}"></script>
+    <script src="{{ static_asset_url('js/product-warehouse-details.js') }}"></script>
     <script>
-        const stockHistoryCache = new Map();
-
         async function renderStockHistory(productId) {
-            const historyList = document.getElementById("stockHistoryList");
-
-            if (!historyList) {
-                return;
-            }
-
-            const cacheKey = String(productId || "");
-            historyList.dataset.productId = cacheKey;
-            historyList.textContent = "Загружаем историю…";
-            let productOperations = stockHistoryCache.get(cacheKey);
-            if (!productOperations) {
-                try {
-                    const response = await fetch(
-                        `/api/v1/products/${encodeURIComponent(cacheKey)}/movements?limit=10`,
-                        {
-                            cache: "no-store",
-                            headers: {Accept: "application/json"},
-                        }
-                    );
-                    const payload = await response.json();
-                    if (!response.ok || !Array.isArray(payload.data)) {
-                        throw new Error("history_unavailable");
-                    }
-                    productOperations = payload.data;
-                    stockHistoryCache.set(cacheKey, productOperations);
-                } catch (error) {
-                    if (historyList.dataset.productId === cacheKey) {
-                        historyList.textContent = "Не удалось загрузить историю. Повторите позже.";
-                    }
-                    return;
-                }
-            }
-
-            if (historyList.dataset.productId !== cacheKey) {
-                return;
-            }
-
-            if (!productOperations.length) {
-                historyList.innerHTML = "Истории по этой позиции пока нет.";
-                return;
-            }
-
-            historyList.innerHTML = productOperations.map(operation => {
-                const label = operation.label || "Операция";
-                const quantity = operation.quantity || 0;
-                const before = operation.stock_before ?? "—";
-                const after = operation.stock_after ?? "—";
-                const createdAt = operation.created_at || "";
-                const documentName = operation.moysklad_document_name || "";
-                const operationReason = operation.reason || "";
-                const saleId = operation.sale_id || "";
-                const source = operation.source || "";
-                const userName = operation.user_name || "";
-                const difference = Number(operation.diff || 0);
-                const signedDifference = `${
-                    difference > 0 ? "+" : ""
-                }${difference}`;
-
-                if (operation.type === "product_photo") {
-                    return `
-                        <div style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
-                            <strong>${label}</strong><br>
-                            <span>${createdAt}</span>
-                            ${source ? `<br><span>Источник: ${source}</span>` : ""}
-                            ${userName ? `<br><span>Пользователь: ${userName}</span>` : ""}
-                            ${operationReason ? `<br><span>${operationReason}</span>` : ""}
-                        </div>
-                    `;
-                }
-
-                return `
-                    <div style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
-                        <strong>${label}: ${signedDifference} шт.</strong><br>
-                        <span>${before} → ${after}</span><br>
-                        <span>${createdAt}</span>
-                        ${saleId ? `<br><span>Продажа №${saleId}</span>` : ""}
-                        ${source ? `<br><span>Источник: ${source}</span>` : ""}
-                        ${userName ? `<br><span>Пользователь: ${userName}</span>` : ""}
-                        ${operationReason ? `<br><span>Причина: ${operationReason}</span>` : ""}
-                        ${documentName ? `<br><span>МойСклад: ${documentName}</span>` : ""}
-                    </div>
-                `;
-            }).join("");
+            return window.ProductWarehouseDetails.loadHistory(
+                document.getElementById("stockHistoryList"), productId
+            );
         }
 
         let warehouseDrawerReturnFocus = null;
@@ -2114,22 +2045,11 @@
             }
         }
 
-        function renderProductStock(value) {
-            const element = document.getElementById("detailStock");
-            const stock = Number.parseFloat(String(value).replace(",", "."));
-
-            element.classList.remove("stock-positive", "stock-negative");
-            if (!Number.isFinite(stock)) {
-                element.textContent = "—";
-                return;
-            }
-            if (stock === 0) {
-                element.textContent = "Нет в наличии";
-                return;
-            }
-
-            element.textContent = String(stock) + " шт.";
-            element.classList.add(stock > 0 ? "stock-positive" : "stock-negative");
+        function renderProductStock(productId) {
+            return window.ProductWarehouseDetails.loadStocks(
+                document.getElementById("detailStock"), productId,
+                document.getElementById("warehouseSelector")?.value || "default"
+            );
         }
 
         function closeProductGalleryLightbox(event) {
@@ -2354,7 +2274,7 @@
             if (!form.classList.contains("is-editing") || !card) {
                 return;
             }
-            if (event.target.closest("input, button, a")) {
+            if (event.target.closest("input, button, a, .product-warehouse-others")) {
                 return;
             }
 
@@ -2512,9 +2432,10 @@
                 .then(payload => {
                     if (bundleStatus.dataset.productId !== productId) return;
                     const data = payload.data;
-                    bundleStatus.textContent = data.is_bundle
+                    const description = data.is_bundle
                         ? (data.physical_inventory_initialized ? "Доступно к сборке: " + data.available_to_assemble : "Физический остаток компонентов не подтверждён")
                         : data.is_physical_component ? (data.physical_inventory_initialized ? "Физический остаток ERP: " + data.physical_stock : "Физический остаток не подтверждён") : "";
+                    bundleStatus.textContent = description ? "TTT · " + description : "";
                 }).catch(() => {
                     if (bundleStatus.dataset.productId === productId) bundleStatus.textContent = "Не удалось загрузить состав";
                 });
@@ -2529,7 +2450,7 @@
             document.getElementById("detailArticle").textContent = productArticle;
             document.getElementById("detailPrice").textContent =
                 button.dataset.priceDisplay || "—";
-            renderProductStock(productStock);
+            renderProductStock(productId);
             document.getElementById("detailBrand").textContent = productBrand;
             document.getElementById("detailCategory").textContent = productCategory;
             document.getElementById("detailCell").textContent = productCell
@@ -2743,7 +2664,7 @@
             Object.entries(displayValues).forEach(function(entry) {
                 document.getElementById(entry[0]).textContent = entry[1];
             });
-            renderProductStock(product.stock_display ?? product.stock ?? 0);
+            renderProductStock(product.id || document.getElementById("editProductId").value);
             const editableValues = {
                 editName: product.name || "",
                 editModel: product.model || "",
@@ -2845,7 +2766,6 @@
                 if (payload.data) {
                     applySavedInlineProduct(form, payload.data);
                 }
-                stockHistoryCache.delete(String(productId));
                 renderStockHistory(productId);
                 resetDetailPhotoChanges(false);
                 document.getElementById("detailPhotoEditor").hidden = true;
@@ -3850,6 +3770,13 @@
     let bitrixSubmitting = false;
     async function submitBitrixImport(action) {
         if (!bitrixSelectedProduct || bitrixSubmitting) return;
+        const warehouseField = document.getElementById("bitrixImportWarehouse");
+        const warehouseId = warehouseField.value;
+        if (!warehouseId || warehouseId === "all") {
+            bitrixImportMessage("Выберите склад прихода.");
+            warehouseField.focus();
+            return;
+        }
         const quantityInput = document.getElementById("bitrixImportQuantity").value.trim();
         const quantity = Number(quantityInput);
         if (!quantityInput || !Number.isSafeInteger(quantity) || quantity < (action === "create" ? 0 : 1)) {
@@ -3857,6 +3784,7 @@
             return;
         }
         bitrixSubmitting = true;
+        warehouseField.disabled = true;
         document.getElementById("bitrixProductSearch").disabled = true;
         const button = action === "update" ? document.getElementById("bitrixUpdateProduct") : document.getElementById("bitrixImportProduct");
         button.disabled = true;
@@ -3865,7 +3793,7 @@
             const response = await fetch("/api/v1/bitrix-products/" + encodeURIComponent(bitrixSelectedProduct.bitrix_id) + "/import", {
                 method:"POST", credentials:"same-origin",
                 headers:{"Content-Type":"application/json","Accept":"application/json","X-CSRF-Token":document.querySelector('#warehouseAddForm [name="csrf_token"]')?.value || ""},
-                body:JSON.stringify({action:action,quantity:quantity,brand_id:document.getElementById("bitrixBrandSelect").value || null,category_id:document.getElementById("bitrixCategorySelect").value || null})
+                body:JSON.stringify({action:action,quantity:quantity,warehouse_id:warehouseId,brand_id:document.getElementById("bitrixBrandSelect").value || null,category_id:document.getElementById("bitrixCategorySelect").value || null})
             });
             const payload = await response.json();
             if (!response.ok || payload.ok === false) {
@@ -3873,11 +3801,12 @@
                 throw new Error(payload.message || "Импорт не выполнен.");
             }
             const saved = payload.data?.product;
-            if (!saved?.id || String(saved.id) !== String(payload.data.erp_product_id) || !(saved.article || saved.name)) {
+            if (!saved?.id || String(saved.id) !== String(payload.data.erp_product_id) || !(saved.article || saved.name) || payload.data.warehouse_id !== warehouseId) {
                 throw new Error("Сервер не подтвердил сохранение товара. Обновите список и проверьте результат.");
             }
             const query = new URLSearchParams({
                 q: saved.article || saved.name,
+                warehouse_id: warehouseId,
                 notice: "success",
                 message: quantity === 0 ? "Товар сохранён без прихода" : "Количество добавлено к остатку ERP",
             });
@@ -3887,6 +3816,7 @@
         } finally {
             button.disabled = false;
             bitrixSubmitting = false;
+            warehouseField.disabled = false;
             document.getElementById("bitrixProductSearch").disabled = false;
         }
     }

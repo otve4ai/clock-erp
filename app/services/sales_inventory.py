@@ -2313,9 +2313,10 @@ class SalesInventory:
             return []
         self.initialize()
         query = (
-            "SELECT m.*, s.source AS sale_source "
+            "SELECT m.*, s.source AS sale_source, w.name AS warehouse_name "
             "FROM catalog_stock_movements m "
-            "LEFT JOIN erp_sales s ON s.id = m.sale_id"
+            "LEFT JOIN erp_sales s ON s.id = m.sale_id "
+            "LEFT JOIN erp_warehouses w ON w.id = COALESCE(m.warehouse_id, 'default')"
         )
         parameters = []
         if product_id is not None:
@@ -2337,16 +2338,23 @@ class SalesInventory:
         result = []
         for row in rows:
             delta = float(row["quantity_delta"])
+            label = labels.get(row["movement_type"], row["movement_type"])
+            if row["source_type"] == "writeoff":
+                label = "Отмена списания" if row["operation_kind"] == "cancel" else "Списание"
+            elif row["source_type"] == "transfer":
+                label = {"send": "Перемещение: отправка", "receive": "Перемещение: приёмка"}.get(
+                    row["operation_kind"], "Перемещение"
+                )
+            warehouse_id = row["warehouse_id"] or "default"
             result.append({
                 "id": row["id"],
                 "product_id": str(row["product_id"]),
                 "created_at": row["created_at"],
                 "type": row["movement_type"],
-                "label": (
-                    ("Отмена списания" if row["operation_kind"] == "cancel" else "Списание")
-                    if row["source_type"] == "writeoff"
-                    else labels.get(row["movement_type"], row["movement_type"])
-                ),
+                "label": label,
+                "warehouse_id": warehouse_id,
+                "warehouse_name": row["warehouse_name"] or ("TTT" if warehouse_id == "default" else warehouse_id),
+                "document_number": row["source_number"] or "",
                 "quantity": abs(delta),
                 "diff": delta,
                 "stock_after": float(row["stock_after"]),

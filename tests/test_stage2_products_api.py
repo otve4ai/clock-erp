@@ -196,19 +196,20 @@ class Stage2ProductsApiTest(unittest.TestCase):
             encoding="utf-8"
         )
 
+        script = (Path(web.app.root_path) / "static/js/product-warehouse-details.js").read_text(encoding="utf-8")
         self.assertIn(
             "if (!response.ok || !Array.isArray(payload.data))",
-            page,
+            script,
         )
         self.assertNotIn(
             "!response.ok || !payload.ok || !Array.isArray(payload.data)",
-            page,
+            script,
         )
-        self.assertIn("stockHistoryCache.delete(String(productId));", page)
+        self.assertNotIn("stockHistoryCache", page)
         self.assertIn("renderStockHistory(productId);", page)
         self.assertNotIn("await renderStockHistory(productId);", page)
-        self.assertIn('cache: "no-store"', page)
-        self.assertIn("historyList.dataset.productId !== cacheKey", page)
+        self.assertIn("cache: 'no-store'", script)
+        self.assertIn("pending.get(container) === token", script)
 
     def test_product_price_can_be_missing_zero_added_and_cleared(self):
         page = (Path(web.app.root_path) / "templates" / "warehouse.html").read_text(

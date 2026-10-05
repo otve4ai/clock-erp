@@ -1000,8 +1000,9 @@ class ReceiptInventory:
         user_name,
         tenant_id,
         now,
+        warehouse_id=None,
     ):
-        products = cls._load_products(connection, prepared)
+        products = cls._load_products(connection, prepared, warehouse_id=warehouse_id)
         connection.execute(
             "INSERT INTO erp_receipts "
             "(id, tenant_id, number, comment, status, receipt_date, user_name, "
@@ -1028,6 +1029,11 @@ class ReceiptInventory:
                 now,
             ),
         )
+        if warehouse_id is not None:
+            connection.execute(
+                "UPDATE erp_receipts SET warehouse_id=? WHERE id=?",
+                (warehouse_id, receipt_id),
+            )
         cls._insert_items(
             connection,
             receipt_id,

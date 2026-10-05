@@ -601,17 +601,17 @@ class BitrixCatalogReadOnlyClient:
     def search_products(self, query, limit=20):
         """Use the catalog export's bounded server-side product search."""
         query = _text(query)
+        direct = None
         if query.isdigit():
-            product = self.get_product(query)
-            return [product] if product is not None else []
-        if len(query) < 2:
+            direct = self.get_product(str(int(query))) if int(query) > 0 else None
+        if len(query) < 2 and not query.isdigit():
             return []
         page_limit = 50
         products = []
         for page in range(1, 21):
             result = self.get_products_page(
                 page=page, limit=page_limit,
-                include_inactive=False, query=query,
+                include_inactive=True, query=query,
             )
             products.extend(result["products"])
             if not result.get("has_more"):
@@ -634,12 +634,21 @@ class BitrixCatalogReadOnlyClient:
             return None
 
         ranked = [(rank(product), product) for product in products]
-        return [
+        matches = [
             product for product_rank, product in sorted(
                 (item for item in ranked if item[0] is not None),
                 key=lambda item: item[0],
-            )[:min(max(int(limit), 1), 50)]
+            )
         ]
+        # A numeric name/article is not necessarily a Bitrix ID. Keep an exact
+        # ID first, but also search names and deduplicate the combined results.
+        result, seen = [], set()
+        for product in ([direct] if direct is not None else []) + matches:
+            identity = product["external_product_id"]
+            if identity not in seen:
+                seen.add(identity)
+                result.append(product)
+        return result[:min(max(int(limit), 1), 50)]
 
     def download_product_image(self, image, max_bytes=3 * 1024 * 1024):
         """Download a product image from the same trusted Bitrix host."""

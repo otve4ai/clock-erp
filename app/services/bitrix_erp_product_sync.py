@@ -22,6 +22,8 @@ from app.services.product_classification import classify_product
 from app.services.product_reconciliation import article_quality, normalize_text, reliable_article
 from app.services.shared_catalog import assign_product_taxonomy
 from app.services.receipt_inventory import ReceiptInventory, positive_integer
+from app.services.component_inventory import balance
+from app.services.manual_receipts import ManualReceipts
 
 
 CATALOG_BATCH_ID = "bitrix-catalog-products"
@@ -237,7 +239,7 @@ class BitrixERPProductSync:
             }
 
     def apply_single(self, product, action, brand_id=None, category_id=None,
-                     prepared_image=None, actor=None, quantity=None):
+                     prepared_image=None, actor=None, quantity=None, warehouse_id="default"):
         """Resolve a card and post user-entered stock atomically in the ERP ledger."""
         if action not in {"create", "update", "resolve"}:
             raise ValueError("Неподдерживаемое действие импорта.")
@@ -248,6 +250,11 @@ class BitrixERPProductSync:
         actor = actor or {}
         self.database.initialize()
         with self.database.transaction() as connection:
+            if action != "resolve":
+                if not isinstance(warehouse_id, str) or not warehouse_id:
+                    raise ValueError("Выберите склад прихода.")
+                warehouse = ManualReceipts._warehouse(connection, warehouse_id)
+                warehouse_id = warehouse["id"]
             if self._deleted_product(connection, product):
                 raise ValueError("Товар ERP удалён. Восстановите карточку перед добавлением.")
             match = self._single_match(connection, product)
@@ -310,6 +317,9 @@ class BitrixERPProductSync:
                     "status": "created" if existing is None else "duplicate",
                     "match_method": match["method"], "erp_product_id": product_id,
                     "changes": {}, "receipt_id": None,
+                    "warehouse_id": warehouse_id,
+                    "warehouse_stock": balance(connection, product_id, require_initialized=False,
+                                               warehouse_id=warehouse_id),
                 }
 
             # Use the same receipt document/ledger primitives as supplies. Both
@@ -318,23 +328,28 @@ class BitrixERPProductSync:
             now = utc_now()
             user_name = str(actor.get("actor_name") or actor.get("actor_id") or "")
             receipt = {"number": receipt_id, "source_type": "bitrix_single_import",
-                       "comment": "Добавление количества через Товары"}
+                       "comment": "Добавление количества через Товары",
+                       "warehouse_id": warehouse_id, "warehouse_name": warehouse["name"]}
             positions = ReceiptInventory._prepare_positions([
                 {"product_id": product_id, "quantity": quantity}
             ])
             ReceiptInventory._insert_draft(
-                connection, receipt, positions, receipt_id, None, user_name, "default", now
+                connection, receipt, positions, receipt_id, None, user_name, "default", now,
+                warehouse_id=warehouse_id,
             )
             ReceiptInventory._post_draft(connection, receipt_id, user_name, None, now)
             AuditJournal(self.database).record(
                 "receipt", receipt_id, "created", "Приход " + receipt_id,
-                after={"status": "posted", "quantity": quantity},
+                after={"status": "posted", "quantity": quantity, "warehouse_id": warehouse_id},
                 source="bitrix_single_import", connection=connection, **actor
             )
             return {
                 "status": "created" if existing is None else "stock_added",
                 "match_method": match["method"], "erp_product_id": product_id,
                 "changes": {}, "receipt_id": receipt_id,
+                "warehouse_id": warehouse_id,
+                "warehouse_stock": balance(connection, product_id, require_initialized=False,
+                                           warehouse_id=warehouse_id),
             }
 
     @staticmethod

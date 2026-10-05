@@ -1,6 +1,16 @@
 (() => {
     const warehouse = new URL(location.href).searchParams.get('warehouse_id') || 'default';
-    document.getElementById('warehouseSelector')?.addEventListener('change', event => {
+    const selector = document.getElementById('warehouseSelector');
+    function syncSelectedCaption() {
+        const caption = selector?.selectedOptions[0]?.textContent || '';
+        const value = selector?.parentElement.querySelector('.products-warehouse-select__value');
+        if (value) value.textContent = caption;
+        if (selector) selector.title = caption;
+    }
+    syncSelectedCaption();
+    window.addEventListener('pageshow', syncSelectedCaption);
+    selector?.addEventListener('change', event => {
+        syncSelectedCaption();
         const url = new window.URL(window.location.href);
         url.searchParams.set('warehouse_id', event.currentTarget.value);
         url.searchParams.delete('page');

@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -116,13 +117,135 @@ class SingleBitrixProductImportTest(unittest.TestCase):
             category = connection.execute("SELECT id FROM erp_categories WHERE name='Watches'").fetchone()[0]
         return brand, category
 
-    def post_import(self, product, action="create", quantity=2):
+    def post_import(self, product, action="create", quantity=2, **extra):
         brand, category = self.taxonomy()
         with mock.patch.object(web, "_bitrix_single_client", return_value=FakeBitrixClient(product)):
             return self.client.post(
                 "/api/v1/bitrix-products/{}/import".format(product["external_product_id"]),
-                json={"action": action, "quantity": quantity, "brand_id": brand, "category_id": category},
+                json={"action": action, "quantity": quantity, "brand_id": brand, "category_id": category, **extra},
             )
+
+    def warehouse_stock(self, product_id, warehouse_id):
+        from app.services.component_inventory import balance
+        with CatalogDatabase(self.database_path).connect() as connection:
+            return balance(connection, product_id, require_initialized=False, warehouse_id=warehouse_id)
+
+    def test_new_hong_kong_import_posts_only_entered_quantity_to_selected_warehouse(self):
+        source = source_product("901", article="HK-901", image=False)
+        source["stock"] = 999
+        response = self.post_import(source, quantity=7, warehouse_id="hong-kong")
+        self.assertEqual(response.status_code, 201, response.get_json())
+        data = response.get_json()["data"]
+        pid = data["erp_product_id"]
+        self.assertEqual((data["warehouse_id"], data["warehouse_stock"], data["product"]["stock"]), ("hong-kong", 7, 7))
+        self.assertEqual(self.warehouse_stock(pid, "default"), 0)
+        self.assertEqual(self.warehouse_stock(pid, "hong-kong"), 7)
+        with CatalogDatabase(self.database_path).connect() as connection:
+            card = connection.execute("SELECT bitrix_external_product_id,stock FROM catalog_excel_products WHERE id=?", (pid,)).fetchone()
+            self.assertEqual(tuple(card), ("901", 0))
+            receipt = connection.execute("SELECT warehouse_id,metadata_json FROM erp_receipts WHERE id=?", (data["receipt_id"],)).fetchone()
+            self.assertEqual(receipt["warehouse_id"], "hong-kong")
+            self.assertEqual(json.loads(receipt["metadata_json"])["warehouse_id"], "hong-kong")
+            movement = connection.execute("SELECT warehouse_id,stock_before,stock_after,quantity_delta FROM catalog_stock_movements WHERE receipt_id=?", (data["receipt_id"],)).fetchone()
+            self.assertEqual(tuple(movement), ("hong-kong", 0, 7, 7))
+
+    def test_existing_card_and_bitrix_link_are_shared_between_warehouses(self):
+        source = source_product("902", article="SHARED-902", image=False)
+        ttt = self.post_import(source, quantity=3).get_json()["data"]
+        pid = ttt["erp_product_id"]
+        for quantity in (4, 2):
+            response = self.post_import(source, action="update", quantity=quantity, warehouse_id="hong-kong")
+            self.assertEqual(response.status_code, 200, response.get_json())
+            self.assertEqual(response.get_json()["data"]["erp_product_id"], pid)
+        self.assertEqual(self.warehouse_stock(pid, "default"), 3)
+        self.assertEqual(self.warehouse_stock(pid, "hong-kong"), 6)
+        response = self.post_import(source, action="update", quantity=1, warehouse_id="default")
+        self.assertEqual(response.get_json()["data"]["product"]["stock"], 4)
+        self.assertEqual(self.warehouse_stock(pid, "hong-kong"), 6)
+        with CatalogDatabase(self.database_path).connect() as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM catalog_excel_products WHERE bitrix_external_product_id='902'").fetchone()[0], 1)
+
+    def test_invalid_or_aggregate_warehouse_is_rejected_before_bitrix_or_writes(self):
+        with CatalogDatabase(self.database_path).transaction() as connection:
+            connection.execute("UPDATE erp_warehouses SET active=0 WHERE id='hong-kong'")
+        for warehouse in ("all", "missing", "", None, True, 1, [], {}, "hong-kong"):
+            with self.subTest(warehouse=warehouse), mock.patch.object(web, "_bitrix_single_client", side_effect=AssertionError("must reject before external access")):
+                response = self.client.post("/api/v1/bitrix-products/903/import", json={"quantity": 1, "warehouse_id": warehouse})
+                self.assertEqual(response.status_code, 422, response.get_json())
+        with CatalogDatabase(self.database_path).connect() as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM erp_receipts").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM catalog_stock_movements").fetchone()[0], 0)
+
+    def test_zero_quantity_hong_kong_import_does_not_copy_site_stock(self):
+        response = self.post_import(source_product("904", article="HK-ZERO", image=False), quantity=0, warehouse_id="hong-kong")
+        self.assertEqual(response.status_code, 201, response.get_json())
+        data = response.get_json()["data"]
+        self.assertIsNone(data["receipt_id"])
+        self.assertEqual(data["warehouse_id"], "hong-kong")
+        self.assertEqual(self.warehouse_stock(data["erp_product_id"], "default"), 0)
+        self.assertEqual(self.warehouse_stock(data["erp_product_id"], "hong-kong"), 0)
+
+    def test_hong_kong_post_failure_rolls_back_card_receipt_and_stocks(self):
+        from app.services.receipt_inventory import ReceiptInventory
+        post = ReceiptInventory._post_draft
+        def fail_after_post(*args, **kwargs):
+            post(*args, **kwargs)
+            raise ValueError("rollback after warehouse posting")
+        with mock.patch.object(ReceiptInventory, "_post_draft", side_effect=fail_after_post):
+            response = self.post_import(source_product("905", article="HK-FAIL", image=False), warehouse_id="hong-kong")
+        self.assertEqual(response.status_code, 422)
+        with CatalogDatabase(self.database_path).connect() as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM catalog_excel_products WHERE bitrix_external_product_id='905'").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM erp_receipts").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM catalog_stock_movements").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM erp_warehouse_stocks WHERE warehouse_id='hong-kong'").fetchone()[0], 0)
+
+    def test_supply_import_keeps_document_warehouse_and_does_not_post_quantity(self):
+        from app.services.supplies import SupplyEngine
+        source = source_product()
+        pid = self.post_import(source, quantity=3).get_json()["data"]["erp_product_id"]
+        engine = SupplyEngine(CatalogDatabase(self.database_path))
+        supply = engine.create("Hong Kong supply", warehouse_id="hong-kong")
+        with mock.patch.object(web, "_bitrix_single_client", return_value=FakeBitrixClient(source)):
+            response = self.client.post("/api/v1/bitrix-products/501/import", json={"supply_id": supply["id"], "warehouse_id": "default", "quantity": 99})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["data"]["erp_product_id"], pid)
+        self.assertEqual(self.warehouse_stock(pid, "default"), 3)
+        self.assertEqual(self.warehouse_stock(pid, "hong-kong"), 0)
+        engine.add_item(supply["id"], pid, 2, key="hk-resolve-item")
+        engine.post(supply["id"])
+        self.assertEqual(self.warehouse_stock(pid, "default"), 3)
+        self.assertEqual(self.warehouse_stock(pid, "hong-kong"), 2)
+
+    def test_import_modal_uses_selected_warehouse_and_all_requires_choice(self):
+        for warehouse in ("default", "hong-kong", "all"):
+            with self.subTest(warehouse=warehouse):
+                response = self.client.get("/warehouse?warehouse_id=" + warehouse)
+                self.assertEqual(response.status_code, 200)
+                html = response.get_data(as_text=True)
+                field = re.search(r'<(input|select) id="bitrixImportWarehouse"([^>]*)>', html)
+                self.assertIsNotNone(field)
+                if warehouse == "all":
+                    self.assertEqual(field.group(1), "select")
+                    self.assertTrue(html[field.end():].lstrip().startswith('<option value="">'))
+                    self.assertIn("required", field.group(2))
+                else:
+                    self.assertIn('value="' + warehouse + '"', field.group(2))
+                    self.assertIn('type="hidden"', field.group(2))
+
+    def test_hong_kong_component_import_does_not_require_or_confirm_ttt_physical_stock(self):
+        from app.services.product_bundles import ProductBundles
+        source = source_product("906", article="HK-COMPONENT", image=False)
+        component = self.post_import(source, quantity=5).get_json()["data"]["erp_product_id"]
+        parent = self.post_import(source_product("907", article="HK-BUNDLE", image=False), quantity=0).get_json()["data"]["erp_product_id"]
+        database = CatalogDatabase(self.database_path)
+        ProductBundles(database).configure(parent, [{"component_id": component, "quantity": 1}])
+        response = self.post_import(source, quantity=2, warehouse_id="hong-kong")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(self.warehouse_stock(component, "hong-kong"), 2)
+        with database.connect() as connection:
+            self.assertIsNone(connection.execute("SELECT physical_stock FROM erp_component_inventory WHERE product_id=?", (component,)).fetchone()[0])
+            self.assertEqual(connection.execute("SELECT stock FROM catalog_excel_products WHERE id=?", (component,)).fetchone()[0], 5)
 
     def test_search_and_import_one_product_with_local_photo(self):
         product = source_product()
@@ -419,22 +542,48 @@ const handler = JSON.parse(fs.readFileSync(0, 'utf8'));
 const elements = new Map();
 const document = {
   getElementById(id) {
-    if (!elements.has(id)) elements.set(id, {value: id === 'bitrixImportQuantity' ? '1' : ''});
+    if (!elements.has(id)) elements.set(id, {
+      value: id === 'bitrixImportQuantity' ? '1' : id === 'bitrixImportWarehouse' ? 'hong-kong' : '',
+      focus() {},
+    });
     return elements.get(id);
   },
   querySelector() { return {value: 'csrf'}; },
 };
-let destination, errorMessage, responsePayload;
+let destination, errorMessage, responsePayload, requestCount = 0, submitted;
 const window = {location: {assign(url) { destination = url; }}};
-const fetch = async () => ({ok: true, json: async () => responsePayload});
+const fetch = async (url, options) => {
+  requestCount += 1;
+  submitted = JSON.parse(options.body);
+  return {ok: true, json: async () => responsePayload};
+};
 let bitrixSelectedProduct = {bitrix_id: 199954}, bitrixSubmitting = false;
 const bitrixImportMessage = message => { errorMessage = message; };
 const submit = eval('(async function(action) {' + handler + ')');
 (async () => {
-  responsePayload = {ok: true, data: {erp_product_id: 8345, product: {id: 8345, article: 'fashion-389-53-20-mm'}}};
-  await submit('update');
-  assert.equal(new URL(destination, 'https://erp.test').searchParams.get('q'), 'fashion-389-53-20-mm');
-  for (const payload of [{ok: false, message: 'DB failed'}, {ok: true, data: {}}, {ok: true, data: {erp_product_id: 8345, product: {id: 999, article: 'other'}}}]) {
+  const field = document.getElementById('bitrixImportWarehouse');
+  for (const warehouse of ['default', 'hong-kong']) {
+    field.value = warehouse;
+    responsePayload = {ok: true, data: {warehouse_id: warehouse, erp_product_id: 8345, product: {id: 8345, article: 'fashion-389-53-20-mm'}}};
+    await submit('update');
+    const url = new URL(destination, 'https://erp.test');
+    assert.equal(url.searchParams.get('q'), 'fashion-389-53-20-mm');
+    assert.equal(url.searchParams.get('warehouse_id'), warehouse);
+    assert.equal(submitted.warehouse_id, warehouse);
+    assert.equal(submitted.quantity, 1);
+    assert.equal(field.disabled, false);
+  }
+  for (const value of ['', 'all']) {
+    field.value = value;
+    const before = requestCount;
+    destination = null;
+    await submit('create');
+    assert.equal(requestCount, before);
+    assert.equal(destination, null);
+    assert.ok(errorMessage);
+  }
+  field.value = 'hong-kong';
+  for (const payload of [{ok: false, message: 'DB failed'}, {ok: true, data: {}}, {ok: true, data: {erp_product_id: 8345, product: {id: 999, article: 'other'}}}, {ok: true, data: {warehouse_id: 'default', erp_product_id: 8345, product: {id: 8345, article: 'same'}}}]) {
     destination = null;
     responsePayload = payload;
     await submit('update');
