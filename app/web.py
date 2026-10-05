@@ -211,7 +211,6 @@ from app.services.sms import (
     SmsValidationError,
     mask_phone as mask_sms_phone,
     new_client_message_id,
-    render_template_text,
     sms_segments,
     status_label as sms_status_label,
 )
@@ -25130,6 +25129,9 @@ def sms_compose_defaults():
 
 def validated_sms_payload(values):
     payload = dict(values or {})
+    # Template values are server-owned; never trust a browser-supplied waybill/name.
+    payload["tracking_number"] = ""
+    payload["client_name"] = ""
     customer = None
     operations = []
     customer_id = str(payload.get("customer_id") or "").strip()
@@ -25141,6 +25143,7 @@ def validated_sms_payload(values):
             raise SmsValidationError("Клиент не найден")
         payload["customer_id"] = int(customer_id)
         payload["customer_name"] = customer.get("name") or ""
+        payload["client_name"] = payload["customer_name"]
         operations = customer_store().operations(int(customer_id), page=1, per_page=200)["rows"]
     order_id = str(payload.get("order_id") or "").strip()
     if order_id:
@@ -25157,6 +25160,15 @@ def validated_sms_payload(values):
         payload["order_number"] = operation.get("number") or operation.get("external_id") or order_id
         payload["order_status"] = operation.get("status_name") or operation.get("status") or ""
         payload["amount"] = operation.get("order_total") if operation.get("order_total") is not None else operation.get("amount") or ""
+        try:
+            order = OrdersSnapshotStore().get(order_id)
+        except sqlite3.Error:
+            order = None
+        if order:
+            payload["tracking_number"] = get_order_tracking(order)
+            payload["client_name"] = str(order.get("first_name") or order.get("customer") or "").strip()
+        else:
+            payload["client_name"] = ""
     repair_id = str(payload.get("repair_id") or "").strip()
     if repair_id:
         operation = next((row for row in operations if row.get("operation_type") == "repair" and repair_id in {str(row.get("external_id") or ""), str(row.get("local_ref") or "")}), None)
@@ -25167,6 +25179,17 @@ def validated_sms_payload(values):
             raise SmsValidationError("Связанный ремонт не найден")
         payload["repair_number"] = (case or {}).get("repair_number") or (operation or {}).get("external_id") or repair_id
     return payload
+
+
+@app.post("/api/v1/sms/templates/preview")
+def sms_template_preview():
+    require_sms_permission("send")
+    try:
+        payload = validated_sms_payload(request.get_json(silent=True) or {})
+        text = sms_store().render_saved_template(payload.get("template_id"), payload)
+    except (SmsValidationError, sqlite3.Error) as error:
+        return api_error("SMS_INVALID", str(error), 422)
+    return api_success({"text": text})
 
 
 def refresh_sms_integration(store, client):
@@ -25257,16 +25280,8 @@ def sms_message_send():
     actor = sms_actor()
     template_id = payload.get("template_id")
     if template_id:
-        template = next((row for row in sms_store().templates(active_only=True) if str(row["id"]) == str(template_id)), None)
-        if not template:
-            return api_error("SMS_TEMPLATE_INVALID", "Шаблон недоступен.", 422)
         try:
-            payload["text"] = render_template_text(
-                template["message_text"],
-                {key: payload.get(key) for key in (
-                    "client_name", "order_number", "order_status", "amount", "repair_number",
-                )},
-            )
+            payload["text"] = sms_store().render_saved_template(template_id, payload)
         except SmsValidationError as error:
             return api_error("SMS_INVALID", str(error), 422)
     try:
