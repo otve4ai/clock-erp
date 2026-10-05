@@ -1,3 +1,5 @@
+import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +13,7 @@ from app.services.supplies import SupplyEngine
 from app.services.component_inventory import balance
 from app.services.warehouse_transfers import WarehouseTransfers, TransferError, distribution
 from app.services.sales_inventory import SalesInventory
+from app.services.recovery_v2 import RecoveryError, inspect_instance
 
 
 class MultiwarehouseTest(unittest.TestCase):
@@ -32,6 +35,31 @@ class MultiwarehouseTest(unittest.TestCase):
 
     def transfer(self, quantity=4, key='transfer-1'):
         return self.transfers.create('default', 'hong-kong', [{'product_id': self.pid, 'quantity': quantity}], key, 'tester')
+
+    def test_recovery_contract_requires_transfer_documents(self):
+        contract_path = Path(__file__).resolve().parents[1] / 'ops' / 'recovery-schema-contract.json'
+        tables = json.loads(contract_path.read_text(encoding='utf-8'))['databases']['catalog.db']
+        contract = {'databases': {'catalog.db': tables}}
+        doc = self.transfer()
+        self.transfers.transition(doc['id'], 'send')
+        manifest = inspect_instance(self.temp.name, contract)
+        self.assertEqual(manifest['catalog.db']['critical_tables'], sorted(tables))
+        for missing in ('erp_stock_transfers', 'erp_stock_transfer_items'):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                self.assertIn(missing, tables)
+                # Synthetic incomplete backup: each required table except one.
+                with sqlite3.connect(str(Path(directory) / 'catalog.db')) as connection:
+                    for table in tables:
+                        if table != missing:
+                            quoted = table.replace('"', '""')
+                            connection.execute('CREATE TABLE "{}" (id INTEGER)'.format(quoted))
+                with self.assertRaises(RecoveryError) as error:
+                    inspect_instance(directory, contract)
+                self.assertEqual(error.exception.code, 'CRITICAL_TABLE_MISSING')
+        self.assertEqual((self.stock(), self.stock('hong-kong')), (6, 0))
+        with self.db.connect() as connection:
+            rows = distribution(connection, [self.pid])[self.pid]
+            self.assertEqual(sum(row['quantity'] + row['in_transit'] for row in rows), 10)
 
     def test_transit_and_retry_preserve_company_quantity(self):
         doc = self.transfer()
