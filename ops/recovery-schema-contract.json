@@ -12,6 +12,8 @@
       "erp_sales",
       "erp_receipts",
       "erp_required_straps",
+      "erp_stock_transfers",
+      "erp_stock_transfer_items",
       "erp_warehouse_stocks",
       "erp_warehouses"
     ],

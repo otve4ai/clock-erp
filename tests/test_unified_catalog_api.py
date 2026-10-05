@@ -191,9 +191,34 @@ class UnifiedCatalogApiTest(unittest.TestCase):
         self.assertEqual(self.client.delete('/api/v1/receipts/supplies/'+draft['id']).status_code,200)
         self.assertEqual(self.stock(),0)
         movements=self.client.get('/api/v1/products/{}/movements'.format(product['id'])).get_json()['data']
-        self.assertEqual({m['type'] for m in movements},{'sale','cancellation'})
+        self.assertEqual({m['type'] for m in movements},{'receipt','sale','cancellation'})
         rows=self.client.get('/api/v1/receipts/movements').get_json()['data']
-        self.assertEqual({m['source_type'] for m in rows},{'sale_cancellation'})
+        self.assertEqual({m['source_type'] for m in rows},{'supply','sale_cancellation'})
+        self.moysklad_class.assert_not_called()
+
+    def test_new_amazon_sale_uses_hk_picker_and_stock(self):
+        from app.services.manual_receipts import ManualReceipts
+        from app.services.component_inventory import balance
+        db = CatalogDatabase(self.database_path)
+        receipts = ManualReceipts(db)
+        doc = receipts.create('hong-kong','initial_stock',[{'product_id':self.product['id'],'quantity':3}])
+        receipts.post(doc['id'])
+        response = self.client.get('/api/v1/catalog/options?type=product&warehouse_id=hong-kong&available_for_sale=true')
+        self.assertEqual(response.status_code, 200)
+        selected = next(p for p in response.json['data'] if int(p['id']) == int(self.product['id']))
+        self.assertEqual(selected['stock'], 3)
+        sale = self.client.post('/api/v1/sales', json={
+            'source':'Amazon','created_at':'2026-10-05','product_id':str(self.product['id']), 'quantity':1,
+            'unit_price':1000,'order_number':'AMAZON-HK-TEST'})
+        self.assertEqual(sale.status_code, 201, sale.json)
+        self.assertEqual(sale.json['data']['warehouse_id'], 'hong-kong')
+        sale_id = sale.json['data']['id']
+        updated = self.client.patch('/api/v1/sales/' + sale_id, json={'note':'HK preserved'})
+        self.assertEqual(updated.status_code, 200, updated.json)
+        self.assertEqual(updated.json['data']['warehouse_id'], 'hong-kong')
+        with db.connect() as c:
+            self.assertEqual(balance(c, self.product['id']), 0)
+            self.assertEqual(balance(c, self.product['id'], warehouse_id='hong-kong'), 2)
         self.moysklad_class.assert_not_called()
 
 

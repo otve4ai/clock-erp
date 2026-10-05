@@ -48,6 +48,8 @@ class InventorySnapshotRestoration:
     def _plan(self, connection, brand_name, session_id=None):
         brand = self._brand(connection, brand_name)
         session = self._session(connection, brand["id"], session_id)
+        if session['warehouse_id'] not in (None, 'default'):
+            raise InventoryRestorationError('Восстановление старого снимка поддерживает только TTT. Для другого склада проведите новый пересчёт.')
         items = connection.execute(
             "SELECT i.id AS item_id, i.product_id, i.snapshot_stock, "
             "p.excel_name_raw AS name, COALESCE(p.excel_article,'') AS article, "

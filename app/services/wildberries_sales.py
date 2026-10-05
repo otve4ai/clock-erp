@@ -24,7 +24,7 @@ class WildberriesSales:
             ).fetchone()
         return self.inventory.get_sale(row["id"]) if row else None
 
-    def conduct(self, order, user_name="", audit_actor=None, replacement=None, straps=None):
+    def conduct(self, order, user_name="", audit_actor=None, replacement=None, straps=None, warehouse_id='default'):
         order_id = str((order or {}).get("wb_order_id") or "").strip()
         if not order_id or order.get("source") != "wildberries":
             raise SalesInventoryError("Заказ Wildberries не найден")
@@ -86,6 +86,7 @@ class WildberriesSales:
             raise SalesInventoryError("Не удалось определить товар ERP для заказа Wildberries")
         payload = {
             "source": "wildberries", "sale_type": "automatic",
+            "warehouse_id": warehouse_id,
             "order_id": order_id, "external_order_id": order_id,
             "order_number": order_id,
             "order_created_at": order.get("created_at") or "",

@@ -332,7 +332,7 @@ test('admin edits and deletes a posted supply through the two-stage preview', as
   });
   await expect(page.locator('#delete-preview-dialog')).not.toBeVisible();
   expect(deleteRequests).toBe(1);
-  await expect(page.locator('#message')).toContainText('Поставка удалена');
+  await expect(page.locator('#message')).toContainText('Поставка аннулирована');
   await expect(page.locator('#records')).not.toContainText('Delete preview edited');
 });
 

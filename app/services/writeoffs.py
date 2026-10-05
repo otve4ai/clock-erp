@@ -2,7 +2,7 @@
 import uuid
 from app.catalog_db import CatalogDatabase
 from app.services.audit_journal import AuditJournal
-from app.services.component_inventory import balance, remember, write_balance
+from app.services.component_inventory import balance, remember, write_balance, document_warehouse
 from app.services.inventory_lock import assert_products_unlocked
 from app.services.product_bundles import physical_lines
 from app.services.sales_inventory import SalesInventoryError, InsufficientStockError, now_iso
@@ -34,10 +34,11 @@ class Writeoffs:
             raise SalesInventoryError('Слишком длинный комментарий или ключ операции.')
         wid, timestamp = uuid.uuid4().hex, now_iso()
         with self.database.transaction() as c:
+            warehouse_id = document_warehouse(c, warehouse_id=payload.get('warehouse_id') or 'default')
             if key:
                 old = c.execute('SELECT * FROM erp_writeoffs WHERE idempotency_key=?', (key,)).fetchone()
                 if old:
-                    if (old['product_id'], old['quantity'], old['reason'], old['comment']) != (pid, quantity, reason, comment):
+                    if (old['product_id'], old['quantity'], old['reason'], old['comment'], old['warehouse_id']) != (pid, quantity, reason, comment, warehouse_id):
                         raise SalesInventoryError('Ключ операции уже использован для другого списания.')
                     return dict(old)
             product = c.execute('SELECT p.*, b.name AS brand_name, k.name AS category_name FROM catalog_excel_products p LEFT JOIN erp_brands b ON b.id=p.brand_id LEFT JOIN erp_categories k ON k.id=p.category_id WHERE p.id=? AND p.active=1', (pid,)).fetchone()
@@ -45,11 +46,12 @@ class Writeoffs:
                 raise SalesInventoryError('Товар не найден.')
             lines = physical_lines(c, pid, quantity)
             assert_products_unlocked(c, [pid] + [p for p, _ in lines], SalesInventoryError)
-            available = min(balance(c, p) // (q // quantity) for p, q in lines)
+            available = min(balance(c, p, warehouse_id=warehouse_id) // (q // quantity) for p, q in lines)
             if available < quantity:
                 raise InsufficientStockError(available)
             c.execute('INSERT INTO erp_writeoffs (id,product_id,quantity,reason,comment,status,created_at,created_by,created_by_name,idempotency_key,product_name,article,brand,category) VALUES (?,?,?,?,?,\'posted\',?,?,?,?,?,?,?,?)',
                       (wid,pid,quantity,reason,comment,timestamp,actor.get('actor_id',''),actor.get('actor_name',''),key or None,product['excel_name_raw'],product['excel_article'],product['brand_name'] or product['excel_brand'],product['category_name'] or product['excel_category']))
+            c.execute('UPDATE erp_writeoffs SET warehouse_id=? WHERE id=?', (warehouse_id, wid))
             for physical_id, amount in lines:
                 c.execute('INSERT INTO erp_writeoff_items VALUES (?,?,?)', (wid,physical_id,amount))
                 remember(c, physical_id, ('writeoff',wid))
@@ -81,7 +83,7 @@ class Writeoffs:
         after = before + delta
         write_balance(c,pid,after,'writeoff',timestamp,document)
         label = 'Списание' if operation == 'post' else 'Отмена списания'
-        c.execute("INSERT INTO catalog_stock_movements (id,product_id,movement_type,quantity_delta,stock_before,stock_after,source_type,source_id,source_line_id,operation_kind,source,user_name,comment,created_at) VALUES (?,?,'manual_adjustment',?,?,?,'writeoff',?,?,?,?,?,?,?)", (uuid.uuid4().hex,pid,delta,before,after,wid,str(pid),operation,label,actor.get('actor_name',''),reason + (': '+comment if comment else ''),timestamp))
+        c.execute("INSERT INTO catalog_stock_movements (id,product_id,movement_type,quantity_delta,stock_before,stock_after,source_type,source_id,source_line_id,operation_kind,source,user_name,comment,created_at,warehouse_id) VALUES (?,?,'manual_adjustment',?,?,?,'writeoff',?,?,?,?,?,?,?,?)", (uuid.uuid4().hex,pid,delta,before,after,wid,str(pid),operation,label,actor.get('actor_name',''),reason + (': '+comment if comment else ''),timestamp,document_warehouse(c, document)))
         AuditJournal(self.database).record('product',str(pid),'updated',label,reason,
             before={'stock':before},after={'stock':after},metadata={'writeoff_id':wid,'quantity_delta':delta,'comment':comment},
             source=label,connection=c,**actor)
@@ -104,5 +106,5 @@ class Writeoffs:
             c.create_function('casefold', 1, lambda value: str(value or '').casefold())
             total = c.execute('SELECT COUNT(*) FROM erp_writeoffs w'+where,params).fetchone()[0]
             page = min(page,max(1,(total+size-1)//size))
-            rows = c.execute('SELECT w.* FROM erp_writeoffs w'+where+' ORDER BY w.created_at DESC,w.id DESC LIMIT ? OFFSET ?',params+[size,(page-1)*size]).fetchall()
+            rows = c.execute("SELECT w.*,(SELECT name FROM erp_warehouses WHERE id=w.warehouse_id) AS warehouse_name FROM erp_writeoffs w"+where+' ORDER BY w.created_at DESC,w.id DESC LIMIT ? OFFSET ?',params+[size,(page-1)*size]).fetchall()
         return {'rows':[dict(r) for r in rows], 'total':total,'page':page,'per_page':size}

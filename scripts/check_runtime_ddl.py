@@ -124,7 +124,7 @@ def main():
     current_ensures = {}
     function_index = {}
     for path in sorted((root / "app").rglob("*.py")):
-        relative = str(path.relative_to(root))
+        relative = path.relative_to(root).as_posix()
         unused_source, unused_tree, definitions = functions(path)
         function_index[relative] = {
             symbol: (node, segment) for symbol, node, segment in definitions
@@ -154,7 +154,7 @@ def main():
         item["file"]: item for item in inventory.get("migration_modules", [])
     }
     for relative, item in sorted(controlled_migration_files.items()):
-        actual = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+        actual = hashlib.sha256((root / relative).read_bytes().replace(b'\r\n', b'\n')).hexdigest()
         if actual != item["sha256"]:
             errors.append("migration module checksum changed: {}".format(relative))
     for key, item in sorted(expected_containers.items()):
@@ -174,7 +174,7 @@ def main():
 
     allowed_runtime = set(expected_containers) | set(expected_ensures)
     for path in sorted((root / "app").rglob("*.py")):
-        relative = str(path.relative_to(root))
+        relative = path.relative_to(root).as_posix()
         if relative in controlled_migration_files:
             continue
         for symbol in sorted(ddl_containers(path)):
@@ -205,7 +205,7 @@ def main():
 
     for item in inventory["legacy_scripts"]:
         path = root / item["file"]
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        actual = hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n')).hexdigest()
         if actual != item["sha256"]:
             errors.append("legacy migration checksum changed: {}".format(item["file"]))
 

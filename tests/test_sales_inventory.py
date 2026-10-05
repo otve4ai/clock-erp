@@ -1267,6 +1267,8 @@ class SalesInventoryWebTest(SalesInventoryTest):
         payload.update({
             "created_at": "2026-08-04T14:14",
             "source": source,
+            # Historical channel sales stay on their original warehouse.
+            "warehouse_id": "default",
             "order_number": "ORDER-{}".format(sale_id),
             "order_status": "completed",
         })
@@ -1335,6 +1337,7 @@ class SalesInventoryWebTest(SalesInventoryTest):
             "created_at": "2026-08-04T14:14",
             "order_status": "completed",
             "metadata_marker": "сохранить",
+            "warehouse_id": "default",
             **metadata,
         })
         return self.inventory.create_sale(
@@ -1458,6 +1461,7 @@ class SalesInventoryWebTest(SalesInventoryTest):
                 "created_at": "2026-08-04T14:14",
                 "source": source,
                 "order_number": "OLD-{}".format(index),
+                "warehouse_id": "default",
                 "delivery_cost": "250.00",
                 "original_unit_price": "1000",
                 "discount_type": "percent",

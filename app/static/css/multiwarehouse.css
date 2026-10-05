@@ -1,0 +1,28 @@
+#warehouseSelector {border:0;background:transparent;color:inherit;font:inherit;max-width:230px;}
+/* The warehouse selector can move the toolbar below the mobile fold. Keep
+   column settings inside the viewport, including with a short screen. */
+@media (max-width:767px) {
+    .warehouse-page .warehouse-column-settings .warehouse-column-settings-panel {
+        position:fixed;top:50%;left:50%;right:auto;
+        transform:translate(-50%,-50%);
+        max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);
+        overflow-y:auto;
+    }
+}
+.other-warehouse-dot {display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;width:20px;height:24px;padding:0;border:0;background:transparent;cursor:pointer;}
+.other-warehouse-dot span {display:block;width:8px;height:8px;border-radius:50%;background:var(--warehouse-dot);}
+.other-warehouse-dot.is-in-transit span {background:transparent;border:1px dashed var(--warehouse-dot);}
+.other-warehouse-dot:focus-visible {outline:2px solid var(--warehouse-dot);border-radius:4px;}
+.warehouse-dot-detail {position:absolute;z-index:20;padding:8px 12px;border:1px solid #ccd7e5;border-radius:8px;background:var(--erp-surface,#fff);color:var(--erp-text,#172b44);box-shadow:0 3px 12px #1232;white-space:nowrap;font-weight:400;}
+.transfer-workspace {max-width:1100px;margin:32px auto;padding:20px;font:14px system-ui;}
+.transfers-page {margin:0;background:var(--erp-bg,#f4f6f8);color:var(--erp-text,#172b44);}
+.transfers-page .main {min-width:0;overflow:auto;}
+.transfer-workspace * {box-sizing:border-box;}
+.transfer-workspace td {white-space:pre-line;overflow-wrap:anywhere;}
+.transfer-workspace button {cursor:pointer;}
+@media(max-width:600px) {.transfer-workspace {margin:0;padding:14px;}.transfer-workspace form label {width:100%;}.transfer-workspace table {font-size:12px;}.transfer-workspace td,.transfer-workspace th {padding:6px;}}
+.transfer-workspace input,.transfer-workspace select,.transfer-workspace button {font:inherit;padding:8px;border:1px solid #cbd5e1;border-radius:6px;}
+.transfer-workspace table {width:100%;border-collapse:collapse;margin:18px 0;}
+.transfer-workspace td,.transfer-workspace th {padding:12px;border-bottom:1px solid #dbe3ef;text-align:left;}
+.transfer-workspace form {display:flex;gap:12px;flex-wrap:wrap;align-items:end;}
+.transfer-workspace label {display:flex;flex-direction:column;gap:4px;}

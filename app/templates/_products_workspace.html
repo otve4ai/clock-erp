@@ -1,10 +1,18 @@
-{% macro products_workspace_header(active_view, product_metrics, add_button=false, export_filtered_url='', site_status_sync=none, can_sync_site_status=false, site_status_sync_csrf='') %}
+{% macro products_workspace_header(active_view, product_metrics, add_button=false, export_filtered_url='', site_status_sync=none, can_sync_site_status=false, site_status_sync_csrf='', warehouses=none, selected_warehouse='default') %}
 <header class="erp-workspace-header products-workspace-header">
     <div class="erp-workspace-heading">
         <h1>Товары</h1>
         <p>Каталог и складские остатки</p>
     </div>
     <div class="erp-workspace-actions products-workspace-actions">
+        {% if warehouses %}
+        <label class="products-workspace-button">Склад:
+            <select id="warehouseSelector" aria-label="Склад" onchange="const u=new URL(location.href);u.searchParams.set('warehouse_id',this.value);u.searchParams.delete('page');location.assign(u.href)">
+            {% for warehouse in warehouses %}<option value="{{ warehouse.id }}"{% if selected_warehouse == warehouse.id %} selected{% endif %}>{{ warehouse.name }}</option>{% endfor %}
+            <option value="all"{% if selected_warehouse == 'all' %} selected{% endif %}>Все склады (с учётом пути)</option>
+            </select>
+        </label>
+        {% endif %}
         {% if active_view == 'products' and site_status_sync is not none %}
             {% include "_product_site_status_indicator.html" %}
         {% endif %}
@@ -12,7 +20,8 @@
             <div class="products-add-menu products-actions-menu">
                 <button id="productsActionsToggle" class="products-workspace-button" type="button" aria-haspopup="menu" aria-expanded="false" onclick="toggleProductsActionsMenu(event)">Действия ▾</button>
                 <div id="productsActionsMenu" class="products-add-menu-list" role="menu" hidden>
-                    <button id="openProductExport" type="button" role="menuitem">Экспорт в Excel</button>
+                    <button id="openProductExport" type="button" role="menuitem"{% if selected_warehouse != 'default' %} disabled title="На первом этапе экспорт доступен только для TTT"{% endif %}>Экспорт в Excel</button>
+                    {% if warehouses %}<a href="/warehouse/transfers" role="menuitem">Перемещения</a>{% endif %}
                 </div>
             </div>
         {% endif %}

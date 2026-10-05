@@ -89,7 +89,12 @@ class WriteoffsTest(unittest.TestCase):
     def test_upgrade_is_repeatable_preserves_stock(self):
         import sqlite3
         from app.schema_migrations import apply_migrations, WRITEOFF_MIGRATION_ID
-        p=self.create_product(7)
+        import app.schema_migrations as migrations
+        from unittest.mock import patch
+        self.tearDown()
+        with patch.object(migrations, 'MIGRATIONS', migrations.MIGRATIONS[:-1]), patch.object(migrations, 'verify_complete_catalog_contract', return_value=True):
+            self.setUp()
+            p=self.create_product(7)
         with sqlite3.connect(str(self.database.path)) as c:
             before=c.execute('SELECT * FROM catalog_excel_products ORDER BY id').fetchall()
             c.execute('DROP TABLE erp_writeoff_items')

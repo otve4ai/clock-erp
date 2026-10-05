@@ -60,7 +60,10 @@ class SupplyEngine:
             if key:
                 previous = connection.execute('SELECT id FROM erp_receipts WHERE tenant_id = ? AND idempotency_key = ?', ('default', 'supply:' + key)).fetchone()
                 if previous:
-                    return self._get(connection, previous['id'])
+                    existing = self._get(connection, previous['id'])
+                    if existing['warehouse_id'] != warehouse['id']:
+                        raise SupplyError('Ключ операции уже использован для другого склада.')
+                    return existing
             supply_id = 'supply:' + uuid.uuid4().hex
             metadata = {'source_type': 'supply', 'title': title, 'created_by': actor,
                         'created_at': now, 'posted_by': None, 'posted_at': None,
@@ -98,7 +101,9 @@ class SupplyEngine:
             row = connection.execute('SELECT id FROM catalog_excel_products WHERE id = ? AND active = 1 AND deleted_at IS NULL', (item['product_id'],)).fetchone()
             if row is None:
                 raise SupplyError('Товар не найден в ERP. Сначала добавьте его в каталог.')
-        products = ReceiptInventory._load_products(connection, prepared) if prepared else {}
+        for item in prepared:
+            remember(connection, item['product_id'], ('receipt', supply_id))
+        products = ReceiptInventory._load_products(connection, prepared, document=('receipt', supply_id)) if prepared else {}
         connection.execute('UPDATE erp_receipt_items SET active = 0 WHERE receipt_id = ?', (supply_id,))
         ReceiptInventory._insert_items(connection, supply_id, prepared, products, now)
 
@@ -141,7 +146,8 @@ class SupplyEngine:
             ).fetchone()
             if active is None:
                 raise SupplyError('Товар не найден в ERP. Сначала добавьте его в каталог.')
-            products = ReceiptInventory._load_products(connection, prepared)
+            remember(connection, product_id, ('receipt', supply_id))
+            products = ReceiptInventory._load_products(connection, prepared, document=('receipt', supply_id))
             assert_products_unlocked(connection, [product_id], SupplyError)
             existing = connection.execute(
                 'SELECT * FROM erp_receipt_items WHERE receipt_id = ? AND product_id = ? AND active = 1 ORDER BY id',
@@ -166,12 +172,12 @@ class SupplyEngine:
                     connection, warehouse, product_id, now
                 )
                 # The addition uses today's physical/legacy balance; old movements stay immutable.
-                stock_before = balance(connection, product_id)
+                stock_before = balance(connection, product_id, ('receipt', supply_id))
                 if not math.isfinite(stock_before) or stock_before < 0:
                     raise SupplyError('Остаток товара некорректен. Добавление остановлено.')
                 remember(connection, product_id, ('receipt', supply_id))
                 stock_after = stock_before + quantity
-                write_balance(connection, product_id, stock_after, 'receipt', now)
+                write_balance(connection, product_id, stock_after, 'receipt', now, ('receipt', supply_id))
                 ManualReceipts._set_warehouse_balance(
                     connection, warehouse['id'], product_id,
                     warehouse_before + quantity, now,
@@ -260,7 +266,7 @@ class SupplyEngine:
                 item['quantity'] = int(value)
             self._positions(items)
             for item in items:
-                stock = self._product(connection, item['product_id'])['stock']
+                stock = self._product(connection, item['product_id'], row['warehouse_id'])['stock']
                 if not math.isfinite(stock) or stock < 0:
                     raise SupplyError('Остаток товара некорректен. Проведение остановлено.')
             now = utc_now()
@@ -279,7 +285,7 @@ class SupplyEngine:
             meta = self._metadata(row)
             meta.update(posted_at=now, posted_by=actor)
             # Preserve historical card labels as well as actual before/after values.
-            meta['snapshots'] = {str(i['product_id']): self._product(connection, i['product_id']) for i in items}
+            meta['snapshots'] = {str(i['product_id']): self._product(connection, i['product_id'], row['warehouse_id']) for i in items}
             connection.execute(
                 "UPDATE erp_receipts SET metadata_json=?,operation_type='supply',posted_at=?,posted_by=? WHERE id=?",
                 (json.dumps(meta, ensure_ascii=False), now, actor or None, supply_id),
@@ -288,7 +294,7 @@ class SupplyEngine:
             return self._get(connection, supply_id)
 
     @staticmethod
-    def _product(connection, product_id):
+    def _product(connection, product_id, warehouse_id=None):
         row = connection.execute("SELECT p.id, p.local_image_path, p.excel_name_raw AS name, COALESCE(p.excel_article, '') AS article, COALESCE(b.name, p.excel_brand, '') AS brand, COALESCE(c.name, p.excel_category, '') AS category, COALESCE(p.bitrix_thumbnail_url, p.bitrix_primary_image_url, '') AS image_url, p.stock FROM catalog_excel_products p LEFT JOIN erp_brands b ON b.id = p.brand_id LEFT JOIN erp_categories c ON c.id = p.category_id WHERE p.id = ?", (product_id,)).fetchone()
         if row is None:
             raise SupplyError('Товар не найден.')
@@ -296,7 +302,7 @@ class SupplyEngine:
         local_image = result.pop('local_image_path', None)
         if local_image:
             result['image_url'] = '/product-images/' + Path(local_image).name
-        result['stock'] = balance(connection, product_id, require_initialized=False)
+        result['stock'] = balance(connection, product_id, require_initialized=False, warehouse_id=warehouse_id)
         return result
 
     def _get(self, connection, supply_id):
@@ -307,7 +313,7 @@ class SupplyEngine:
         result.pop('metadata_json', None)
         result['items'] = []
         for item in connection.execute('SELECT * FROM erp_receipt_items WHERE receipt_id = ? AND active = 1 ORDER BY id', (supply_id,)):
-            product = (meta.get('snapshots') or {}).get(str(item['product_id'])) or self._product(connection, item['product_id'])
+            product = (meta.get('snapshots') or {}).get(str(item['product_id'])) or self._product(connection, item['product_id'], row['warehouse_id'])
             movements = connection.execute("SELECT stock_before, stock_after FROM catalog_stock_movements WHERE receipt_item_id = ? AND operation_kind IN ('post', 'add') ORDER BY rowid", (item['id'],)).fetchall()
             before = movements[0]['stock_before'] if movements else product['stock']
             after = movements[-1]['stock_after'] if movements else before + item['quantity']
@@ -387,6 +393,7 @@ class SupplyEngine:
         rows = []
         represented = set()
         with self.database.connect() as connection:
+            warehouses = {r['id']: r['name'] for r in connection.execute('SELECT id,name FROM erp_warehouses')}
             for raw in connection.execute('SELECT * FROM catalog_stock_movements WHERE quantity_delta > 0 ORDER BY created_at DESC, id DESC'):
                 m = dict(raw)
                 kind = 'sale_cancellation' if m['movement_type'] == 'cancellation' else (m['source_type'] or m['movement_type'])
@@ -407,6 +414,7 @@ class SupplyEngine:
                 if kind == 'sale_cancellation':
                     represented.add('sale-cancellation:' + str(m['sale_id']))
                 rows.append(dict(product, id=m['id'], product_id=m['product_id'],
+                    warehouse_id=m['warehouse_id'] or 'default', warehouse_name=warehouses.get(m['warehouse_id'] or 'default', 'TTT'),
                     source_type=kind, source_id=source_id, sale_number=sale_number, source_line_id=m['source_line_id'] or m['sale_item_id'],
                     number=(receipt['number'] if receipt else m['source_number']) or '',
                     title=meta.get('title') or (receipt['number'] if receipt else m['source_number']) or str(source_id or ''),

@@ -5,6 +5,7 @@ from pathlib import Path
 from app.catalog_db import CatalogDatabase
 from app.schema_migrations import apply_migrations
 from app.services.brand_values import normalize_brand
+from app.services.excel_product_catalog import ExcelProductCatalog
 from scripts.restore_bitrix_brand import exact_brand, restore_brand
 from tests.test_bitrix_erp_product_sync import FakeClient, product
 
@@ -41,6 +42,13 @@ class RestoreBitrixBrandTest(unittest.TestCase):
             backup_root=self.root / "backups-first",
             image_root=self.root / "images",
         )
+        with self.database.connect() as connection:
+            product_id = connection.execute(
+                "SELECT id FROM catalog_excel_products WHERE bitrix_external_product_id='10'"
+            ).fetchone()[0]
+        ExcelProductCatalog(self.database).update_product(
+            product_id, stock=5, stock_reason="ERP adjustment before repeated restore"
+        )
         with self.database.transaction() as connection:
             connection.execute(
                 "UPDATE erp_brands SET name = 'Luch', normalized_name = 'luch' "
@@ -58,9 +66,14 @@ class RestoreBitrixBrandTest(unittest.TestCase):
 
         self.assertEqual(first["imported"], 1)
         self.assertEqual(first["stock_mismatch"], 0)
+        self.assertEqual(first['status'], 'success')
+        self.assertEqual(first['stock_report']['updated'], 0)
         self.assertEqual(first["other_brands_changed"], 0)
         self.assertEqual(second["imported"], 0)
         self.assertEqual(second["duplicates_skipped"], 1)
+        self.assertEqual(second["stock_mismatch"], 1)
+        self.assertEqual(second["status"], "reconciliation_required")
+        self.assertEqual(second["stock_report"]["updated"], 0)
         with self.database.connect() as connection:
             rows = connection.execute(
                 "SELECT excel_brand, stock, bitrix_external_product_id, "
@@ -72,7 +85,7 @@ class RestoreBitrixBrandTest(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(
             [tuple(row) for row in rows],
-            [("Луч", 7, "10", "731959996")],
+            [("Луч", 5, "10", "731959996")],
         )
         self.assertEqual(rows[0]["excel_article"], "731959996")
         self.assertEqual(brand, "Луч")

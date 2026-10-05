@@ -164,7 +164,9 @@ def restore_brand(client, database, brand="Луч", apply=False,
             for result in card_results
         ):
             raise RuntimeError("Brand restore produced unresolved product matches")
-        stock_report = BitrixStockSync(database).synchronize(active, apply=True)
+        # New cards retain the usual one-time TTT stock import. Existing cards
+        # are reconciled only: a repeated restore cannot undo ERP movements.
+        stock_report = BitrixStockSync(database).synchronize(active, apply=False)
         image_report = ProductImageImporter(database, store).run(
             [_image_record(product) for product in active],
             "bitrix",
@@ -217,6 +219,7 @@ def restore_brand(client, database, brand="Луч", apply=False,
         "stock_mismatch": len(stock_mismatches),
         "stock_mismatch_ids": stock_mismatches,
         "stock_report": stock_report,
+        "stock_authority": "erp",
         "photos": {
             "products_with_source_images": sum(
                 bool(product.get("images")) for product in active
@@ -239,6 +242,9 @@ def restore_brand(client, database, brand="Луч", apply=False,
         and report["other_brands_changed"] == 0
         and not report["photos"]["errors"]
     ) else "failed"
+    if (report['missing_after'] == 0 and report['stock_mismatch'] > 0
+            and report['other_brands_changed'] == 0 and not report['photos']['errors']):
+        report['status'] = 'reconciliation_required'
     return report
 
 

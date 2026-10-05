@@ -134,9 +134,13 @@ class ComponentInventoryTest(unittest.TestCase):
         b,sku,h,s,_=self.setup_components()
         with self.database.transaction() as c:
             c.execute("UPDATE catalog_excel_products SET bitrix_external_product_id='700' WHERE id=?",(h['id'],))
-        result=BitrixStockSync(self.database).synchronize([{'external_product_id':'700','name':'Head','brand':'Brand','stock':999,'stock_source_field':'CCatalogProduct.QUANTITY'}],apply=True)
-        self.assertEqual(result['updated'],1)
-        self.assertEqual(self.stock(h['id']),999);self.assertEqual(self.physical(h),3)
+        site=[{'external_product_id':'700','name':'Head','brand':'Brand','stock':999,'stock_source_field':'CCatalogProduct.QUANTITY'}]
+        sync=BitrixStockSync(self.database)
+        result=sync.synchronize(site)
+        self.assertEqual(result['items'][0]['erp_stock'],3)
+        with self.assertRaisesRegex(ValueError,'ERP — источник'):
+            sync.synchronize(site,apply=True)
+        self.assertEqual(self.stock(h['id']),998);self.assertEqual(self.physical(h),3)
         self.assertEqual(b.get(sku['id'])['available_to_assemble'],3)
 
     def test_ordinary_sale_and_receipt_unchanged(self):
@@ -204,7 +208,14 @@ class ComponentInventoryTest(unittest.TestCase):
         import sqlite3
         from app.bundle_migration import BUNDLE_SQL
         from app.schema_migrations import apply_migrations, COMPONENT_MIGRATION_ID
-        sku=self.create_product(0,'Old bundle','OLD');h=self.create_product(998,'Head','HEAD')
+        import app.schema_migrations as migrations
+        from unittest.mock import patch
+        # Build the pre-multiwarehouse fixture before removing the older slice;
+        # dropping a table from a current DB also drops later migration triggers.
+        self.tearDown()
+        with patch.object(migrations, 'MIGRATIONS', migrations.MIGRATIONS[:-1]), patch.object(migrations, 'verify_complete_catalog_contract', return_value=True):
+            self.setUp()
+            sku=self.create_product(0,'Old bundle','OLD');h=self.create_product(998,'Head','HEAD')
         with sqlite3.connect(str(self.database.path)) as c:
             c.execute("INSERT INTO erp_product_bundles VALUES (?,?)",(sku['id'],'2026-09-01'))
             c.execute("INSERT INTO erp_bundle_components VALUES (?,?,1)",(sku['id'],h['id']))

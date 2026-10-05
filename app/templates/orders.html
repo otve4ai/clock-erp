@@ -325,6 +325,10 @@
         <div class="sale-dialog-head"><div><h2 id="orderSaleTitle">Провести продажу</h2><p class="card-subtitle">Заказ №{{ detail_number }} · {{ 'Wildberries' if selected_order.get('source') == 'wildberries' else 'Tictactoy' }}</p></div><button class="button button-secondary" type="button" data-close-sale-dialog aria-label="Закрыть">×</button></div>
         <form method="post" action="{% if selected_order.get('source') == 'wildberries' %}/order/wildberries/{{ selected_order.get('wb_order_id') }}/conduct-sale{% else %}/order/{{ detail_id }}/stock-writeoff{% endif %}"{% if selected_order.get('source') == 'wildberries' %} data-wb-sale-form{% endif %} data-order-sale-form data-erp-pending data-pending-label="Проводим продажу…"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="sale-dialog-body">
+                <label for="orderSaleWarehouse">Склад списания</label>
+                <select class="field" id="orderSaleWarehouse" name="warehouse_id">
+                    {% for warehouse in warehouses|default([]) %}<option value="{{ warehouse.id }}"{% if warehouse.id == selected_warehouse %} selected{% endif %}>{{ warehouse.name }}</option>{% endfor %}
+                </select>
                 {% if request.args.get('notice') == 'error' and request.args.get('message') %}<div class="notice notice-error" role="alert">{{ request.args.get('message') }}</div>{% endif %}
                 <section class="sale-dialog-section" aria-labelledby="orderSaleLinesTitle">
                     <h3 id="orderSaleLinesTitle">Позиции заказа</h3>
@@ -797,7 +801,7 @@
     }
     if(document.readyState==='loading')onDocument('DOMContentLoaded',initializeOrderSaleLocations,{once:true});else initializeOrderSaleLocations();
     let saleDialogReturnFocus=null;
-    const focusableElements=()=>Array.from(modal.querySelectorAll('button:not([disabled]),input:not([type="hidden"]):not([disabled]),[href],[tabindex]:not([tabindex="-1"])')).filter(element=>!element.hidden&&element.getAttribute('aria-hidden')!=='true');
+    const focusableElements=()=>Array.from(modal.querySelectorAll('button:not([disabled]),select:not([disabled]),input:not([type="hidden"]):not([disabled]),[href],[tabindex]:not([tabindex="-1"])')).filter(element=>!element.hidden&&element.getAttribute('aria-hidden')!=='true');
     const open=()=>{saleDialogReturnFocus=document.activeElement;modal.classList.add('is-open');document.body.classList.add('has-open-sale-dialog');modal.setAttribute('aria-hidden','false');modal.querySelector('[data-close-sale-dialog]')?.focus();};
     const close=()=>{modal.classList.remove('is-open');document.body.classList.remove('has-open-sale-dialog');modal.setAttribute('aria-hidden','true');saleDialogReturnFocus?.focus();};
     saleAction?.addEventListener('click',event=>event.currentTarget.hasAttribute('data-open-sale-dialog')?open():showSaleBlock());
@@ -805,6 +809,13 @@
     modal.addEventListener('click',event=>{if(event.target===modal)close();});
     onDocument('keydown',event=>{if(!modal.classList.contains('is-open'))return;if(event.key==='Escape'){event.preventDefault();close();return;}if(event.key==='Tab'){const focusable=focusableElements();if(!focusable.length){event.preventDefault();return;}const first=focusable[0];const last=focusable[focusable.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}});
     const saleForm=modal.querySelector('[data-order-sale-form]');
+    const orderWarehouse = document.getElementById('orderSaleWarehouse');
+    saleForm.querySelectorAll('[data-shared-catalog-scope]').forEach(scope => { scope.dataset.warehouseId = orderWarehouse.value; });
+    orderWarehouse.addEventListener('change', () => {
+        try { sessionStorage.removeItem('order-strap-replacement:{{ detail_id if selected_order else "" }}'); } catch (_) {}
+        const url = new URL(location.href); url.searchParams.set('warehouse_id', orderWarehouse.value);
+        url.searchParams.set('open_sale', '1'); location.assign(url.href);
+    });
     const strapSection=modal.querySelector('[data-strap-replacement]');
     const operationMode=modal.querySelector('[data-operation-mode]');
     const strapSubmit=modal.querySelector('[data-sale-submit]');
@@ -812,7 +823,7 @@
     updateStrapSubmitState();
     const strapStorageKey='order-strap-replacement:{{ detail_id if selected_order else "" }}';
     const productLabel=item=>`${item.brand||'Без бренда'} · ${item.name||item.model||'Без названия'}${item.article?` · ${item.article}`:''} · в наличии ${item.stock_display??item.stock??0}`;
-    const apiItems=async params=>{const response=await fetch(`/api/v1/catalog/options?${new URLSearchParams(params)}`,{credentials:'same-origin',headers:{Accept:'application/json'}});let payload=null;try{payload=await response.json();}catch(error){throw new Error(`Каталог вернул некорректный ответ (HTTP ${response.status})`);}if(!response.ok)throw new Error(payload?.message||payload?.error?.message||`Не удалось загрузить каталог (HTTP ${response.status})`);if(!Array.isArray(payload?.data))throw new Error('Каталог вернул некорректные данные');return params.product_kind==='strap'?payload.data.filter(item=>!item.is_bundle).map(item=>item.is_physical_component?{...item,stock:item.physical_stock||0,stock_display:item.physical_stock||0}:item):payload.data;};
+    const apiItems=async params=>{const response=await fetch(`/api/v1/catalog/options?${new URLSearchParams({...params,warehouse_id:orderWarehouse.value})}`,{credentials:'same-origin',headers:{Accept:'application/json'}});let payload=null;try{payload=await response.json();}catch(error){throw new Error(`Каталог вернул некорректный ответ (HTTP ${response.status})`);}if(!response.ok)throw new Error(payload?.message||payload?.error?.message||`Не удалось загрузить каталог (HTTP ${response.status})`);if(!Array.isArray(payload?.data))throw new Error('Каталог вернул некорректные данные');return params.product_kind==='strap'?payload.data.filter(item=>!item.is_bundle).map(item=>item.is_physical_component?{...item,stock:item.physical_stock||0,stock_display:item.physical_stock||0}:item):payload.data;};
     const selectedItem=picker=>{try{return JSON.parse(picker?.dataset.selected||'null');}catch(error){return null;}};
     function selectPickerItem(picker,item){picker.dataset.selected=JSON.stringify(item);picker.querySelector('[data-picker-value]').value=item.id;const selected=picker.querySelector('[data-picker-selected]');selected.textContent=productLabel(item);selected.hidden=false;updateStrapPreview();updateStrapSubmitState();}
     function renderPickerStatus(picker,message,state){const results=picker.querySelector('[data-picker-results]');const status=document.createElement('div');status.className=`strap-picker-status is-${state}`;status.textContent=message;status.setAttribute('role',state==='error'?'alert':'status');results.replaceChildren(status);}
@@ -841,7 +852,7 @@
     function closeStrap(){strapSection.hidden=true;operationMode.value='';strapSubmit.textContent=strapSubmitDefaultLabel;updateStrapSubmitState();}
     modal.querySelector('[data-open-strap-replacement]')?.addEventListener('click',openStrap);modal.querySelector('[data-cancel-strap-replacement]')?.addEventListener('click',closeStrap);
     function saveStrapDraft(){try{const values={};for(const [key,value] of new FormData(saleForm).entries())values[key]=value;const pickers={};modal.querySelectorAll('[data-strap-picker]').forEach(picker=>pickers[picker.dataset.strapPicker]=selectedItem(picker));sessionStorage.setItem(strapStorageKey,JSON.stringify({values,pickers}));}catch(error){}}
-    function restoreStrapDraft(){if(modal.querySelector('[data-required-strap-line]'))return;try{const draft=JSON.parse(sessionStorage.getItem(strapStorageKey)||'null');if(!draft)return;for(const [key,value] of Object.entries(draft.values||{})){const fields=saleForm.elements.namedItem(key);if(!fields)continue;if(fields instanceof RadioNodeList){for(const field of fields)field.checked=field.value===value;}else if(fields.type==='checkbox')fields.checked=fields.value===value;else fields.value=value;}for(const [key,item] of Object.entries(draft.pickers||{})){const picker=modal.querySelector(`[data-strap-picker="${CSS.escape(key)}"]`);if(picker&&item)selectPickerItem(picker,item);}if(draft.values?.operation_mode==='strap_replacement')openStrap();}catch(error){sessionStorage.removeItem(strapStorageKey);}}
+    function restoreStrapDraft(){if(modal.querySelector('[data-required-strap-line]'))return;try{const draft=JSON.parse(sessionStorage.getItem(strapStorageKey)||'null');if(!draft)return;if((draft.values?.warehouse_id||'default')!==orderWarehouse.value){sessionStorage.removeItem(strapStorageKey);return;}for(const [key,value] of Object.entries(draft.values||{})){const fields=saleForm.elements.namedItem(key);if(!fields)continue;if(fields instanceof RadioNodeList){for(const field of fields)field.checked=field.value===value;}else if(fields.type==='checkbox')fields.checked=fields.value===value;else fields.value=value;}for(const [key,item] of Object.entries(draft.pickers||{})){const picker=modal.querySelector(`[data-strap-picker="${CSS.escape(key)}"]`);if(picker&&item)selectPickerItem(picker,item);}if(draft.values?.operation_mode==='strap_replacement')openStrap();}catch(error){sessionStorage.removeItem(strapStorageKey);}}
     const duplicateRaw=new URLSearchParams(location.search).get('duplicate_matches');if(duplicateRaw){try{const matches=JSON.parse(duplicateRaw);const host=modal.querySelector('[data-duplicate-matches]');host.textContent=`Возможные дубли: ${matches.map(productLabel).join('; ')}`;host.hidden=false;modal.querySelector('[data-duplicate-confirm]').hidden=false;}catch(error){}}
     restoreStrapDraft();if(new URLSearchParams(location.search).get('open_strap')==='1')openStrap();
     let wbSalePending=false;

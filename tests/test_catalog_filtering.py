@@ -764,20 +764,20 @@ class CatalogFilteringTest(unittest.TestCase):
             [str(available["id"])],
         )
 
-    def test_sale_channels_share_catalog_excel_stock(self):
+    def test_sale_channels_can_explicitly_select_ttt_catalog_stock(self):
         expected_product_ids = None
 
         for source in ("Tictactoy", "Wildberries", "Amazon"):
             with self.subTest(source=source):
                 query = (
-                    "source={}&brand_id={}&category_id={}&limit=200"
+                    "source={}&brand_id={}&category_id={}&limit=200&warehouse_id=default"
                 ).format(source, self.brand["id"], self.duplicate_category_id)
                 products = self.client.get(
                     "/api/v1/sales/catalog?" + query
                 ).get_json()
                 brands = self.client.get(
                     "/api/v1/catalog/options?type=brand"
-                    "&available_for_sale=1&source=" + source
+                    "&available_for_sale=1&warehouse_id=default&source=" + source
                 ).get_json()
 
                 product_ids = [item["id"] for item in products["data"]]
@@ -792,6 +792,30 @@ class CatalogFilteringTest(unittest.TestCase):
                     self.brand["id"],
                     {item["id"] for item in brands["data"]},
                 )
+
+    def test_amazon_picker_defaults_to_hk_without_borrowing_ttt_stock(self):
+        from app.services.manual_receipts import ManualReceipts
+
+        ttt = self.client.get("/api/v1/sales/catalog?source=Tictactoy").get_json()["data"]
+        self.assertTrue(ttt)
+        self.assertEqual(
+            self.client.get("/api/v1/sales/catalog?source=Amazon").get_json()["data"], []
+        )
+        product_id = ttt[0]["id"]
+        receipts = ManualReceipts(self.database)
+        receipt = receipts.create("hong-kong", "initial_stock", [
+            {"product_id": product_id, "quantity": 3}
+        ])
+        receipts.post(receipt["id"])
+        hk = self.client.get("/api/v1/sales/catalog?source=Amazon").get_json()["data"]
+        self.assertEqual([(p["id"], p["stock"]) for p in hk], [(product_id, 3)])
+        explicit_ttt = self.client.get(
+            "/api/v1/sales/catalog?source=Amazon&warehouse_id=default"
+        ).get_json()["data"]
+        self.assertEqual(
+            [(p["id"], p["stock"]) for p in explicit_ttt],
+            [(p["id"], p["stock"]) for p in ttt],
+        )
 
     def test_large_catalog_is_bounded_but_searches_beyond_first_window(self):
         large_brand = self.shared.create_brand("Большой бренд")

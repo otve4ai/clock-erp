@@ -619,6 +619,7 @@ class ExcelProductBatchService:
                 ).fetchone()
                 if product is None:
                     continue
+                ExcelProductCatalog._guard_other_warehouse_stock(connection, product['id'])
                 stock_before = float(product["stock"])
                 previous = _load_json(change["previous_state_json"], None)
                 original_operation = connection.execute(
@@ -638,6 +639,10 @@ class ExcelProductBatchService:
                 if change["created_product"] and self._can_delete_created_product(
                     connection, product["id"], batch_id
                 ):
+                    # This is a derived TTT mirror, not an independent receipt.
+                    # External stock/transit was checked above; document history
+                    # prevents physical deletion via _can_delete_created_product.
+                    connection.execute('DELETE FROM erp_warehouse_stocks WHERE product_id=?', (product['id'],))
                     connection.execute(
                         "DELETE FROM catalog_excel_products WHERE id = ?", (product["id"],)
                     )
@@ -787,7 +792,8 @@ class ExcelProductBatchService:
             "WHERE product_id = ? AND batch_id <> ?",
             (int(product_id), batch_id),
         ).fetchone()[0]
-        return not (manual_uses or other_batch_rows or other_operations)
+        transfer_uses = connection.execute('SELECT 1 FROM erp_stock_transfer_items WHERE product_id=? LIMIT 1', (int(product_id),)).fetchone()
+        return not (manual_uses or other_batch_rows or other_operations or transfer_uses)
 
     @staticmethod
     def _record_operation(connection, batch_id, product_id, operation_type,
@@ -835,8 +841,28 @@ class ExcelProductCatalog:
                       product_ids=None,
                       include_cell_item_names=True, include_facets=True,
                       include_inventory_locked=False, stock_state="all",
-                      check_state="all", site_issue=""):
+                      check_state="all", site_issue="", warehouse_id=None):
         self.database.initialize()
+        stock_sql = 'p.stock'
+        available_sql = None
+        warehouse_scope = ''
+        if warehouse_id:
+            from app.services.component_inventory import PHYSICAL_STOCK_SQL
+            with self.database.connect() as warehouse_connection:
+                if warehouse_id != 'all' and not warehouse_connection.execute('SELECT 1 FROM erp_warehouses WHERE id=? AND active=1', (warehouse_id,)).fetchone():
+                    raise ValueError('Склад не найден.')
+                # SQLite quote produces a safe literal for the correlated read
+                # expression reused in filters, sorting, counts and pagination.
+                quoted = warehouse_connection.execute('SELECT quote(?)', (warehouse_id,)).fetchone()[0]
+            if warehouse_id == 'default':
+                stock_sql = PHYSICAL_STOCK_SQL
+            elif warehouse_id == 'all':
+                available_sql = '(COALESCE((SELECT SUM(quantity) FROM erp_warehouse_stocks ws WHERE ws.product_id=p.id),0))'
+                stock_sql = '(COALESCE((SELECT SUM(quantity) FROM erp_warehouse_stocks ws WHERE ws.product_id=p.id),0) + COALESCE((SELECT SUM(ti.quantity) FROM erp_stock_transfer_items ti JOIN erp_stock_transfers t ON t.id=ti.transfer_id WHERE ti.product_id=p.id AND t.status=\'in_transit\'),0))'
+            else:
+                stock_sql = '(COALESCE((SELECT quantity FROM erp_warehouse_stocks ws WHERE ws.product_id=p.id AND ws.warehouse_id={}),0))'.format(quoted)
+                warehouse_scope = '(EXISTS(SELECT 1 FROM erp_warehouse_stocks ws WHERE ws.product_id=p.id AND ws.warehouse_id={0}) OR EXISTS(SELECT 1 FROM erp_stock_transfer_items ti JOIN erp_stock_transfers t ON t.id=ti.transfer_id WHERE ti.product_id=p.id AND t.to_warehouse_id={0} AND t.status=\'in_transit\'))'.format(quoted)
+        available_sql = available_sql or stock_sql
         if stock_state == "out" or check_state != "all":
             OutOfStockChecks(self.database).sync()
         page = max(1, int(page))
@@ -857,6 +883,8 @@ class ExcelProductCatalog:
         sort_dir = sort_dir if sort_dir in {"asc", "desc"} else "asc"
         visible_cards_sql = VISIBLE_PRODUCT_SQL
         where = [product_list_scope_sql(include_inventory_locked)]
+        if warehouse_scope:
+            where.append(warehouse_scope)
         parameters = []
         if query:
             prefix_pattern = catalog_prefix_pattern(query)
@@ -912,11 +940,11 @@ class ExcelProductCatalog:
                 where.append("trim(COALESCE(p.cell, '')) = ?")
                 parameters.append(cell)
         if hide_zero:
-            where.append("p.stock > 0 AND CAST(p.stock AS REAL) > 0")
+            where.append("{0} > 0 AND CAST({0} AS REAL) > 0".format(available_sql))
         if stock_state == "out":
-            where.append("p.stock = 0")
+            where.append("{} = 0".format(available_sql))
         elif stock_state == "in":
-            where.append("p.stock > 0")
+            where.append("{} > 0".format(available_sql))
         site_issue_sql = product_site_issue_sql(site_issue)
         if site_issue_sql:
             where.append(site_issue_sql)
@@ -974,6 +1002,8 @@ class ExcelProductCatalog:
             "LEFT JOIN erp_brands canonical_brand "
             "ON canonical_brand.id = p.brand_id"
         )
+        allowed_sort_fields['stock'] = stock_sql
+        select_sql = select_sql.replace('SELECT p.*,', 'SELECT p.*, {} AS warehouse_stock,'.format(stock_sql))
         with self.database.connect() as connection:
             if query or model:
                 register_catalog_search(connection)
@@ -992,7 +1022,7 @@ class ExcelProductCatalog:
                 "AS matched_positions FROM catalog_excel_products p "
                 "JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
                 "LEFT JOIN catalog_products cp "
-                "ON cp.id = p.bitrix_catalog_product_id" + where_sql,
+                "ON cp.id = p.bitrix_catalog_product_id".replace('p.stock > 0', available_sql + ' > 0').replace('p.stock = 0', available_sql + ' = 0').replace('SUM(p.stock)', 'SUM({})'.format(stock_sql)) + where_sql,
                 parameters,
             ).fetchone())
             total = int(stats["positions"] or 0)
@@ -1106,7 +1136,7 @@ class ExcelProductCatalog:
                         + visible_cards_sql + " GROUP BY p.match_status"
                     ).fetchall()
                 }
-        items = [self._prepare_product(dict(row)) for row in rows]
+        items = [self._prepare_product(dict(dict(row), stock=row['warehouse_stock'])) for row in rows]
         return {
             "items": items, "total": total, "page": page, "per_page": per_page,
             "pages": pages,
@@ -1878,6 +1908,7 @@ class ExcelProductCatalog:
             ).fetchone()
             if product is None:
                 raise ValueError("Товар не найден.")
+            self._guard_other_warehouse_stock(connection, product_id)
             if float(product["stock"] or 0) != 0:
                 raise ProductDeleteBlockedError(
                     "Товар с ненулевым остатком нельзя удалить."
@@ -1929,6 +1960,7 @@ class ExcelProductCatalog:
             self, connection, product, force=False, actor_id="",
             actor_name="", actor_type="user", record_audit=True):
         product_id = int(product["id"])
+        self._guard_other_warehouse_stock(connection, product_id)
         stock = float(product["stock"] or 0)
         deleted_at = utc_now()
         source_key = str(product["source_key"])
@@ -1954,6 +1986,16 @@ class ExcelProductCatalog:
             )
         return {"id": product_id, "stock": stock, "force": bool(force),
                 "deleted_at": deleted_at}
+
+    @staticmethod
+    def _guard_other_warehouse_stock(connection, product_id):
+        remaining = connection.execute(
+            "SELECT 1 FROM erp_warehouse_stocks WHERE product_id=? AND warehouse_id<>'default' AND quantity>0 "
+            "UNION ALL SELECT 1 FROM erp_stock_transfer_items i JOIN erp_stock_transfers t ON t.id=i.transfer_id "
+            "WHERE i.product_id=? AND t.status='in_transit' LIMIT 1", (int(product_id), int(product_id)),
+        ).fetchone()
+        if remaining:
+            raise ProductDeleteBlockedError('Карточку нельзя удалить: есть остаток на другом складе или товар в пути.')
 
     def delete_brand_catalog(
             self, brand_id, category_id=None, force=False, actor_id="",

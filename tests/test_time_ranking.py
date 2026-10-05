@@ -139,6 +139,7 @@ class ProductTimeRankingTest(unittest.TestCase):
             "stats": {"total_stock": 0}, "cell_groups": [],
         }
         catalog_service = mock.Mock()
+        catalog_service.database = self.database
         catalog_service.list_products.return_value = catalog_result
         shared_catalog = mock.Mock()
         shared_catalog.list_brands.return_value = []

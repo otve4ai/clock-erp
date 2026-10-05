@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synchronize active Bitrix quantities into existing ERP product cards."""
+"""Compare active Bitrix quantities with ERP TTT stock without changing it."""
 
 import argparse
 import json
@@ -40,6 +40,8 @@ def load_active_products(client, page_size=200, progress_callback=None):
 
 def sync_bitrix_stock(client, database, apply=False, backup=False,
                       backup_root=None, page_size=200, progress_callback=None):
+    if apply:
+        raise ValueError("ERP — источник остатков; --apply отключён. Используйте --dry-run.")
     backup_path = None
     if apply or backup:
         backup_path = create_database_backup(database, backup_root)

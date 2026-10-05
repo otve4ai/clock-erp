@@ -506,8 +506,7 @@ const submit = eval('(async function(action) {' + handler + ')');
         engine.delete(supply["id"])
         response = self.client.post(path, json={"product_id": product["id"], "quantity": 3}, headers={"Idempotency-Key": "cancelled-supply"})
         self.assertEqual(response.status_code, 422)
-        with self.assertRaises(SupplyError):
-            engine.get(supply["id"])
+        self.assertEqual(engine.get(supply["id"])["status"], "cancelled")
         with CatalogDatabase(self.database_path).connect() as c:
             self.assertEqual(c.execute("SELECT stock FROM catalog_excel_products WHERE id=?", (product["id"],)).fetchone()[0], 0)
         with mock.patch.object(web, "_bitrix_single_client") as remote:

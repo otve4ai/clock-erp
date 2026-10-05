@@ -27,6 +27,7 @@ from app.component_inventory_migration import COMPONENT_SQL, apply_component_inv
 from app.writeoff_migration import WRITEOFF_SQL, apply_writeoff_migration
 from app.bundle_migration import BUNDLE_SQL, apply_bundle_migration
 from app.incoming_receipts_migration import INCOMING_RECEIPTS_DEFINITION, apply_incoming_receipts_migration
+from app.multiwarehouse_migration import apply_multiwarehouse_migration
 
 from app.catalog_migration_steps import (
     ORDER_STRAP_SCHEMA_SQL,
@@ -251,6 +252,7 @@ WRITEOFF_MIGRATION_ID = "2026-09-08-stock-writeoffs-v1"
 INCOMING_RECEIPTS_MIGRATION_ID = "2026-09-23-incoming-receipts-v1"
 
 REQUIRED_STRAP_MIGRATION_ID = "2026-09-24-required-straps-v1"
+MULTIWAREHOUSE_MIGRATION_ID = "2026-10-04-multiwarehouse-v1"
 
 MIGRATIONS = (
     {
@@ -348,6 +350,10 @@ MIGRATIONS = (
      "checksum": hashlib.sha256("\n".join(REQUIRED_STRAP_SQL).encode("utf-8")).hexdigest(),
      "transactional": True, "recovery": "restore verified catalog database backup while service is stopped"},
 )
+
+MIGRATIONS += ({'id': MULTIWAREHOUSE_MIGRATION_ID, 'name': 'Warehouse-scoped stock and transfers',
+                'checksum': hashlib.sha256(Path(__file__).with_name('multiwarehouse_migration.py').read_bytes().replace(b'\r\n', b'\n')).hexdigest(),
+                'transactional': True, 'recovery': 'restore verified backup'},)
 
 REQUIRED_TABLES = {
     "catalog_excel_products",
@@ -568,13 +574,28 @@ def business_snapshot(connection):
             statement += " WHERE " + condition
         result[label] = int(connection.execute(statement).fetchone()[0])
     if "catalog_excel_products" in tables:
-        value = connection.execute(
-            "SELECT COALESCE(SUM(stock), 0) FROM catalog_excel_products "
-            "WHERE active = 1"
-        ).fetchone()[0]
-        result["active_stock_sum"] = float(value or 0)
+        if 'erp_stock_transfers' in tables:
+            expression = ("COALESCE((SELECT SUM(quantity) FROM erp_warehouse_stocks w WHERE w.product_id=p.id),0) "
+                          "+ COALESCE((SELECT SUM(i.quantity) FROM erp_stock_transfer_items i "
+                          "JOIN erp_stock_transfers t ON t.id=i.transfer_id "
+                          "WHERE i.product_id=p.id AND t.status='in_transit'),0)")
+        elif 'erp_component_inventory' in tables:
+            expression = ("CASE WHEN EXISTS(SELECT 1 FROM erp_component_inventory ci WHERE ci.product_id=p.id) "
+                          "THEN COALESCE((SELECT physical_stock FROM erp_component_inventory ci WHERE ci.product_id=p.id),0) "
+                          "ELSE COALESCE(p.stock,0) END")
+        else:
+            expression = 'COALESCE(p.stock,0)'
+        # Compare company-owned quantities, not the old aggregate to the new
+        # TTT-only compatibility field. Digest every SKU, including archived
+        # cards, so a compensating +/- on different products cannot pass.
+        stocks = connection.execute('SELECT p.id,p.active,{} FROM catalog_excel_products p ORDER BY p.id'.format(expression)).fetchall()
+        result['active_stock_sum'] = sum(float(row[2] or 0) for row in stocks if row[1] == 1)
+        result['owned_stock_digest'] = hashlib.sha256(json.dumps(
+            [(row[0], row[1], float(row[2] or 0)) for row in stocks], separators=(',', ':')
+        ).encode('utf-8')).hexdigest()
     else:
         result["active_stock_sum"] = None
+        result['owned_stock_digest'] = None
     if "catalog_stock_movements" in tables:
         result["movement_quantity_sum"] = float(connection.execute(
             "SELECT COALESCE(SUM(quantity_delta), 0) "
@@ -775,6 +796,10 @@ def verify_complete_catalog_contract(connection, include_bundles=True, include_i
     if include_incoming:
         extra = json.loads(Path(__file__).resolve().with_name("catalog_required_strap_schema_manifest.json").read_text(encoding="utf-8"))
         expected["tables"].update(extra["tables"])
+        extra = json.loads(Path(__file__).resolve().with_name('catalog_multiwarehouse_schema_manifest.json').read_text(encoding='utf-8'))
+        expected['tables'].update(extra['tables'])
+        for kind in ('indexes', 'triggers', 'views'):
+            expected[kind] = sorted(expected[kind] + extra[kind])
     actual = _json_structure(connection)
     if actual == expected:
         return True
@@ -1342,12 +1367,12 @@ def apply_migrations(database_path, app_commit="", ddl_observer=None):
                         raise
                     finally:
                         connection.close()
-                elif migration["id"] in (BUNDLE_MIGRATION_ID, COMPONENT_MIGRATION_ID, WRITEOFF_MIGRATION_ID, "2026-09-09-remove-product-collections-v1", INCOMING_RECEIPTS_MIGRATION_ID, REQUIRED_STRAP_MIGRATION_ID):
+                elif migration["id"] in (BUNDLE_MIGRATION_ID, COMPONENT_MIGRATION_ID, WRITEOFF_MIGRATION_ID, "2026-09-09-remove-product-collections-v1", INCOMING_RECEIPTS_MIGRATION_ID, REQUIRED_STRAP_MIGRATION_ID, MULTIWAREHOUSE_MIGRATION_ID):
                     connection = sqlite3.connect(str(path))
                     try:
                         connection.execute("PRAGMA foreign_keys = ON")
                         connection.execute("BEGIN IMMEDIATE")
-                        ({"2026-09-09-remove-product-collections-v1": apply_remove_collections_migration, BUNDLE_MIGRATION_ID: apply_bundle_migration, COMPONENT_MIGRATION_ID: apply_component_inventory_migration, WRITEOFF_MIGRATION_ID: apply_writeoff_migration, INCOMING_RECEIPTS_MIGRATION_ID: apply_incoming_receipts_migration, REQUIRED_STRAP_MIGRATION_ID: apply_required_strap_migration}[migration["id"]])(connection, ddl_observer)
+                        ({MULTIWAREHOUSE_MIGRATION_ID: apply_multiwarehouse_migration, "2026-09-09-remove-product-collections-v1": apply_remove_collections_migration, BUNDLE_MIGRATION_ID: apply_bundle_migration, COMPONENT_MIGRATION_ID: apply_component_inventory_migration, WRITEOFF_MIGRATION_ID: apply_writeoff_migration, INCOMING_RECEIPTS_MIGRATION_ID: apply_incoming_receipts_migration, REQUIRED_STRAP_MIGRATION_ID: apply_required_strap_migration}[migration["id"]])(connection, ddl_observer)
                         connection.commit()
                     except Exception:
                         connection.rollback()
@@ -1609,6 +1634,9 @@ def validate_known_sql_compatibility(source_root):
     required_strap_migration = source_root / "app" / "required_strap_migration.py"
     if required_strap_migration.exists():
         paths.append(required_strap_migration)
+    multiwarehouse_migration = source_root / "app" / "multiwarehouse_migration.py"
+    if multiwarehouse_migration.exists():
+        paths.append(multiwarehouse_migration)
     domain_migrations = source_root / "app" / "domain_schema_migrations.py"
     if domain_migrations.exists():
         paths.append(domain_migrations)

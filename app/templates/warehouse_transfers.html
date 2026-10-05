@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru"><head>{% include "_favicon.html" %}<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="csrf-token" content="{{ csrf_token() }}">
+<title>ТТТ ERP — Перемещения</title>
+<link rel="stylesheet" href="{{ static_asset_url('css/erp-components.css') }}">
+<link rel="stylesheet" href="{{ static_asset_url('css/multiwarehouse.css') }}">
+<script defer src="{{ static_asset_url('js/warehouse-transfers.js') }}"></script>
+</head><body class="transfers-page"><div class="app">{% include '_sidebar.html' %}<main class="main" id="main-content"><section class="transfer-workspace">
+<a href="/app/products">← Товары</a><h1>Перемещения</h1>
+<p>Отправка → В пути → Подтверждённая приёмка. В пути товар остаётся в остатке компании.</p>
+<div id="transfer-message" role="status" aria-live="polite"></div>
+<form id="transfer-form">
+<label>Откуда<select id="transfer-from">{% for w in warehouses %}<option value="{{ w.id }}">{{ w.name }}</option>{% endfor %}</select></label>
+<label>Куда<select id="transfer-to">{% for w in warehouses %}<option value="{{ w.id }}"{% if w.code == 'HK' %} selected{% endif %}>{{ w.name }}</option>{% endfor %}</select></label>
+<label>Поиск товара<input id="transfer-search" type="search" placeholder="Название или артикул"></label>
+<label>Товар<select id="transfer-product"><option value="">Найдите товар</option></select></label>
+<label>Количество<input id="transfer-quantity" type="number" min="1" step="1" value="1" required style="width:90px"></label>
+<button type="button" id="transfer-add">Добавить строку</button>
+<label>Комментарий<input id="transfer-comment"></label>
+<button type="submit">Создать черновик</button>
+</form>
+<ul id="transfer-items"></ul>
+<table><thead><tr><th>Документ</th><th>Маршрут / товары</th><th>Статус</th><th>Действия</th></tr></thead><tbody id="transfer-list"></tbody></table>
+</section></main></div></body></html>

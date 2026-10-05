@@ -87,6 +87,7 @@ class InventoryControl:
     def _base_select():
         return (
             "SELECT s.*,n.document_number,b.name brand_name,c.name category_name,mo.name model_name,"
+            "(SELECT name FROM erp_warehouses WHERE id=COALESCE(s.warehouse_id,'default')) warehouse_name,"
             "COUNT(i.id) total_positions,"
             "COALESCE(SUM(CASE WHEN i.status IN ('confirmed','adjusted','added','missing') THEN 1 ELSE 0 END),0) checked_positions,"
             "COALESCE(SUM(CASE WHEN COALESCE(i.quantity_delta,0)<>0 THEN 1 ELSE 0 END),0) discrepancy_positions,"
@@ -115,6 +116,8 @@ class InventoryControl:
         if model:
             parts.append(model)
         item["scope_label"] = " → ".join(parts)
+        if item.get('warehouse_id') not in (None, 'default'):
+            item['scope_label'] = '{} · {}'.format(item.get('warehouse_name') or item['warehouse_id'], item['scope_label'])
         item["employee"] = item.get("completed_by") or item.get("cancelled_by") or item.get("started_by") or ""
         item["accuracy"] = inventory_accuracy(item["total_positions"], item["discrepancy_positions"])
         item["duration"] = _duration(item.get("started_at"), item.get("completed_at"))
@@ -227,6 +230,7 @@ class InventoryControl:
             page = min(page, max(1, int(math.ceil(float(total) / per_page))))
             rows = connection.execute(
                 "SELECT i.id item_id,i.session_id,i.product_id,n.document_number,s.completed_at,COALESCE(i.snapshot_name,p.excel_name_raw) name,"
+                "COALESCE(s.warehouse_id,'default') warehouse_id,(SELECT name FROM erp_warehouses WHERE id=COALESCE(s.warehouse_id,'default')) warehouse_name,"
                 "COALESCE(i.snapshot_article,p.excel_article) article,COALESCE(i.snapshot_photo_url,p.bitrix_thumbnail_url,p.bitrix_primary_image_url) photo_url,COALESCE(i.snapshot_brand_name,p.excel_brand) brand_name,"
                 "COALESCE(i.snapshot_category_name,p.excel_category) category_name,COALESCE(i.snapshot_model_name,p.model) model_name,"
                 "i.snapshot_stock,i.actual_stock,i.quantity_delta,COALESCE(r.review_status,'new') review_status,r.reason_code,r.reason_comment,r.decision_code,r.assignee_user_id,r.assignee_name,r.task_id "
@@ -323,10 +327,11 @@ class InventoryControl:
             rows = connection.execute(
                 "SELECT b.id,b.name brand_name,COALESCE(SUM(CASE WHEN p.active=1 AND p.stock>0 THEN 1 ELSE 0 END),0) in_stock,"
                 "bc.enabled,COALESCE(bc.interval_days,90) interval_days,bc.assignee_user_id,bc.assignee_name,"
-                "EXISTS(SELECT 1 FROM erp_inventory_sessions ax WHERE ax.brand_id=b.id AND ax.status='active') has_active "
+                "EXISTS(SELECT 1 FROM erp_inventory_sessions ax WHERE ax.brand_id=b.id AND ax.status='active' AND COALESCE(ax.warehouse_id,'default')='default') has_active "
                 "FROM erp_brands b LEFT JOIN catalog_excel_products p ON p.brand_id=b.id LEFT JOIN erp_inventory_brand_controls bc ON bc.brand_id=b.id WHERE b.active=1 GROUP BY b.id ORDER BY b.name COLLATE NOCASE"
             ).fetchall()
-            completed = connection.execute(self._base_select() + " WHERE s.status='completed' GROUP BY s.id ORDER BY s.completed_at DESC,s.id DESC").fetchall()
+            # Existing regular brand control is for TTT, not an aggregate of warehouses.
+            completed = connection.execute(self._base_select() + " WHERE s.status='completed' AND COALESCE(s.warehouse_id,'default')='default' GROUP BY s.id ORDER BY s.completed_at DESC,s.id DESC").fetchall()
         latest = {}
         for row in completed:
             item = self._prepare_document(row); latest.setdefault(int(item["brand_id"]), item)
