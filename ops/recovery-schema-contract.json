@@ -40,6 +40,7 @@
     ],
     "sms.db": [
       "sms_messages",
+      "sms_templates",
       "sms_meta"
     ],
     "tasks.db": [
