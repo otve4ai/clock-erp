@@ -7756,6 +7756,17 @@
                 const activeSection = form.querySelector(
                     '[data-source-fields="' + sourceKey + '"]'
                 );
+                const expectedWarehouseId = sourceKey === "amazon"
+                    ? "hong-kong" : "default";
+                const warehouseControl = document.getElementById(
+                    "saleWarehouseCombobox"
+                );
+                const warehouseOption = warehouseControl.querySelector(
+                    '[data-brand="' + expectedWarehouseId + '"]'
+                );
+                const expectedWarehouseLabel = warehouseOption
+                    ?.querySelector(".brand-combobox-option-label")
+                    ?.textContent.trim();
 
                 const checks = {
                     activeCount: active.length === 1,
@@ -7766,10 +7777,18 @@
                     submitBlockedUntilProduct: submitButton.disabled,
                     description: description.textContent.trim()
                         === "Источник: " + label
-                            + ". Склад: " + (sourceKey === "amazon" ? "Гонконг" : "TTT") + ".",
+                            + ". Склад: " + expectedWarehouseLabel + ".",
                     warehouseValue: document.getElementById("saleWarehouse").value
-                        === (sourceKey === "amazon" ? "hong-kong" : "default"),
+                        === expectedWarehouseId,
                     warehouseEnabled: !document.getElementById("saleWarehouse").disabled,
+                    warehouseTriggerEnabled: !warehouseControl.querySelector(
+                        ".brand-combobox-trigger"
+                    ).disabled,
+                    warehouseSelected: Boolean(expectedWarehouseLabel)
+                        && warehouseOption.getAttribute("aria-selected") === "true",
+                    warehouseCaption: warehouseControl.querySelector(
+                        ".brand-combobox-value"
+                    ).textContent.trim() === expectedWarehouseLabel,
                     warehouseScope: form.dataset.warehouseId
                         === document.getElementById("saleWarehouse").value,
                     submitText: submitButton.textContent.trim()
