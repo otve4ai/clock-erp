@@ -391,6 +391,7 @@ test('required product viewports preserve cards, history and zero page overflow'
     await expect(editButton).toBeInViewport();
     await expect(product.card.locator('.close-button')).toBeInViewport();
     if (viewport.width < 768) {
+      await expect(page.locator('.mobile-erp-navigation')).toBeHidden();
       await expect(product.card.locator('.product-external-actions')).toHaveCSS('position', 'static');
       await editButton.click();
       const settings = product.card.locator('[data-product-additional-settings]');
@@ -408,6 +409,9 @@ test('required product viewports preserve cards, history and zero page overflow'
       await expect(editButton).toBeInViewport();
     }
     await closeProductCard(page);
+    if (viewport.width < 768) {
+      await expect(page.locator('.mobile-erp-navigation')).toBeVisible();
+    }
 
     const historyLength = await page.evaluate(() => history.length);
     await navigateTopTab(page, evidence, 'brands');

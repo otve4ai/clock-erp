@@ -4065,6 +4065,11 @@ body.edit-drawer-open:has(.app.sidebar-collapsed) #drawerBackdrop {
 
 @media (max-width: 767px) {
     /* Keep one action bar visible; external links remain in the scroll flow. */
+    body.warehouse-page.edit-drawer-open .mobile-erp-navigation {
+        visibility: hidden;
+        pointer-events: none;
+    }
+
     #editDrawer.open {
         /* A transformed scroll container also scrolls its fixed descendants. */
         transform: none;

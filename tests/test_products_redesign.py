@@ -193,6 +193,11 @@ class ProductsRedesignStructureTest(unittest.TestCase):
         drawer = mobile.split("#editDrawer.open {", 1)[1].split("}", 1)[0]
         self.assertIn("transform: none;", drawer)
         self.assertIn("transition: none;", drawer)
+        navigation = mobile.split(
+            "body.warehouse-page.edit-drawer-open .mobile-erp-navigation {", 1
+        )[1].split("}", 1)[0]
+        self.assertIn("visibility: hidden;", navigation)
+        self.assertIn("pointer-events: none;", navigation)
         self.assertIn("#editDrawer .product-detail-grid > .category-cell-form", css)
 
     def test_table_has_synchronized_top_scrollbar_and_mobile_overflow(self):
