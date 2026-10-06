@@ -112,7 +112,7 @@ def seed_catalog(database):
             transfers.transition(doc['id'], action, actor='Демо')
 
 
-def create_preview(root, port):
+def create_preview(root, port, product_card=False):
     prepare_environment(root)
     disable_outbound_connections()
     from app.schema_migrations import apply_migrations
@@ -144,10 +144,21 @@ def create_preview(root, port):
         if request.method not in ('GET', 'HEAD'):
             if request.headers.get('Origin') not in (None, 'http://' + request.host):
                 return 'Local preview only', 403
-            if request.endpoint not in ('transfers', 'transfer_action'):
-                return jsonify(ok=False, message='В демо доступны только перемещения.'), 403
+            allowed_writes = ('transfers', 'transfer_action')
+            if product_card and request.method == 'PATCH':
+                allowed_writes += ('api_product_resource',)
+            if request.endpoint not in allowed_writes:
+                return jsonify(ok=False, message='Эта операция отключена в локальном демо.'), 403
         if request.path == '/':
             return redirect('/app/products')
+        if product_card and (request.endpoint == 'api_product_resource' or (
+            request.method in ('GET', 'HEAD') and request.endpoint in (
+                'warehouse_product_detail', 'api_product_warehouse_stocks',
+                'api_product_movements', 'api_product_bundle',
+                'api_product_required_strap', 'api_catalog_options',
+            )
+        )):
+            return None
         if request.endpoint not in ('warehouse_page', 'transfers_page', 'transfers',
                                     'transfer_action', 'transfer_products', 'static', 'preview_health'):
             if request.path.startswith('/api/'):
@@ -183,12 +194,14 @@ def create_preview(root, port):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=4197)
+    parser.add_argument('--product-card', action='store_true',
+                        help='Enable product card reads/edits on disposable demo data only')
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
         parser.error('Use a local unprivileged port (1024..65535)')
     # Each invocation gets a brand-new synthetic database, never an existing path.
     with tempfile.TemporaryDirectory(prefix='erp-multiwarehouse-demo-', ignore_cleanup_errors=True) as directory:
-        app = create_preview(Path(directory), args.port)
+        app = create_preview(Path(directory), args.port, product_card=args.product_card)
         print('Synthetic preview: http://127.0.0.1:{}/app/products'.format(args.port), flush=True)
         app.run(host='127.0.0.1', port=args.port, debug=False, use_reloader=False,
                 load_dotenv=False, threaded=False)

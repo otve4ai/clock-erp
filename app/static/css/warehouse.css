@@ -3673,12 +3673,48 @@ body.edit-drawer-open:has(.app.sidebar-collapsed) #drawerBackdrop {
     grid-column: 1 / -1;
 }
 
+#editDrawer .product-detail-grid > .category-cell-form {
+    margin: 0;
+}
+
 #editDrawer .product-detail-name .product-detail-value {
     font-size: var(--erp-type-section-title-size);
 }
 
+#editDrawer .product-detail-cell,
 #editDrawer .product-detail-model {
+    display: grid;
+    grid-template-columns: minmax(84px, 1fr) minmax(0, 1.5fr);
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
     margin-top: 12px;
+}
+
+#editDrawer .product-detail-cell > .product-detail-label,
+#editDrawer .product-detail-model > .product-detail-label {
+    margin: 0;
+}
+
+#editDrawer .product-detail-cell > input.product-detail-input,
+#editDrawer .product-detail-model > input.product-detail-input {
+    min-width: 0;
+    height: 34px;
+    min-height: 34px;
+    margin: 0;
+    padding: 0 8px;
+    border: 1px solid var(--erp-border, #dce3ed);
+    border-radius: 8px;
+    background: var(--erp-surface, #fff);
+    color: var(--erp-text, #172033);
+    font: inherit;
+    font-size: 13px;
+}
+
+#editDrawer .product-detail-cell > input.product-detail-input:focus-visible,
+#editDrawer .product-detail-model > input.product-detail-input:focus-visible {
+    outline: 2px solid var(--theme-focus, #2563eb);
+    outline-offset: 1px;
 }
 
 #editDrawer .product-detail-label {
@@ -4024,6 +4060,53 @@ body.edit-drawer-open:has(.app.sidebar-collapsed) #drawerBackdrop {
     #editDrawer .product-card-layout {
         grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
         gap: 16px;
+    }
+}
+
+@media (max-width: 767px) {
+    /* Keep one action bar visible; external links remain in the scroll flow. */
+    body.warehouse-page.edit-drawer-open .mobile-erp-navigation {
+        visibility: hidden;
+        pointer-events: none;
+    }
+
+    #editDrawer.open {
+        /* A transformed scroll container also scrolls its fixed descendants. */
+        transform: none;
+        transition: none;
+    }
+
+    #editDrawer .product-inline-form > .product-inline-actions {
+        position: static;
+        z-index: auto;
+        bottom: auto;
+        margin: 14px 0 0;
+        padding: 0;
+        border-top: 0;
+        background: transparent;
+    }
+
+    #editDrawer.open .product-inline-form > .product-inline-actions:not(.product-external-actions) {
+        position: fixed;
+        z-index: 7;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        display: flex;
+        margin: 0;
+        padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+        border-top: 1px solid var(--erp-border, #e5eaf2);
+        background: var(--erp-surface, #fff);
+    }
+
+    #editDrawer .product-inline-actions:not(.product-external-actions) button {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+
+    #editDrawer .product-inline-form > .product-external-actions {
+        padding-top: 12px;
+        border-top: 1px solid var(--erp-border);
     }
 }
 

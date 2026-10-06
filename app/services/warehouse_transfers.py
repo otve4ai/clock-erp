@@ -178,6 +178,7 @@ def product_stock_summary(connection, product_id):
         'SELECT physical_stock FROM erp_component_inventory WHERE product_id=?',
         (product_id,),
     ).fetchone()
+    bundle = connection.execute('SELECT 1 FROM erp_product_bundles WHERE product_id=?', (product_id,)).fetchone()
     warehouses = connection.execute(
         "SELECT id,name,code,active FROM erp_warehouses "
         "ORDER BY CASE WHEN id='default' THEN 0 ELSE 1 END,name,id"
@@ -195,5 +196,6 @@ def product_stock_summary(connection, product_id):
             'quantity': float(stock.get('quantity', 0)) if confirmed else None,
             'in_transit': float(stock.get('in_transit', 0)),
             'confirmed': confirmed,
+            'editable': bool(warehouse['active']) and component is None and bundle is None,
         })
     return result

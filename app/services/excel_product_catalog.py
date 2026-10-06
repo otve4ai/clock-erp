@@ -246,6 +246,50 @@ def _record_manual_stock_adjustment(
     )
 
 
+def _adjust_warehouse_stock(connection, database, product_id, warehouse_id,
+                            expected, quantity, reason, actor):
+    """Compare and correct one warehouse inside the product save transaction."""
+    from app.services.component_inventory import balance, write_balance
+    if not isinstance(warehouse_id, str) or not warehouse_id:
+        raise ValueError("Выберите конкретный склад для корректировки.")
+    amounts = []
+    for value in (expected, quantity):
+        if isinstance(value, bool) or value is None or str(value).strip() == "":
+            raise ValueError("Укажите исходный и новый остаток склада.")
+        try:
+            amount = float(str(value).replace(",", "."))
+        except (ValueError, TypeError):
+            raise ValueError("Остаток должен быть целым неотрицательным числом.")
+        if not math.isfinite(amount) or not 0 <= amount <= 2147483647 or amount != int(amount):
+            raise ValueError("Остаток должен быть целым неотрицательным числом.")
+        amounts.append(amount)
+    expected, quantity = amounts
+    before = balance(connection, product_id, warehouse_id=warehouse_id)
+    if before != expected:
+        raise ValueError("Остаток выбранного склада уже изменился. Откройте карточку заново и проверьте количество.")
+    if before == quantity:
+        return
+    warehouse = connection.execute("SELECT name FROM erp_warehouses WHERE id=?", (warehouse_id,)).fetchone()
+    stamp, identity = utc_now(), str(uuid.uuid4())
+    reason = text(reason) or "Редактирование карточки товара"
+    write_balance(connection, product_id, quantity, 'manual', stamp, warehouse_id=warehouse_id)
+    connection.execute(
+        "INSERT INTO catalog_stock_movements (id,product_id,movement_type,quantity_delta,"
+        "stock_before,stock_after,source_type,source_id,operation_kind,source,user_name,"
+        "comment,created_at,warehouse_id) VALUES (?,?,'manual_adjustment',?,?,?,"
+        "'product_card',?,'correction','Карточка товара',?,?,?,?)",
+        (identity, product_id, quantity - before, before, quantity, identity,
+         actor['actor_name'], reason, stamp, warehouse_id),
+    )
+    AuditJournal(database).record(
+        'product', product_id, 'updated', 'Корректировка остатка', warehouse['name'],
+        before={'stock': before}, after={'stock': quantity},
+        metadata={'warehouse_id': warehouse_id, 'warehouse_name': warehouse['name'],
+                  'movement_id': identity, 'reason': reason},
+        source='Карточка товара', connection=connection, **actor,
+    )
+
+
 def _display_property(row):
     value = _load_json(row["display_value_json"], None)
     if value in (None, "", []):
@@ -1678,7 +1722,10 @@ class ExcelProductCatalog:
                        category=None, cell=None, stock=None, stock_reason="",
                        brand_id=None, category_id=None, price=UNSET,
                        actor_id="", actor_name="", actor_type="system",
-                       model=None):
+                       model=None, stock_warehouse_id=None, stock_expected=None):
+        scoped_stock = stock_warehouse_id is not None or stock_expected is not None
+        if scoped_stock and (stock is None or stock_warehouse_id is None or stock_expected is None):
+            raise ValueError("Для корректировки нужны склад, исходный и новый остаток.")
         self.database.initialize()
         with self.database.transaction() as connection:
             product = connection.execute(
@@ -1802,7 +1849,7 @@ class ExcelProductCatalog:
                         values.get("bitrix_price_currency") or "RUB"
                     )
             stock_before = float(values["stock"] or 0)
-            if stock is not None:
+            if stock is not None and not scoped_stock:
                 try:
                     stock_after = float(str(stock).replace(",", "."))
                 except (TypeError, ValueError):
@@ -1823,7 +1870,11 @@ class ExcelProductCatalog:
             })
             values["raw_excel_json"] = _json(raw_excel)
             values["updated_at"] = utc_now()
-            _restore_columns(connection, product_id, values, PRODUCT_MUTABLE_COLUMNS)
+            columns = PRODUCT_MUTABLE_COLUMNS
+            if scoped_stock:
+                # HK changes must not even rewrite the legacy TTT balance.
+                columns = tuple(column for column in columns if column not in ('stock', 'stock_source'))
+            _restore_columns(connection, product_id, values, columns)
             if model is not None or brand_changed:
                 values["model_id"] = get_or_create_model_record(
                     connection, values.get("brand_id"), values.get("model")
@@ -1840,7 +1891,13 @@ class ExcelProductCatalog:
                 brand_id=values.get("brand_id"),
                 category_id=values.get("category_id"),
             )
-            if stock is not None:
+            if scoped_stock:
+                _adjust_warehouse_stock(
+                    connection, self.database, product_id, stock_warehouse_id,
+                    stock_expected, stock, stock_reason,
+                    dict(actor_id=actor_id, actor_name=actor_name, actor_type=actor_type),
+                )
+            elif stock is not None:
                 _record_manual_stock_adjustment(
                     connection,
                     product_id,
