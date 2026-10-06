@@ -181,6 +181,14 @@ class ProductsRedesignStructureTest(unittest.TestCase):
         self.assertIn("position: static;", actions)
         self.assertIn("margin: 14px 0 0;", actions)
         self.assertIn("bottom: auto;", actions)
+        primary = css.split(
+            "#editDrawer.open .product-inline-form > "
+            ".product-inline-actions:not(.product-external-actions) {", 1
+        )[1].split("}", 1)[0]
+        self.assertIn("position: fixed;", primary)
+        self.assertIn("bottom: 0;", primary)
+        self.assertIn("margin: 0;", primary)
+        self.assertIn("env(safe-area-inset-bottom)", primary)
         self.assertIn("#editDrawer .product-detail-grid > .category-cell-form", css)
 
     def test_table_has_synchronized_top_scrollbar_and_mobile_overflow(self):

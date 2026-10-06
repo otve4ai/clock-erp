@@ -390,6 +390,23 @@ test('required product viewports preserve cards, history and zero page overflow'
     const editButton = product.card.getByRole('button', { name: 'Редактировать' });
     await expect(editButton).toBeInViewport();
     await expect(product.card.locator('.close-button')).toBeInViewport();
+    if (viewport.width < 768) {
+      await expect(product.card.locator('.product-external-actions')).toHaveCSS('position', 'static');
+      await editButton.click();
+      const settings = product.card.locator('[data-product-additional-settings]');
+      await settings.locator('summary').click();
+      await expect(settings).toHaveAttribute('open', '');
+      await expect(product.card.locator('#editCell')).toBeVisible();
+      const saveButton = product.card.getByRole('button', { name: 'Сохранить', exact: true });
+      const cancelButton = product.card.getByRole('button', { name: 'Отмена', exact: true });
+      await expect(saveButton).toBeInViewport();
+      await expect(cancelButton).toBeInViewport();
+      await product.card.locator('.product-history-section').scrollIntoViewIfNeeded();
+      await expect(saveButton).toBeInViewport();
+      await expect(cancelButton).toBeInViewport();
+      await cancelButton.click();
+      await expect(editButton).toBeInViewport();
+    }
     await closeProductCard(page);
 
     const historyLength = await page.evaluate(() => history.length);
