@@ -20654,6 +20654,7 @@ def api_product_update_request_payload():
     allowed_names = (
         "name", "model", "article", "brand", "category", "brand_id",
         "category_id", "cell", "stock", "stock_reason", "price",
+        "stock_warehouse_id", "stock_expected",
     )
     payload = {
         key: request.form.get(key)
@@ -21191,7 +21192,7 @@ def api_product_resource(product_id):
         )
         allowed_fields = {
             "name", "model", "article", "brand", "category", "brand_id", "category_id",
-            "cell", "stock", "stock_reason", "price",
+            "cell", "stock", "stock_reason", "price", "stock_warehouse_id", "stock_expected",
         }
         unknown_fields = set(payload) - allowed_fields
         if unknown_fields:
@@ -21213,6 +21214,11 @@ def api_product_resource(product_id):
                 "Не передано ни одного изменения.",
                 422,
             )
+        if 'stock_warehouse_id' in payload or 'stock_expected' in payload:
+            if any(payload.get(key) in (None, '') for key in ('stock', 'stock_warehouse_id', 'stock_expected')):
+                raise ValueError("Для корректировки нужны склад, исходный и новый остаток.")
+            if image_action != 'keep':
+                raise ValueError("Сохраните корректировку остатка и изменение фотографии отдельно.")
         remote_product_id = str(
             product.get("moysklad_product_id") or ""
         ).strip()

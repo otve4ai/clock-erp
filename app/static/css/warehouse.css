@@ -3673,12 +3673,48 @@ body.edit-drawer-open:has(.app.sidebar-collapsed) #drawerBackdrop {
     grid-column: 1 / -1;
 }
 
+#editDrawer .product-detail-grid > .category-cell-form {
+    margin: 0;
+}
+
 #editDrawer .product-detail-name .product-detail-value {
     font-size: var(--erp-type-section-title-size);
 }
 
+#editDrawer .product-detail-cell,
 #editDrawer .product-detail-model {
+    display: grid;
+    grid-template-columns: minmax(84px, 1fr) minmax(0, 1.5fr);
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
     margin-top: 12px;
+}
+
+#editDrawer .product-detail-cell > .product-detail-label,
+#editDrawer .product-detail-model > .product-detail-label {
+    margin: 0;
+}
+
+#editDrawer .product-detail-cell > input.product-detail-input,
+#editDrawer .product-detail-model > input.product-detail-input {
+    min-width: 0;
+    height: 34px;
+    min-height: 34px;
+    margin: 0;
+    padding: 0 8px;
+    border: 1px solid var(--erp-border, #dce3ed);
+    border-radius: 8px;
+    background: var(--erp-surface, #fff);
+    color: var(--erp-text, #172033);
+    font: inherit;
+    font-size: 13px;
+}
+
+#editDrawer .product-detail-cell > input.product-detail-input:focus-visible,
+#editDrawer .product-detail-model > input.product-detail-input:focus-visible {
+    outline: 2px solid var(--theme-focus, #2563eb);
+    outline-offset: 1px;
 }
 
 #editDrawer .product-detail-label {
@@ -4099,6 +4135,22 @@ body.edit-drawer-open:has(.app.sidebar-collapsed) #drawerBackdrop {
 
     #editDrawer .product-inline-actions {
         align-items: stretch;
+    }
+
+    /* Two action groups must not share the legacy sticky footer or overlap. */
+    #editDrawer .product-inline-form > .product-inline-actions {
+        position: static;
+        z-index: auto;
+        bottom: auto;
+        margin: 14px 0 0;
+        padding: 0;
+        border-top: 0;
+        background: transparent;
+    }
+
+    #editDrawer .product-inline-form > .product-external-actions {
+        padding-top: 12px;
+        border-top: 1px solid var(--erp-border);
     }
 
     #editDrawer .product-inline-actions button,

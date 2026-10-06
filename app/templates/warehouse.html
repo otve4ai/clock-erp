@@ -1577,25 +1577,29 @@
                 <div class="product-detail-label">Остатки по складам</div>
                 <div id="detailStock" class="product-warehouse-stocks" role="status" aria-live="polite">—</div>
                 <div id="bundleAvailability" role="status"></div>
-                <label for="editStock" class="product-detail-input product-warehouse-edit-label">Корректировка остатка TTT</label>
-                <input id="editStock" class="product-detail-input" type="number" min="0" step="1" aria-label="Остаток TTT" required
-                    {% if current_user and current_user.role != "admin" %}readonly aria-readonly="true"{% else %}name="stock"{% endif %}>
-            </div>
-
-            <div class="product-detail-card">
-                <div class="product-detail-label">Ячейка</div>
-                <div id="detailCell" class="product-detail-value">—</div>
-                <input id="editCell" class="product-detail-input" type="text" name="cell" aria-label="Складская ячейка товара">
+                <div class="product-detail-input product-warehouse-editor">
+                    <label id="editStockLabel" for="editStock" class="product-warehouse-edit-label">Остаток выбранного склада</label>
+                    <div class="product-warehouse-quantity-input">
+                        <input id="editStock" class="product-detail-input" type="number" min="0" max="2147483647" step="1" aria-label="Остаток выбранного склада" required disabled
+                            {% if current_user and current_user.role != "admin" %}readonly aria-readonly="true"{% else %}name="stock"{% endif %}>
+                        <span aria-hidden="true">шт.</span>
+                    </div>
+                </div>
             </div>
             </div>
 
             <details class="product-additional-settings" data-product-additional-settings>
                 <summary>Дополнительные настройки</summary>
                 <div class="product-additional-settings-body">
-                    <div class="product-detail-card product-detail-model">
-                        <div class="product-detail-label">Модель часов</div>
+                    <div class="product-detail-model">
+                        <label for="editModel" class="product-detail-label">Модель часов</label>
                         <div id="detailModel" class="product-detail-value">—</div>
                         <input id="editModel" class="product-detail-input" type="text" name="model" aria-label="Модель товара">
+                    </div>
+                    <div class="product-detail-cell">
+                        <label for="editCell" class="product-detail-label">Ячейка</label>
+                        <div id="detailCell" class="product-detail-value">—</div>
+                        <input id="editCell" class="product-detail-input" type="text" name="cell" aria-label="Складская ячейка товара">
                     </div>
                     <div class="product-setting-row" data-required-strap-settings>
                         <div class="product-setting-copy">
@@ -2048,7 +2052,13 @@
         function renderProductStock(productId) {
             return window.ProductWarehouseDetails.loadStocks(
                 document.getElementById("detailStock"), productId,
-                document.getElementById("warehouseSelector")?.value || "default"
+                document.getElementById("warehouseSelector")?.value || "default",
+                {
+                    input: document.getElementById("editStock"),
+                    label: document.getElementById("editStockLabel"),
+                    isSaving: () => document.getElementById("inlineProductForm").dataset.submitting === "true",
+                    onBlocked: () => setDetailPhotoStatus("Сначала сохраните или отмените изменение остатка текущего склада."),
+                }
             );
         }
 
@@ -2274,7 +2284,7 @@
             if (!form.classList.contains("is-editing") || !card) {
                 return;
             }
-            if (event.target.closest("input, button, a, .product-warehouse-others")) {
+            if (event.target.closest("input, button, a, .product-warehouse-card")) {
                 return;
             }
 
@@ -2486,7 +2496,6 @@
                 editModel: button.dataset.model || "",
                 editArticle: button.dataset.article || "",
                 editPrice: button.dataset.price ?? "",
-                editStock: productStock,
                 editCell: productCell,
             };
             Object.entries(editableValues).forEach(function(entry) {
@@ -2670,7 +2679,6 @@
                 editModel: product.model || "",
                 editArticle: product.article || "",
                 editPrice: product.price ?? "",
-                editStock: String(product.stock ?? 0),
                 editCell: product.cell || "",
             };
             Object.entries(editableValues).forEach(function(entry) {
@@ -2719,10 +2727,7 @@
                 await canonicalizeInlineProductTaxonomy(form);
                 const body = new FormData(form);
                 const stockInput = document.getElementById("editStock");
-                if (stockInput.value === stockInput.dataset.originalValue) {
-                    body.delete("stock");
-                    body.delete("stock_reason");
-                }
+                window.ProductWarehouseDetails.appendStockChange(body, stockInput);
                 const photoAction = form.dataset.photoAction || "keep";
                 body.set("product_image_action", photoAction);
                 body.set("bitrix_image_file_id", form.dataset.photoFileId || "");

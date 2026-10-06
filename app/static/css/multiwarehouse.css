@@ -70,38 +70,68 @@
 .transfer-workspace form {display:flex;gap:12px;flex-wrap:wrap;align-items:end;}
 .transfer-workspace label {display:flex;flex-direction:column;gap:4px;}
 
-/* Keep the existing product card; only its stock cell becomes warehouse-aware. */
+/* The floating picker never adds warehouse rows to the card's normal flow. */
+#editDrawer .product-inline-form .product-detail-card.product-warehouse-card {
+    grid-column:1 / -1;height:auto;min-height:0;gap:8px;cursor:default;overflow:visible;
+}
+#editDrawer .product-warehouse-card > .product-detail-label {margin:0;}
 #editDrawer .product-inline-form .product-warehouse-card #detailStock.product-warehouse-stocks {
-    display:grid;align-items:stretch;gap:6px;width:100%;font-weight:400;
+    display:grid;align-items:stretch;gap:4px;width:100%;min-width:0;font-weight:400;flex:none;
 }
 #editDrawer .product-warehouse-card #detailStock::before {display:none;}
-#editDrawer .product-warehouse-stock {
-    display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;
-    padding:6px 8px;border:1px solid transparent;border-radius:7px;
+#editDrawer .product-warehouse-picker {position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:36px 15px;align-items:center;gap:4px 8px;min-width:0;}
+#editDrawer .product-warehouse-picker__trigger {
+    display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:0;
+    height:36px;margin:0;padding:0 9px;border:1px solid var(--erp-border,#dce3ed);border-radius:8px;
+    background:var(--erp-surface,#fff);color:var(--erp-text,#172033);font:inherit;font-size:13px;cursor:pointer;
 }
-#editDrawer .product-warehouse-stock.is-selected {
-    background:var(--erp-primary-soft,#eff6ff);border-color:var(--erp-border,#dbe4f0);
+#editDrawer .product-warehouse-picker__caption {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#editDrawer .product-warehouse-picker__arrow {flex:0 0 6px;height:6px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:translateY(-2px) rotate(45deg);}
+#editDrawer .product-warehouse-picker__trigger[aria-expanded="true"] .product-warehouse-picker__arrow {transform:translateY(2px) rotate(225deg);}
+#editDrawer .product-warehouse-picker__quantity {max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-variant-numeric:tabular-nums;}
+#editDrawer .product-warehouse-picker__transit {grid-column:1 / -1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px;color:var(--erp-muted,#64748b);}
+#editDrawer .product-warehouse-picker__list {
+    position:absolute;z-index:30;top:42px;left:0;width:max(100%,260px);max-width:calc(100vw - 52px);
+    max-height:240px;overflow-y:auto;overscroll-behavior:contain;box-sizing:border-box;padding:5px;
+    border:1px solid var(--erp-border,#dce3ed);border-radius:10px;background:var(--erp-surface,#fff);
+    box-shadow:0 12px 28px rgba(15,23,42,.16);
 }
-#editDrawer .product-warehouse-stock__name {overflow-wrap:anywhere;}
-#editDrawer .product-warehouse-stock__quantity {text-align:right;}
-#editDrawer .product-warehouse-stock__note,
-#editDrawer .product-warehouse-stock__transit {
-    grid-column:1 / -1;font-size:11px;color:var(--erp-muted,#64748b);
+#editDrawer .product-warehouse-picker__list[hidden],
+#editDrawer .product-warehouse-picker__transit[hidden] {display:none;}
+#editDrawer .product-warehouse-picker__list[data-direction="up"] {top:auto;bottom:calc(100% + 6px);}
+#editDrawer .product-warehouse-option {
+    display:grid;grid-template-columns:14px minmax(0,1fr) auto;align-items:center;gap:3px 8px;
+    width:100%;min-height:36px;margin:0;padding:8px;border:0;border-radius:6px;background:transparent;
+    color:var(--erp-text,#172033);font:inherit;font-size:13px;text-align:left;cursor:pointer;
 }
-#editDrawer .product-warehouse-edit-label {margin-top:10px;font-size:12px;}
-#editDrawer .product-warehouse-others {min-width:0;}
-#editDrawer .product-warehouse-others__summary {
-    padding:4px 8px;font-size:12px;font-weight:600;
-    color:var(--erp-primary,#2563eb);cursor:pointer;overflow-wrap:anywhere;
+#editDrawer .product-warehouse-option__check {visibility:hidden;color:var(--erp-primary,#2563eb);}
+#editDrawer .product-warehouse-option[aria-selected="true"] {background:var(--erp-primary-soft,#eff6ff);}
+#editDrawer .product-warehouse-option[aria-selected="true"] .product-warehouse-option__check {visibility:visible;}
+#editDrawer .product-warehouse-option__name {overflow-wrap:anywhere;}
+#editDrawer .product-warehouse-option__quantity {max-width:110px;text-align:right;font-variant-numeric:tabular-nums;}
+#editDrawer .product-warehouse-option__transit {grid-column:2 / -1;font-size:11px;color:var(--erp-muted,#64748b);}
+#editDrawer .product-warehouse-option:hover {background:var(--erp-surface-muted,#f1f5f9);}
+#editDrawer .product-warehouse-picker__trigger:focus-visible,
+#editDrawer .product-warehouse-option:focus-visible {outline:2px solid var(--theme-focus,#2563eb);outline-offset:-2px;}
+#editDrawer .product-inline-form.is-editing .product-warehouse-card .product-warehouse-editor {
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding-top:8px;border-top:1px solid var(--erp-border,#e5e7eb);
 }
-#editDrawer .product-warehouse-others__list {
-    max-height:200px;overflow-y:auto;overscroll-behavior:contain;
-    margin-top:4px;border:1px solid var(--erp-border,#dbe4f0);border-radius:7px;
+#editDrawer .product-warehouse-edit-label {
+    margin:0;min-width:0;font-size:12px;line-height:1.4;color:var(--erp-muted,#64748b);
 }
-#editDrawer .product-warehouse-others__summary:focus-visible,
-#editDrawer .product-warehouse-others__list:focus-visible {
-    outline:2px solid var(--erp-primary,#2563eb);outline-offset:1px;border-radius:4px;
+#editDrawer .product-warehouse-quantity-input {display:flex;align-items:center;gap:8px;flex:0 0 112px;}
+#editDrawer .product-warehouse-quantity-input > span {font-size:12px;color:var(--erp-muted,#64748b);}
+#editDrawer .product-inline-form .product-warehouse-card input.product-detail-input {
+    width:100%;min-width:0;height:34px;min-height:34px;margin:0;padding:0 8px;
+    border:1px solid var(--erp-border,#dce3ed);border-radius:8px;
+    background:var(--erp-surface,#fff);color:var(--erp-text,#172033);font:inherit;font-size:13px;
 }
+#editDrawer .product-warehouse-card input.product-detail-input:focus-visible {
+    outline:2px solid var(--theme-focus,#2563eb);outline-offset:1px;
+}
+#editDrawer .product-warehouse-card #bundleAvailability:empty {display:none;}
+#editDrawer .product-warehouse-card #bundleAvailability {font-size:12px;line-height:1.4;color:var(--erp-muted,#64748b);}
 .product-stock-history-entry {
     display:flex;flex-direction:column;gap:3px;padding:10px 0;
     border-bottom:1px solid var(--erp-border,#e5e7eb);overflow-wrap:anywhere;

@@ -69,7 +69,7 @@ class ProductsRedesignStructureTest(unittest.TestCase):
         products = self.source("warehouse.html")
         for label in (
             "Название товара", "Артикул товара", "Модель товара", "Цена товара",
-            "Остаток TTT", "Складская ячейка товара", "Заменить фото товара",
+            "Остаток выбранного склада", "Складская ячейка товара", "Заменить фото товара",
         ):
             self.assertIn('aria-label="{}"'.format(label), products)
 
@@ -110,6 +110,78 @@ class ProductsRedesignStructureTest(unittest.TestCase):
         self.assertIn('content: "↗"', css)
         self.assertIn('publicProductLink.hidden = !publicProductUrl', products)
         self.assertIn('bitrixLink.setAttribute("aria-disabled", "true")', products)
+
+    def test_stock_panel_contains_only_warehouse_and_quantity(self):
+        products = self.source("warehouse.html")
+        detail = products.split('id="inlineProductForm"', 1)[1].split("</form>", 1)[0]
+        stock = detail.split('class="product-detail-card product-warehouse-card"', 1)[1].split(
+            'data-product-additional-settings', 1
+        )[0]
+        for field in ("detailStock", "detailCell", "editStock", "editCell"):
+            self.assertEqual(detail.count('id="{}"'.format(field)), 1)
+        for field in ("detailStock", "editStock"):
+            self.assertIn('id="{}"'.format(field), stock)
+        for field in ("detailCell", "editCell"):
+            self.assertNotIn('id="{}"'.format(field), stock)
+        self.assertNotIn('product-warehouse-overview', products)
+        self.assertIn('class="product-detail-input product-warehouse-editor"', stock)
+        self.assertIn('class="product-warehouse-quantity-input"', stock)
+        self.assertIn('readonly aria-readonly="true"{% else %}name="stock"', stock)
+        self.assertIn('input, button, a, .product-warehouse-card', products)
+
+        css = (ROOT / "app/static/css/multiwarehouse.css").read_text(encoding="utf-8")
+        panel = css.split(
+            "#editDrawer .product-inline-form .product-detail-card.product-warehouse-card {", 1
+        )[1].split("}", 1)[0]
+        for rule in ("grid-column:1 / -1", "height:auto", "min-height:0"):
+            self.assertIn(rule, panel)
+        editor = css.split(
+            "#editDrawer .product-inline-form.is-editing .product-warehouse-card .product-warehouse-editor {", 1
+        )[1].split("}", 1)[0]
+        self.assertIn("display:flex", editor)
+        self.assertIn("max-height:240px", css)
+        self.assertIn(".product-warehouse-picker__list[hidden]", css)
+        popup = css.split('#editDrawer .product-warehouse-picker__list {', 1)[1].split('}', 1)[0]
+        self.assertIn('position:absolute', popup)
+        self.assertIn('overflow-y:auto', popup)
+        self.assertNotIn('product-warehouse-others', css)
+        self.assertNotIn('product-warehouse-cell', css)
+        self.assertNotIn('product-warehouse-overview', css)
+
+    def test_additional_settings_keep_compact_model_and_strap_separate_from_stock(self):
+        products = self.source("warehouse.html")
+        settings = products.split('data-product-additional-settings>', 1)[1].split(
+            "</details>", 1
+        )[0]
+        self.assertIn('class="product-detail-model"', settings)
+        self.assertNotIn('class="product-detail-card', settings)
+        self.assertIn('<label for="editModel"', settings)
+        self.assertEqual(settings.count('id="editModel"'), 1)
+        self.assertIn('name="model" aria-label="Модель товара"', settings)
+        self.assertLess(settings.index('id="editModel"'), settings.index('data-required-strap-settings'))
+        self.assertIn('class="product-detail-cell"', settings)
+        self.assertIn('<label for="editCell"', settings)
+        self.assertIn('name="cell" aria-label="Складская ячейка товара"', settings)
+        self.assertLess(settings.index('id="editModel"'), settings.index('id="editCell"'))
+        self.assertLess(settings.index('id="editCell"'), settings.index('data-required-strap-settings'))
+        for outside in ('id="editStock"', 'type="submit"'):
+            self.assertNotIn(outside, settings)
+        css = (ROOT / "app/static/css/warehouse.css").read_text(encoding="utf-8")
+        model = css.split('#editDrawer .product-detail-model {', 1)[1].split('}', 1)[0]
+        self.assertIn('display: grid;', model)
+        self.assertIn('minmax(0, 1.5fr)', model)
+        self.assertNotIn('height:', model)
+        self.assertIn('#editDrawer .product-detail-cell,\n#editDrawer .product-detail-model {', css)
+
+    def test_mobile_card_actions_cannot_overlap_as_two_sticky_footers(self):
+        css = (ROOT / "app/static/css/warehouse.css").read_text(encoding="utf-8")
+        actions = css.split(
+            "#editDrawer .product-inline-form > .product-inline-actions {", 1
+        )[1].split("}", 1)[0]
+        self.assertIn("position: static;", actions)
+        self.assertIn("margin: 14px 0 0;", actions)
+        self.assertIn("bottom: auto;", actions)
+        self.assertIn("#editDrawer .product-detail-grid > .category-cell-form", css)
 
     def test_table_has_synchronized_top_scrollbar_and_mobile_overflow(self):
         products = self.source("warehouse.html")
