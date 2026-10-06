@@ -4065,6 +4065,12 @@ body.edit-drawer-open:has(.app.sidebar-collapsed) #drawerBackdrop {
 
 @media (max-width: 767px) {
     /* Keep one action bar visible; external links remain in the scroll flow. */
+    #editDrawer.open {
+        /* A transformed scroll container also scrolls its fixed descendants. */
+        transform: none;
+        transition: none;
+    }
+
     #editDrawer .product-inline-form > .product-inline-actions {
         position: static;
         z-index: auto;

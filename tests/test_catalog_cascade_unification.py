@@ -71,7 +71,13 @@ class CatalogCascadeUnificationTest(unittest.TestCase):
         self.assertIn('data-catalog-item="{{ option|tojson|forceescape }}"',
                       component)
         self.assertIn("canonicalizeInlineProductTaxonomy", warehouse)
-        self.assertIn('body.delete("stock")', warehouse)
+        self.assertIn("ProductWarehouseDetails.appendStockChange(body, stockInput)", warehouse)
+        stock_script = self.source("app/static/js/product-warehouse-details.js")
+        self.assertIn(
+            "['stock', 'stock_reason', 'stock_warehouse_id', 'stock_expected']"
+            ".forEach(key => body.delete(key))",
+            stock_script,
+        )
         self.assertIn("AbortController", script)
 
     def test_category_creation_uses_accessible_modal(self):

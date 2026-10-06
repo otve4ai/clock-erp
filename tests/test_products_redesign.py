@@ -189,6 +189,10 @@ class ProductsRedesignStructureTest(unittest.TestCase):
         self.assertIn("bottom: 0;", primary)
         self.assertIn("margin: 0;", primary)
         self.assertIn("env(safe-area-inset-bottom)", primary)
+        mobile = css.split("/* Keep one action bar visible;", 1)[1]
+        drawer = mobile.split("#editDrawer.open {", 1)[1].split("}", 1)[0]
+        self.assertIn("transform: none;", drawer)
+        self.assertIn("transition: none;", drawer)
         self.assertIn("#editDrawer .product-detail-grid > .category-cell-form", css)
 
     def test_table_has_synchronized_top_scrollbar_and_mobile_overflow(self):
