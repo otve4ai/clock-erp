@@ -1805,12 +1805,18 @@ class SharedCatalog:
         with self.database.connect() as c:
             from app.services.component_inventory import document_warehouse
             document_warehouse(c, warehouse_id=warehouse_id)
-            rows = c.execute('SELECT COALESCE(d.id,0) AS id,COALESCE(d.name,?) AS name,COUNT(*) AS product_count '
+            # Aggregate the same warehouse as the product picker, not legacy TTT stock.
+            rows = c.execute('SELECT COALESCE(d.id,0) AS id,COALESCE(d.name,?) AS name,COUNT(*) AS product_count, '
+                'COALESCE(SUM(ws.quantity),0) AS stock_total '
                 'FROM catalog_excel_products p LEFT JOIN erp_categories c ON c.id=p.category_id '
+                'LEFT JOIN erp_warehouse_stocks ws ON ws.product_id=p.id AND ws.warehouse_id=? '
                 'LEFT JOIN {} d ON d.id=p.{} '.format(table,field) + where + ' GROUP BY d.id,d.name ORDER BY name',
-                ['Не указан'] + params).fetchall()
+                ['Не указан', warehouse_id] + params).fetchall()
         key = catalog_search_key(query)
-        items = [dict(row, count=row['product_count']) for row in rows if not key or catalog_search_key(row['name']).startswith(key)]
+        items = [dict(row, count=row['product_count'],
+                      stock_total=normalized_stock_value(row['stock_total']),
+                      stock_display=format_stock_value(row['stock_total']))
+                 for row in rows if not key or catalog_search_key(row['name']).startswith(key)]
         return items[:max(1,min(int(limit),200))], len(items)
 
     def legacy_links(self, entity_type, entity_ids):

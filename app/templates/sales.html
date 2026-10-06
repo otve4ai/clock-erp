@@ -2946,12 +2946,6 @@
                 <input id="saleEditId" type="hidden" disabled>
                 <input id="manualSaleRequestId" type="hidden" name="idempotency_key">
                 <input id="saleSource" type="hidden" name="source">
-                <div class="field">
-                    <label for="saleWarehouse">Склад списания</label>
-                    <select id="saleWarehouse" name="warehouse_id" disabled>
-                        {% for warehouse in warehouses|default([]) %}<option value="{{ warehouse.id }}">{{ warehouse.name }}</option>{% endfor %}
-                    </select>
-                </div>
                 <input
                     id="product_name"
                     type="hidden"
@@ -3000,6 +2994,26 @@
                         role="alert"
                         hidden
                     ></p>
+                    <div class="field sale-catalog-field sale-warehouse-field">
+                        <label for="saleWarehouseComboboxTrigger">Склад списания</label>
+                        {% set warehouse_options = namespace(items=[]) %}
+                        {% for warehouse in warehouses|default([]) %}
+                            {% set warehouse_options.items = warehouse_options.items + [{
+                                "value": warehouse.id, "name": warehouse.name, "count": ""
+                            }] %}
+                        {% endfor %}
+                        {{ render_catalog_combobox(
+                            "saleWarehouseCombobox",
+                            "warehouse_id",
+                            warehouse_options.items,
+                            item_label="склад списания",
+                            disabled=true,
+                            component_class="filter-combobox",
+                            input_id="saleWarehouse",
+                            search_placeholder="Поиск склада",
+                            floating_layer=true
+                        ) }}
+                    </div>
                     <h3 class="erp-form-section-title field-wide sale-section-title">Товар</h3>
                     <div class="field sale-catalog-field">
                         <label for="saleBrandTrigger">Бренд</label>
@@ -5872,14 +5886,26 @@
         window.location.assign(url);
     }
 
+    function setSaleWarehouseControl(warehouseId, disabled) {
+        const combobox = document.getElementById("saleWarehouseCombobox");
+        const option = Array.from(
+            combobox.querySelectorAll(".brand-combobox-option")
+        ).find((item) => item.dataset.brand === warehouseId);
+        const label = option?.querySelector(".brand-combobox-option-label")
+            ?.textContent.trim() || warehouseId;
+        window.setCatalogComboboxDisabled(combobox, disabled);
+        window.setBrandComboboxValue(combobox, warehouseId, label);
+        return label;
+    }
+
     function showSaleForm(sourceKey) {
         const isEditing = manualSaleForm.dataset.editing === "1";
         const previousWarehouse = manualSaleForm.dataset.warehouseId;
         manualSaleForm.dataset.warehouseId = isEditing ? (editingSale?.warehouse_id || 'default') : ({amazon:'hong-kong'}[sourceKey] || 'default');
-        const warehouseSelect = document.getElementById('saleWarehouse');
-        warehouseSelect.value = manualSaleForm.dataset.warehouseId;
-        warehouseSelect.disabled = isEditing;
-        if (!isEditing && previousWarehouse && previousWarehouse !== warehouseSelect.value) resetProductFilters();
+        const warehouseLabel = setSaleWarehouseControl(
+            manualSaleForm.dataset.warehouseId, isEditing
+        );
+        if (!isEditing && previousWarehouse && previousWarehouse !== manualSaleForm.dataset.warehouseId) resetProductFilters();
         saleSourceInput.value = sourceLabels[sourceKey];
         saleFormFields.disabled = false;
         manualSaleForm.classList.remove("is-hidden");
@@ -5906,7 +5932,7 @@
             isEditing
                 ? "Дата, бренд, категория, товар, количество, номер заказа и стоимость доставки защищены от изменения. Цену и доступные данные продажи можно редактировать"
                 : "Источник: " + sourceLabels[sourceKey]
-                    + ". Склад: " + ({'hong-kong':'Гонконг',default:'TTT'}[manualSaleForm.dataset.warehouseId] || manualSaleForm.dataset.warehouseId) + ".";
+                    + ". Склад: " + warehouseLabel + ".";
         saleSubmitButton.textContent = isEditing
             ? "Сохранить изменения"
             : "Добавить продажу в " + sourceLabels[sourceKey];
@@ -5947,7 +5973,7 @@
     }
 
     function clearSaleFormSource() {
-        document.getElementById('saleWarehouse').disabled = true;
+        setSaleWarehouseControl("", true);
         saleSourceInput.value = "";
         saleFormFields.disabled = true;
         modalTitle.textContent = "Добавить продажу";
@@ -6279,14 +6305,20 @@
         renderSaleProductPhoto(null);
     }
 
-    document.getElementById('saleWarehouse').addEventListener('change', event => {
-        if (manualSaleForm.dataset.editing === '1') return;
-        manualSaleForm.dataset.warehouseId = event.target.value;
+    function onSaleWarehouseChange(event) {
+        const input = document.getElementById("saleWarehouse");
+        if (manualSaleForm.dataset.editing === "1" || input.disabled
+            || manualSaleForm.dataset.warehouseId === input.value) return;
+        manualSaleForm.dataset.warehouseId = input.value;
         manualSaleRequestId.value = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
         resetProductFilters();
-        modalDescription.textContent = `Источник: ${saleSourceInput.value}. Склад: ${event.target.selectedOptions[0]?.textContent || ''}.`;
+        modalDescription.textContent = `Источник: ${saleSourceInput.value}. Склад: ${event.detail.displayValue}.`;
         validateSaleQuantity();
-    });
+    }
+
+    document.getElementById("saleWarehouseCombobox").addEventListener(
+        "catalog-combobox:change", onSaleWarehouseChange
+    );
 
     function renderSaleComposition(components = []) {
         saleCompositionItems.replaceChildren();

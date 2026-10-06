@@ -1,3 +1,7 @@
+/* Also overrides the mobile card layout's explicit display on table cells. */
+.warehouse-products-table[data-site-status-hidden="true"] [data-column-key="site_status"] {
+    display:none !important;
+}
 .products-workspace-actions .products-warehouse-select {
     justify-content:flex-start;
     gap:8px;
@@ -79,16 +83,16 @@
     display:grid;align-items:stretch;gap:4px;width:100%;min-width:0;font-weight:400;flex:none;
 }
 #editDrawer .product-warehouse-card #detailStock::before {display:none;}
-#editDrawer .product-warehouse-picker {position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:36px 15px;align-items:center;gap:4px 8px;min-width:0;}
+#editDrawer .product-warehouse-picker {position:relative;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:36px 15px;align-items:center;gap:4px;min-width:0;}
 #editDrawer .product-warehouse-picker__trigger {
-    display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:0;
+    display:grid;grid-template-columns:minmax(0,1fr) auto 6px;align-items:center;gap:12px;width:100%;min-width:0;text-align:left;
     height:36px;margin:0;padding:0 9px;border:1px solid var(--erp-border,#dce3ed);border-radius:8px;
     background:var(--erp-surface,#fff);color:var(--erp-text,#172033);font:inherit;font-size:13px;cursor:pointer;
 }
 #editDrawer .product-warehouse-picker__caption {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-#editDrawer .product-warehouse-picker__arrow {flex:0 0 6px;height:6px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:translateY(-2px) rotate(45deg);}
+#editDrawer .product-warehouse-picker__arrow {width:6px;height:6px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:translateY(-2px) rotate(45deg);}
 #editDrawer .product-warehouse-picker__trigger[aria-expanded="true"] .product-warehouse-picker__arrow {transform:translateY(2px) rotate(225deg);}
-#editDrawer .product-warehouse-picker__quantity {max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-variant-numeric:tabular-nums;}
+#editDrawer .product-warehouse-picker__quantity {white-space:nowrap;text-align:right;font-size:13px;font-variant-numeric:tabular-nums;}
 #editDrawer .product-warehouse-picker__transit {grid-column:1 / -1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px;color:var(--erp-muted,#64748b);}
 #editDrawer .product-warehouse-picker__list {
     position:absolute;z-index:30;top:42px;left:0;width:max(100%,260px);max-width:calc(100vw - 52px);

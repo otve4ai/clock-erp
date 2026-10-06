@@ -148,6 +148,18 @@ class ProductsRedesignStructureTest(unittest.TestCase):
         self.assertNotIn('product-warehouse-cell', css)
         self.assertNotIn('product-warehouse-overview', css)
 
+    def test_stock_picker_keeps_name_quantity_and_arrow_in_one_control(self):
+        css = (ROOT / "app/static/css/multiwarehouse.css").read_text(encoding="utf-8")
+        trigger = css.split('#editDrawer .product-warehouse-picker__trigger {', 1)[1].split('}', 1)[0]
+        self.assertIn('grid-template-columns:minmax(0,1fr) auto 6px', trigger)
+        self.assertIn('text-align:left', trigger)
+        quantity = css.split('#editDrawer .product-warehouse-picker__quantity {', 1)[1].split('}', 1)[0]
+        self.assertIn('white-space:nowrap', quantity)
+        self.assertNotIn('max-width', quantity)
+        self.assertNotIn('text-overflow:ellipsis', quantity)
+        caption = css.split('#editDrawer .product-warehouse-picker__caption {', 1)[1].split('}', 1)[0]
+        self.assertIn('text-overflow:ellipsis', caption)
+
     def test_additional_settings_keep_compact_model_and_strap_separate_from_stock(self):
         products = self.source("warehouse.html")
         settings = products.split('data-product-additional-settings>', 1)[1].split(

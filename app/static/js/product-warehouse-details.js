@@ -62,8 +62,8 @@
         const caption = textElement('span', '', 'product-warehouse-picker__caption');
         const arrow = textElement('span', '', 'product-warehouse-picker__arrow');
         arrow.setAttribute('aria-hidden', 'true');
-        trigger.append(caption, arrow);
         const amount = textElement('strong', '', 'product-warehouse-picker__quantity');
+        trigger.append(caption, amount, arrow);
         const transit = textElement('span', '', 'product-warehouse-picker__transit');
         const list = textElement('div', '', 'product-warehouse-picker__list');
         list.id = `product-warehouse-options-${++pickerSequence}`;
@@ -73,7 +73,7 @@
         trigger.setAttribute('aria-controls', list.id);
         const options = ordered.map(stockRow);
         list.append(...options);
-        root.append(trigger, amount, transit, list);
+        root.append(trigger, transit, list);
         container.append(root);
 
         function update() {
