@@ -10,7 +10,12 @@ import sqlite3
 import subprocess
 import sys
 import time
+from contextlib import closing
 from pathlib import Path
+
+
+TEST_NAME_PREFIX = "Codex Services smoke "
+TEST_TOKEN_LENGTH = 12
 
 
 def counts(database):
@@ -39,6 +44,27 @@ def cleanup(database, service_id, expected_name):
         connection.commit()
 
 
+def cleanup_audit(database):
+    """Remove only audit rows created by this production smoke."""
+    with closing(sqlite3.connect(
+        database, timeout=15, isolation_level=None
+    )) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "DELETE FROM erp_audit_events WHERE entity_type='service' "
+            "AND length(object_label_snapshot)=? "
+            "AND substr(object_label_snapshot,1,?)=? "
+            "AND substr(object_label_snapshot,?) NOT GLOB '*[^0-9a-f]*'",
+            (
+                len(TEST_NAME_PREFIX) + TEST_TOKEN_LENGTH,
+                len(TEST_NAME_PREFIX),
+                TEST_NAME_PREFIX,
+                len(TEST_NAME_PREFIX) + 1,
+            ),
+        )
+        connection.commit()
+
+
 def main():
     if os.getenv("ERP_PRODUCTION_SERVICES_SMOKE") != "confirmed":
         print("SERVICES_SMOKE_FAILED=confirmation", file=sys.stderr)
@@ -49,7 +75,7 @@ def main():
     stage = "bootstrap"
     secret_values = []
     database = "instance/services.db"
-    test_name = "Codex Services smoke {}".format(secrets.token_hex(6))
+    test_name = "{}{}".format(TEST_NAME_PREFIX, secrets.token_hex(6))
     before = counts(database)
     with sqlite3.connect(database) as connection:
         category_row = connection.execute(
@@ -226,6 +252,7 @@ def main():
     finally:
         try:
             cleanup(database, service_id, test_name)
+            cleanup_audit("instance/catalog.db")
         except Exception as cleanup_error:
             print(
                 "SERVICES_SMOKE_FAILED=cleanup type={}".format(
