@@ -482,6 +482,10 @@
   color: var(--erp-text-muted, #64748b);
   font-size: 13px;
 }
+.sms-page [data-sms-live-note] {
+  margin: 0 0 8px;
+  color: var(--erp-text, #172033);
+}
 .sms-customer-results {
   position: static;
   max-height: 220px;
