@@ -212,6 +212,10 @@ jobs:
         if: needs.changes.outputs.css_only != 'true'
         run: pnpm exec playwright test --config playwright.repairs.config.ts
 
+      - name: SMS live status refresh
+        if: needs.changes.outputs.css_only != 'true'
+        run: node --test ../tests/test_sms_statuses.cjs
+
       - name: SMS responsive Playwright smoke
         if: needs.changes.outputs.css_only != 'true'
         env:

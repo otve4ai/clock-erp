@@ -25413,6 +25413,26 @@ def sms_page():
     )
 
 
+@app.get("/api/v1/sms/statuses")
+def sms_live_statuses_api():
+    require_sms_permission("view")
+    ids = request.args.getlist("id")
+    if len(ids) > 100 or any(not re.fullmatch(r"[0-9]{1,18}", value) for value in ids):
+        return api_error("SMS_INVALID", "Некорректный список SMS", 422)
+    store = sms_store()
+    rows = []
+    for message_id in dict.fromkeys(ids):
+        row = store.get(message_id=int(message_id))
+        if row:
+            rows.append({"id": row["id"], "status": row["status"],
+                         "status_label": sms_status_label(row["status"], row.get("provider_status")),
+                         "segments": row.get("segments"), "cost": row.get("cost"),
+                         "currency": row.get("currency")})
+    response = app.make_response(api_success({"messages": rows, "summary": store.summary()}))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.get("/api/v1/sms/messages/<int:message_id>")
 def sms_message_detail(message_id):
     require_sms_permission("view")

@@ -6,38 +6,32 @@
 .sms-main {
   min-width: 0;
   flex: 1;
-  padding: 28px;
+  padding: 24px 26px;
 }
 .sms-shell {
-  max-width: 1480px;
-  margin: 0 auto;
+  width: 100%;
+  min-width: 0;
 }
-.sms-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 20px;
-}
-.sms-header h1 {
-  margin: 0 0 6px;
-  font-size: 30px;
-}
-.sms-header p,
 .sms-section-head p {
   margin: 0;
   color: #475569;
 }
 .sms-button {
-  min-height: 40px;
-  padding: 0 16px;
+  min-height: 36px;
+  padding: 0 12px;
   border: 1px solid var(--erp-border, #dbe2ea);
   border-radius: 9px;
   background: var(--erp-surface, #fff);
   color: inherit;
   font: inherit;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
+}
+.sms-header .sms-button {
+  min-height: 42px;
+  border-radius: 11px;
+  padding: 0 16px;
 }
 .sms-button:hover {
   border-color: #2563eb;
@@ -47,42 +41,28 @@
   border-color: #2563eb;
   background: #2563eb;
   color: #fff;
-  box-shadow: 0 7px 20px rgba(37, 99, 235, 0.18);
+  box-shadow: none;
 }
 .sms-button:disabled {
   opacity: 0.58;
   cursor: wait;
 }
 .sms-kpis {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(150px, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
+  --erp-workspace-metric-count: 5;
 }
-.sms-kpis article {
-  min-height: 92px;
-  padding: 16px;
-  border: 1px solid var(--erp-border, #e2e8f0);
-  border-radius: 13px;
-  background: var(--erp-surface, #fff);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
-}
-.sms-kpis span,
-.sms-kpis small {
-  display: block;
-  color: var(--erp-text-muted, #64748b);
-  font-size: 12px;
-}
-.sms-kpis strong {
-  display: block;
-  margin-top: 8px;
-  font-size: 21px;
+.sms-kpis .erp-workspace-metric {
+  min-height: 48px;
+  padding: 10px 12px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .sms-kpis small {
-  margin-top: 4px;
+  flex-basis: 100%;
+  color: var(--erp-muted);
+  font-size: 11px;
 }
 .sms-kpis .sms-connection {
-  font-size: 14px;
+  font-size: 12px;
 }
 .sms-connection i {
   display: inline-block;
@@ -95,10 +75,10 @@
 .sms-connection.ok i {
   background: #22c55e;
 }
-.positive {
+.sms-kpis .erp-stat-value.positive {
   color: #15803d;
 }
-.negative {
+.sms-kpis .erp-stat-value.negative {
   color: #b91c1c;
 }
 .sms-alert {
@@ -123,11 +103,15 @@
 .sms-tabs {
   display: flex;
   gap: 4px;
-  margin-top: 20px;
+  margin: 0 0 12px;
   border-bottom: 1px solid var(--erp-border, #e2e8f0);
 }
-.sms-tabs button {
-  padding: 13px 18px;
+.sms-page .sms-tabs button {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: 13px;
   border: 0;
   border-bottom: 2px solid transparent;
   background: none;
@@ -135,7 +119,7 @@
   font-weight: 750;
   cursor: pointer;
 }
-.sms-tabs button.active {
+.sms-page .sms-tabs button.active {
   border-bottom-color: #2563eb;
   color: #1d4ed8;
 }
@@ -148,7 +132,11 @@
   align-items: center;
   gap: 9px;
   flex-wrap: wrap;
-  padding: 14px 0;
+  padding: 7px;
+  margin: 12px 0 16px;
+  border: 1px solid var(--erp-border);
+  border-radius: 14px;
+  background: var(--erp-surface);
 }
 .sms-filters input,
 .sms-filters select,
@@ -167,6 +155,8 @@
 }
 .sms-filters select,
 .sms-filters input {
+  min-height: 34px;
+  font-size: 13px;
   padding: 0 10px;
 }
 .sms-filters label {
@@ -196,7 +186,7 @@
 .sms-table-wrap {
   overflow: auto;
   border: 1px solid var(--erp-border, #e2e8f0);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--erp-surface, #fff);
 }
 .sms-table {
@@ -208,10 +198,10 @@
   padding: 11px 13px;
   background: var(--erp-surface-muted, #f8fafc);
   color: var(--erp-text-muted, #64748b);
-  font-size: 11px;
+  font-size: 12px;
   text-align: left;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: normal;
 }
 .sms-table td {
   padding: 13px;
@@ -492,6 +482,10 @@
   color: var(--erp-text-muted, #64748b);
   font-size: 13px;
 }
+.sms-page [data-sms-live-note] {
+  margin: 0 0 8px;
+  color: var(--erp-text, #172033);
+}
 .sms-customer-results {
   position: static;
   max-height: 220px;
@@ -559,7 +553,7 @@
 }
 @media (max-width: 1100px) {
   .sms-kpis {
-    grid-template-columns: repeat(3, 1fr);
+    --erp-workspace-metric-count: 3;
   }
   .sms-template-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -571,9 +565,6 @@
   }
   .sms-header {
     align-items: flex-start;
-  }
-  .sms-header h1 {
-    font-size: 25px;
   }
   .sms-kpis {
     display: flex;

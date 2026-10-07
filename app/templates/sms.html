@@ -23,23 +23,23 @@
                 {% if permissions.send %}<button class="sms-button primary" type="button" data-open-compose>Новое SMS</button>{% endif %}
             </header>
 
-            <section class="sms-kpis" aria-label="Сводка SMS">
-                <article><span>Подключение</span><strong class="sms-connection {{ 'ok' if integration.connected else 'muted' }}"><i></i>{{ integration.state_label }}</strong></article>
-                {% if permissions.view_integration %}<article><span>Баланс</span><strong>{% if integration.balance %}{{ integration.balance.balance }} {{ integration.balance.type }}{% else %}—{% endif %}</strong><small>{{ integration.balance_updated_at[:16].replace('T',' ') if integration.balance_updated_at else 'Не обновлялся' }}</small></article>{% endif %}
-                <article><span>Отправлено сегодня</span><strong>{{ summary.sent }}</strong></article>
-                <article><span>Доставлено сегодня</span><strong class="positive">{{ summary.delivered }}</strong></article>
-                <article><span>С ошибкой</span><strong class="negative">{{ summary.failed }}</strong></article>
-            </section>
-
-            {% if integration_error %}<div class="sms-alert error" role="alert" aria-atomic="true">{{ integration_error }}</div>{% endif %}
-            {% if not integration.configured %}<div class="sms-alert" role="status" aria-atomic="true"><strong>SmsBliss не настроен.</strong> Для активации нужны серверные переменные <code>SMSBLISS_LOGIN</code>, <code>SMSBLISS_PASSWORD</code>, <code>SMSBLISS_API_BASE_URL</code> и <code>SMSBLISS_STATUS_QUEUE_NAME</code>. История и шаблоны доступны; отправка останется безопасно заблокированной.</div>{% endif %}
-            <div class="sms-alert consent" role="note">Рекламные сообщения нельзя отправлять без зафиксированного согласия клиента.</div>
-
             <div class="sms-tabs" role="tablist" aria-label="SMS">
                 <button class="active" type="button" role="tab" aria-selected="true" data-sms-tab="messages">Сообщения <span>{{ messages_total }}</span></button>
                 <button type="button" role="tab" aria-selected="false" data-sms-tab="templates">Шаблоны <span>{{ templates|length }}</span></button>
                 {% if permissions.view_integration %}<button type="button" role="tab" aria-selected="false" data-sms-tab="integration">Интеграция</button>{% endif %}
             </div>
+
+            <section class="sms-kpis erp-workspace-metrics" aria-label="Сводка SMS">
+                <article class="erp-workspace-metric"><span class="erp-stat-label">Подключение</span><strong class="erp-stat-value sms-connection {{ 'ok' if integration.connected else 'muted' }}"><i></i>{{ integration.state_label }}</strong></article>
+                {% if permissions.view_integration %}<article class="erp-workspace-metric"><span class="erp-stat-label">Баланс</span><strong class="erp-stat-value">{% if integration.balance %}{{ integration.balance.balance }} {{ integration.balance.type }}{% else %}—{% endif %}</strong><small>{{ integration.balance_updated_at[:16].replace('T',' ') if integration.balance_updated_at else 'Не обновлялся' }}</small></article>{% endif %}
+                <article class="erp-workspace-metric"><span class="erp-stat-label">Отправлено сегодня</span><strong class="erp-stat-value" data-sms-summary="sent">{{ summary.sent }}</strong></article>
+                <article class="erp-workspace-metric"><span class="erp-stat-label">Доставлено сегодня</span><strong class="erp-stat-value positive" data-sms-summary="delivered">{{ summary.delivered }}</strong></article>
+                <article class="erp-workspace-metric"><span class="erp-stat-label">С ошибкой</span><strong class="erp-stat-value negative" data-sms-summary="failed">{{ summary.failed }}</strong></article>
+            </section>
+
+            {% if integration_error %}<div class="sms-alert error" role="alert" aria-atomic="true">{{ integration_error }}</div>{% endif %}
+            {% if not integration.configured %}<div class="sms-alert" role="status" aria-atomic="true"><strong>SmsBliss не настроен.</strong> Для активации нужны серверные переменные <code>SMSBLISS_LOGIN</code>, <code>SMSBLISS_PASSWORD</code>, <code>SMSBLISS_API_BASE_URL</code> и <code>SMSBLISS_STATUS_QUEUE_NAME</code>. История и шаблоны доступны; отправка останется безопасно заблокированной.</div>{% endif %}
+            <div class="sms-alert consent" role="note">Рекламные сообщения нельзя отправлять без зафиксированного согласия клиента.</div>
 
             <section data-sms-panel="messages">
                 <form class="sms-filters" method="get" id="smsFilters">
@@ -55,13 +55,14 @@
                     <button class="sms-button" type="submit">Применить</button>
                     {% if permissions.send %}<button class="sms-button" type="button" data-sync-statuses>Обновить статусы</button>{% endif %}
                 </form>
+                <p class="sms-recipient-note" data-sms-live-note role="status">Статусы запрашиваются каждые 5 минут. Таблица обновляется автоматически.</p>
                 <div class="sms-table-wrap">
                     <table class="sms-table" aria-label="История SMS">
                         <thead><tr><th scope="col">Клиент / получатель</th><th scope="col">Телефон</th><th scope="col">Текст</th><th scope="col">Связь</th><th scope="col">Дата и время</th><th scope="col">Сотрудник</th><th scope="col">SMS</th><th scope="col">Стоимость</th><th scope="col">Статус</th></tr></thead>
                         <tbody>{% for message in messages %}<tr tabindex="0" data-message-id="{{ message.id }}" aria-label="Открыть SMS">
                             <td><strong>{{ message.customer_name or 'Получатель' }}</strong></td><td>{{ message.phone_masked }}</td><td class="sms-preview">{{ message.text_preview }}{% if message.message_text|length>80 %}…{% endif %}</td>
                             <td>{% if message.order_number and message.order_id %}<a href="/order/{{ message.order_id }}">Заказ №{{ message.order_number }}</a>{% elif message.repair_number %}<a href="/app/repairs?repair_id={{ message.repair_id }}">Ремонт №{{ message.repair_number }}</a>{% elif message.customer_id %}<a href="/app/customers/{{ message.customer_id }}">Клиент</a>{% else %}—{% endif %}</td>
-                            <td><time>{{ message.created_at[:16].replace('T',' ') }}</time></td><td>{{ message.created_by_name }}</td><td>{{ message.segments or '—' }}</td><td>{{ (message.cost ~ ' ' ~ (message.currency or '')) if message.cost is not none else '—' }}</td><td><span class="sms-status is-{{ message.status }}">{{ message.status_label }}</span></td>
+                            <td><time>{{ message.created_at[:16].replace('T',' ') }}</time></td><td>{{ message.created_by_name }}</td><td data-sms-segments>{{ message.segments or '—' }}</td><td data-sms-cost>{{ (message.cost ~ ' ' ~ (message.currency or '')) if message.cost is not none else '—' }}</td><td><span class="sms-status is-{{ message.status }}">{{ message.status_label }}</span></td>
                         </tr>{% else %}<tr><td colspan="9"><div class="sms-empty" role="status" aria-atomic="true"><strong>Сообщений пока нет</strong><span>Создайте первое сервисное SMS или измените фильтры.</span></div></td></tr>{% endfor %}</tbody>
                     </table>
                 </div>
@@ -111,4 +112,5 @@
 <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 <script src="{{ url_for('static', filename='js/sms.js') }}"></script>
+<script src="{{ url_for('static', filename='js/sms-statuses.js') }}"></script>
 </body></html>

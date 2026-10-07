@@ -440,6 +440,26 @@ class SmsWebTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_live_statuses_reads_database_without_calling_provider(self):
+        store = SmsStore(self.path)
+        provider = FakeProvider()
+        message, _ = SmsService(store, provider).send({
+            "client_message_id": "live-status", "phone": "+79991234567", "text": "Тест",
+        }, {"id": "test", "name": "Тест"})
+        store.update_status(message["id"], "delivered", "delivered")
+        with mock.patch.object(self.web, "sms_client") as external:
+            response = self.client.get("/api/v1/sms/statuses?id={}".format(message["id"]))
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()["data"]
+            self.assertEqual(data["messages"][0]["status"], "delivered")
+            self.assertEqual(data["summary"]["delivered"], 1)
+            self.assertNotIn("phone", data["messages"][0])
+            external.assert_not_called()
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(self.client.get("/api/v1/sms/statuses?id=bad").status_code, 422)
+        with mock.patch.object(self.web, "auth_is_enabled", return_value=True), mock.patch.object(self.web, "current_auth_user", return_value={"role": "viewer"}):
+            self.assertEqual(self.client.get("/api/v1/sms/statuses").status_code, 403)
+
     def test_page_is_available_without_credentials_and_contains_no_secrets(self):
         with mock.patch.dict(os.environ, {
             "SMSBLISS_LOGIN": "", "SMSBLISS_PASSWORD": "",
