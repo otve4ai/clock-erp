@@ -33,6 +33,7 @@ from app.time_ranking import erp_timestamp, parse_erp_datetime, receipt_business
 from app.clients.moysklad import MoySkladClient
 from app.cdek_routes import register_cdek_routes
 from app.services.cdek_delivery import CdekDelivery
+from app.clients.cdek import CdekError
 from app.services.cdek_sales import CdekSales, shipment_id
 from app.cdek_sales_routes import register_cdek_sales_routes
 from app.cdek_payouts_routes import register_cdek_payouts_routes
@@ -25195,6 +25196,9 @@ def sms_cached_integration(store, client, can_view):
             row for row in ((senders.get("value") or {}).get("senders") or [])
             if str(row.get("status") or "").casefold() in {"active", "default"}
         ]
+        result["senders"].sort(key=lambda row: {
+            "tictactoy.ru": 0, "tictactoy": 1,
+        }.get(str(row.get("name") or "").strip().casefold(), 2))
     if configured and version and version.get("success"):
         result["connected"] = True
         result["state_label"] = "SmsBliss подключён"
@@ -25227,9 +25231,9 @@ def sms_compose_defaults():
             defaults.update({
                 "order_id": order_id, "order_number": order.get("number") or order_id,
                 "order_status": order.get("status_name") or order.get("status") or "",
-                "amount": order.get("order_total") or "", "phone": order.get("phone") or defaults["phone"],
-                "customer_name": order.get("customer") or defaults["customer_name"],
-                "customer_id": order.get("customer_id") or defaults["customer_id"],
+                "amount": order.get("order_total") or "", "phone": order.get("phone") or "",
+                "customer_name": order.get("first_name") or order.get("customer") or "",
+                "customer_id": "",
             })
     repair_id = str(request.args.get("repair_id") or "").strip()
     if repair_id:
@@ -25245,11 +25249,32 @@ def sms_compose_defaults():
     return defaults
 
 
+def apply_sms_recipient_name(payload):
+    # Explicit editable SMS name; source records are never modified.
+    if "recipient_name_override" in payload:
+        name = payload["recipient_name_override"]
+        if not isinstance(name, str) or len(name) > 240:
+            raise SmsValidationError("Имя получателя должно быть текстом до 240 символов.")
+        payload["client_name"] = payload["customer_name"] = name.strip()
+    return payload
+
+
 def validated_sms_payload(values):
     payload = dict(values or {})
-    # Template values are server-owned; never trust a browser-supplied waybill/name.
+    # Waybill and automatic name come from the source; explicit SMS name override is allowed.
     payload["tracking_number"] = ""
     payload["client_name"] = ""
+    cdek_selection = str(payload.get("cdek_selection") or "")
+    if cdek_selection:
+        saved = (session.get("sms_cdek_selections") or {}).get(cdek_selection)
+        if not saved or time.time() - saved["created_at"] > 1800:
+            raise SmsValidationError("Повторно найдите отправление СДЭК: данные выбора устарели.")
+        if payload.get("order_id") or payload.get("customer_id") or payload.get("repair_id"):
+            raise SmsValidationError("Выберите либо заказ ERP, либо отправление СДЭК.")
+        payload.update(customer_name=saved["name"], client_name=saved["name"],
+                       tracking_number=saved["tracking"], order_number=saved["number"],
+                       order_status="", amount="", repair_number="")
+        return apply_sms_recipient_name(payload)
     customer = None
     operations = []
     customer_id = str(payload.get("customer_id") or "").strip()
@@ -25285,6 +25310,7 @@ def validated_sms_payload(values):
         if order:
             payload["tracking_number"] = get_order_tracking(order)
             payload["client_name"] = str(order.get("first_name") or order.get("customer") or "").strip()
+            payload["customer_name"] = payload["client_name"]
         else:
             payload["client_name"] = ""
         if not payload["tracking_number"]:
@@ -25307,7 +25333,7 @@ def validated_sms_payload(values):
         if operation is None and case is None:
             raise SmsValidationError("Связанный ремонт не найден")
         payload["repair_number"] = (case or {}).get("repair_number") or (operation or {}).get("external_id") or repair_id
-    return payload
+    return apply_sms_recipient_name(payload)
 
 
 @app.post("/api/v1/sms/templates/preview")
@@ -25454,6 +25480,71 @@ def sms_integration_check_api():
     except SmsBlissError:
         return api_error("SMS_PROVIDER_UNAVAILABLE", "SmsBliss временно недоступен.", 503)
     return api_success(sms_cached_integration(sms_store(), sms_client(), True))
+
+
+@app.get("/api/v1/sms/cdek")
+def sms_cdek_recipient_api():
+    require_sms_permission("send")
+    number = str(request.args.get("number") or "").strip()
+    if not re.fullmatch(r"[0-9]{6,20}", number):
+        return api_error("CDEK_REFERENCE", "Введите полный номер накладной СДЭК (6–20 цифр).", 422)
+    try:
+        entity = CDEK_DELIVERY.client.get_order(cdek_number=number)
+    except CdekError as error:
+        return api_error(error.code, str(error), 404 if error.code == "CDEK_NOT_FOUND" else 503)
+    if str(entity.get("cdek_number") or "").strip() != number:
+        return api_error("CDEK_MISMATCH", "Номер отправления в ответе СДЭК не совпадает с запросом.", 422)
+    recipient = entity.get("recipient") or {}
+    if not isinstance(recipient, dict):
+        return api_error("CDEK_RESPONSE", "СДЭК не вернул корректные данные получателя.", 503)
+    from app.services.sms import normalize_phone
+    phones = []
+    for item in recipient.get("phones") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            phone = normalize_phone(item.get("number"))
+        except SmsValidationError:
+            continue
+        if phone not in phones:
+            phones.append(phone)
+    row = {"id": "", "number": str(entity.get("number") or ""),
+           "tracking": number, "name": str(recipient.get("name") or ""),
+           "phone": phones[0] if len(phones) == 1 else "", "source": "СДЭК",
+           "phone_hint": "У получателя несколько телефонов — введите нужный ниже." if len(phones) > 1 else ""}
+    token = uuid.uuid4().hex
+    saved = {key: value for key, value in (session.get("sms_cdek_selections") or {}).items()
+             if time.time() - value["created_at"] <= 1800}
+    saved = dict(list(saved.items())[-4:])
+    saved[token] = dict(row, created_at=time.time())
+    session["sms_cdek_selections"] = saved
+    return api_success(dict(row, cdek_selection=token))
+
+
+@app.get("/api/v1/sms/orders")
+def sms_order_search_api():
+    require_sms_permission("send")
+    query = str(request.args.get("q") or "").strip()[:120]
+    order_id = str(request.args.get("order_id") or "").strip()
+    try:
+        store = OrdersSnapshotStore()
+        if order_id:
+            order = store.get(order_id)
+            if not order:
+                return api_error("ORDER_NOT_FOUND", "Заказ не найден.", 404)
+            rows = [dict(order, id=order_id)]
+        else:
+            rows = store.search_by_number(query) if query else []
+    except sqlite3.Error:
+        return api_error("ORDERS_UNAVAILABLE", "Поиск заказов временно недоступен.", 503)
+    return api_success([{
+        "id": str(row["id"]), "number": str(row.get("number") or row["id"]),
+        "phone": str(row.get("phone") or ""),
+        "name": str(row.get("first_name") or row.get("customer") or ""),
+        "status": str(row.get("status_name") or row.get("status") or ""),
+        "amount": row.get("order_total") if row.get("order_total") is not None else "",
+        "source": str(row.get("source_name") or row.get("source") or ""),
+    } for row in rows])
 
 
 @app.get("/api/v1/sms/customers")

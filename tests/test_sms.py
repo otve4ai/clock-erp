@@ -263,6 +263,111 @@ class SmsBlissClientTests(unittest.TestCase):
 
 
 class SmsWebTests(unittest.TestCase):
+    def test_manual_recipient_name_is_used_in_preview_and_send_including_empty(self):
+        template = SmsStore(self.path).save_template(None, "Имя", "{client_name}, заказ готов", True, {"id": "1", "name": "Тест"})
+        with self.client.session_transaction() as state:
+            state["sms_cdek_selections"] = {"selected": {"name": "Из СДЭК", "tracking": "1234567890", "number": "7", "created_at": self.web.time.time()}}
+        for source in ({}, {"order_id": "551"}, {"cdek_selection": "selected"}):
+            for name in ("Мария", ""):
+                with self.subTest(source=source, name=name), mock.patch.object(self.web, "OrdersSnapshotStore") as snapshots, mock.patch.object(self.web, "api_sales_records", return_value=[]), mock.patch.object(self.web, "sms_client", return_value=FakeProvider()):
+                    snapshots.return_value.get.return_value = {"id": "551", "number": "551", "customer": "Из заказа"}
+                    message_id = "manual-{}-{}".format(len(source), source.get("order_id") or source.get("cdek_selection") or "phone") + ("-name" if name else "-empty")
+                    payload = dict(source, recipient_name_override=name, template_id=template["id"], phone="+79991234567", client_message_id=message_id)
+                    preview = self.client.post("/api/v1/sms/templates/preview", json=payload)
+                    expected = "Мария, заказ готов" if name else "заказ готов"
+                    self.assertEqual(preview.get_json()["data"]["text"], expected)
+                    self.assertEqual(self.client.post("/api/v1/sms/messages", json=payload).status_code, 200)
+                    message = SmsStore(self.path).get(client_message_id=message_id)
+                    self.assertEqual(message["message_text"], expected)
+                    self.assertEqual(message["customer_name"], name)
+
+    def test_cdek_without_erp_order_supplies_recipient_and_trusted_template_values(self):
+        entity = {"cdek_number": "1234567890", "number": "SHOP-7", "recipient": {
+            "name": "Анна", "phones": [{"number": "+79991234567"}]}}
+        with mock.patch.object(self.web.CDEK_DELIVERY.client, "get_order", return_value=entity) as lookup:
+            result = self.client.get("/api/v1/sms/cdek?number=1234567890")
+            self.assertEqual(result.status_code, 200)
+            data = result.get_json()["data"]
+            self.assertEqual(data["phone"], "+79991234567")
+            self.assertEqual(data["id"], "")
+            lookup.assert_called_once_with(cdek_number="1234567890")
+        template = SmsStore(self.path).save_template(None, "СДЭК", "{client_name}, накладная {tracking_number}", True, {"id": "1", "name": "Тест"})
+        payload = {"cdek_selection": data["cdek_selection"], "template_id": template["id"],
+                   "phone": data["phone"], "tracking_number": "FORGED", "customer_name": "FORGED",
+                   "client_message_id": "cdek-direct-test"}
+        provider = FakeProvider()
+        with mock.patch.object(self.web, "sms_client", return_value=provider), mock.patch.object(self.web, "OrdersSnapshotStore") as orders:
+            preview = self.client.post("/api/v1/sms/templates/preview", json=payload)
+            self.assertEqual(preview.get_json()["data"]["text"], "Анна, накладная 1234567890")
+            self.assertEqual(provider.calls, 0)
+            self.assertEqual(self.client.post("/api/v1/sms/messages", json=payload).status_code, 200)
+            orders.assert_not_called()
+        payload["order_id"] = "551"
+        self.assertEqual(self.client.post("/api/v1/sms/templates/preview", json=payload).status_code, 422)
+        payload.pop("order_id")
+        with self.client.session_transaction() as state:
+            saved = state["sms_cdek_selections"]
+            saved[data["cdek_selection"]]["created_at"] = 0
+            state["sms_cdek_selections"] = saved
+        self.assertEqual(self.client.post("/api/v1/sms/templates/preview", json=payload).status_code, 422)
+
+    def test_cdek_lookup_missing_multiple_phones_and_errors(self):
+        from app.clients.cdek import CdekError
+        with mock.patch.object(self.web.CDEK_DELIVERY.client, "get_order") as lookup:
+            self.assertEqual(self.client.get("/api/v1/sms/cdek?number=abc").status_code, 422)
+            lookup.assert_not_called()
+            for phones in ([], [{"number": "+79991234567"}, {"number": "+79991234568"}]):
+                lookup.return_value = {"cdek_number": "1234567890", "recipient": {"phones": phones}}
+                data = self.client.get("/api/v1/sms/cdek?number=1234567890").get_json()["data"]
+                self.assertEqual(data["phone"], "")
+            lookup.return_value = {"cdek_number": "9999999999"}
+            self.assertEqual(self.client.get("/api/v1/sms/cdek?number=1234567890").status_code, 422)
+            lookup.side_effect = CdekError("CDEK_NOT_FOUND", "Не найдено")
+            self.assertEqual(self.client.get("/api/v1/sms/cdek?number=1234567890").status_code, 404)
+
+    def test_order_search_uses_number_without_customer_and_preserves_local_id(self):
+        from app.domain_schema_migrations import apply_domain_migrations
+        from app.services.orders_snapshot import OrdersSnapshotStore
+        snapshots = OrdersSnapshotStore(Path(self.temp.name) / "orders.db")
+        apply_domain_migrations(snapshots.path, "orders", "sms-test")
+        with mock.patch("app.services.orders_snapshot.link_order_safely", return_value={"customer_id": None}), mock.patch("app.services.orders_snapshot.publish_orders"):
+            snapshots.replace([
+                {"id": "local-1", "number": "00551", "phone": "+79991234567", "customer": "Анна", "created_at": "2026-10-01"},
+                {"id": "local-2", "number": "005519", "phone": "", "created_at": "2026-10-01"},
+                {"id": "local-3", "number": "888", "customer": "00551", "created_at": "2026-10-01"},
+            ], 1000)
+        with mock.patch.object(self.web, "OrdersSnapshotStore", return_value=snapshots), mock.patch.object(self.web, "customer_store") as customers:
+            result = self.client.get("/api/v1/sms/orders", query_string={"q": "№00551"})
+            self.assertEqual(result.status_code, 200)
+            rows = result.get_json()["data"]
+            self.assertEqual([row["id"] for row in rows], ["local-1", "local-2"])
+            self.assertEqual(rows[0]["phone"], "+79991234567")
+            self.assertEqual(rows[0]["name"], "Анна")
+            self.assertEqual(rows[1]["name"], "")
+            self.assertEqual(self.client.get("/api/v1/sms/orders?q=%25").get_json()["data"], [])
+            self.assertEqual(self.client.get("/api/v1/sms/orders").get_json()["data"], [])
+            self.assertEqual(self.client.get("/api/v1/sms/orders?order_id=missing").status_code, 404)
+            self.assertEqual(self.client.get("/api/v1/sms/orders?order_id=local-1").get_json()["data"][0]["number"], "00551")
+            customers.assert_not_called()
+
+    def test_order_without_name_can_preview_and_send_without_customer(self):
+        row = SmsStore(self.path).save_template(None, "Заказ", "{client_name}, заказ {order_number}", True, {"id": "1", "name": "Тест"})
+        payload = {"client_message_id": "order-no-name", "order_id": "551", "phone": "+79991234567", "template_id": row["id"], "customer_name": "Старое имя"}
+        provider = FakeProvider()
+        with mock.patch.object(self.web, "OrdersSnapshotStore") as snapshots, mock.patch.object(self.web, "api_sales_records", return_value=[]), mock.patch.object(self.web, "sms_client", return_value=provider):
+            snapshots.return_value.get.return_value = {"id": "551", "number": "551"}
+            preview = self.client.post("/api/v1/sms/templates/preview", json=payload)
+            self.assertEqual(preview.status_code, 200)
+            self.assertEqual(preview.get_json()["data"]["text"], "заказ 551")
+            self.assertEqual(provider.calls, 0)
+            self.assertEqual(self.client.post("/api/v1/sms/messages", json=payload).status_code, 200)
+        self.assertEqual(SmsStore(self.path).get(client_message_id="order-no-name")["customer_name"], "")
+
+    def test_order_search_error_is_visible(self):
+        with mock.patch.object(self.web, "OrdersSnapshotStore") as snapshots:
+            snapshots.return_value.search_by_number.side_effect = sqlite3.OperationalError("unavailable")
+            self.assertEqual(self.client.get("/api/v1/sms/orders?q=551").status_code, 503)
+
     def test_cdek_preview_and_send_use_saved_template_and_source_order(self):
         store = SmsStore(self.path)
         row = store.save_template(None, "СДЭК", "{client_name}, Трекинг {Накладная}", True, {"id":"1", "name":"Тест"})
