@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from app.clients.cdek import CdekError
 from app.services.cdek_delivery import MOSCOW, display_time
+from app.services.cdek_contacts import contact_states
 from app.time_ranking import parse_erp_datetime
 
 DAY = 86400
@@ -32,7 +33,9 @@ LABELS = {
     "NOT_DELIVERED": ("Не вручён", "red"),
     "POSTOMAT_SEIZED": ("Возврат", "red"),
 }
-WORK = {"new": "Нужна реакция", "working": "В работе", "closed": "Возврат проверен"}
+WORK = {"new": "Нужна реакция", "working": "В работе", "closed": "Обработан"}
+OUTCOMES = {"collected": "Получатель забрал заказ", "refused": "Клиент отказался",
+            "return_checked": "Возврат проверен", "other": "Другое"}
 LEGACY_WORK = {"today": "new", "tomorrow": "new"}
 CATEGORIES = {"pvz": "Не забирают", "delay": "Задержки", "return": "Возвраты",
               "data": "Ошибки данных"}
@@ -61,7 +64,7 @@ def group_sales(sales):
         group = groups.setdefault(key, {"id": key, "source": "tictactoy",
             "number": str(sale.get("order_number") or "").strip(),
             "tracking": str(sale.get("track_number") or "").strip(),
-            "orders": [], "sale_ids": [], "items": [], "order_date": ""})
+            "orders": [], "order_ids": [], "sale_ids": [], "items": [], "order_date": ""})
         parsed = parse_erp_datetime(sale.get("created_at"))
         if parsed:
             created = parsed[0]
@@ -71,6 +74,7 @@ def group_sales(sales):
             if not group["order_date"] or date < group["order_date"]:
                 group["order_date"] = date
         for field, value in (("orders", str(sale.get("order_number") or "")),
+                             ("order_ids", str(sale.get("external_order_id") or sale.get("order_id") or "")),
                              ("sale_ids", str(sale.get("id") or "")),
                              ("items", str(sale.get("product_name") or ""))):
             if value and value not in group[field]:
@@ -99,11 +103,26 @@ def short_status(data, track):
     return LABELS.get(code, ("Нет данных", "gray") if track else ("Нет трека", "gray"))
 
 
+def situation(data):
+    """Stable business milestone, unaffected by polling, wording or location."""
+    code = data.get("status_code", "")
+    if data.get("is_return") and code in DELIVERED:
+        return "return_received"
+    if data.get("is_return") or code == "POSTOMAT_SEIZED":
+        return "return_started"
+    if code == "NOT_DELIVERED":
+        return "refused"
+    if code in PICKUP:
+        return "pickup"
+    return ""
+
+
 class CdekSales:
-    def __init__(self, delivery, clock=None):
+    def __init__(self, delivery, clock=None, contacts=None):
         self.delivery = delivery
         self.clock = clock or delivery.clock
         self.review_path = delivery.path / "reviews"
+        self.contacts = contacts
         self.pvz_warning = self._threshold("CDEK_PVZ_WARNING_DAYS", 3)
         self.pvz_urgent = max(self.pvz_warning, self._threshold("CDEK_PVZ_URGENT_DAYS", 5))
         self.transit_days = self._threshold("CDEK_TRANSIT_WARNING_DAYS", 3)
@@ -127,6 +146,12 @@ class CdekSales:
             raise CdekError("CDEK_REVIEW", "Не удалось прочитать отметки менеджера.") from None
         if not isinstance(data, dict) or data.get("work") not in set(WORK) | set(LEGACY_WORK) or not isinstance(data.get("version"), int):
             raise CdekError("CDEK_REVIEW", "Повреждены отметки менеджера.")
+        for field in ("history", "calls"):
+            if field in data and (not isinstance(data[field], list) or any(not isinstance(v, dict) for v in data[field])):
+                raise CdekError("CDEK_REVIEW", "Повреждена история менеджера.")
+        for call in data.get("calls", []):
+            if call.get("result") not in {"no_answer", "connected"} or not isinstance(call.get("at"), (int, float)) or not all(isinstance(call.get(k), str) for k in ("actor", "note")):
+                raise CdekError("CDEK_REVIEW", "Повреждена история звонков.")
         for field in ("storage_until", "followup", "expected_delivery"):
             if data.get(field):
                 try:
@@ -134,8 +159,13 @@ class CdekSales:
                         raise ValueError("Noncanonical date")
                 except (TypeError, ValueError):
                     raise CdekError("CDEK_REVIEW", "Повреждены даты в отметках менеджера.") from None
+        if data["work"] in LEGACY_WORK:
+            data["legacy_followup"] = data.get("followup", "")
+            data["followup"] = ""
         data["work"] = LEGACY_WORK.get(data["work"], data["work"])
-        data["followup"] = ""
+        if data["work"] == "closed" and not data.get("outcome"):
+            data["outcome"] = "return_checked"
+            data["closed_situation"] = "return_received"
         return data
 
     def save_review(self, shipment, payload, actor):
@@ -144,15 +174,19 @@ class CdekSales:
         note = str(payload.get("note") or "").strip()
         if work not in WORK or len(note) > 2000:
             raise CdekError("CDEK_FORM", "Проверьте отметку и длину заметки (до 2000 символов).")
-        storage_until = str(payload.get("storage_until") or "").strip()
-        expected_delivery = str(payload.get("expected_delivery") or "").strip()
-        for value in (storage_until, expected_delivery):
+        followup = str(payload.get("followup") or "").strip()
+        next_action = str(payload.get("next_action") or "").strip()
+        outcome = str(payload.get("outcome") or "").strip()
+        outcome_note = str(payload.get("outcome_note") or "").strip()
+        if len(next_action) > 500 or len(outcome_note) > 2000:
+            raise CdekError("CDEK_FORM", "Слишком длинное пояснение или следующее действие.")
+        for value in (payload.get("storage_until"), payload.get("expected_delivery"), followup):
             if not value:
                 continue
             try:
                 if datetime.strptime(value, "%Y-%m-%d").strftime("%Y-%m-%d") != value:
                     raise ValueError("Noncanonical date")
-            except ValueError:
+            except (TypeError, ValueError):
                 raise CdekError("CDEK_FORM", "Некорректная подтверждённая дата.") from None
         try:
             version = int(payload.get("version", -1))
@@ -163,12 +197,44 @@ class CdekSales:
             if previous["version"] != version:
                 raise CdekError("CDEK_CONFLICT", "Другой сотрудник изменил отметку. Обновите страницу.")
             snapshot = self.delivery.view(shipment)
-            if work == "closed" and not (snapshot.get("is_return") and snapshot.get("status_code") in DELIVERED):
+            if work == "closed" and outcome not in OUTCOMES:
+                raise CdekError("CDEK_FORM", "Выберите результат обработки.")
+            if work == "closed" and outcome == "other" and not outcome_note:
+                raise CdekError("CDEK_FORM", "Поясните результат «Другое».")
+            if work == "closed" and outcome == "return_checked" and not (snapshot.get("is_return") and snapshot.get("status_code") in DELIVERED):
                 raise CdekError("CDEK_FORM", "Подтвердить возврат можно после его получения по данным СДЭК.")
-            data = dict(version=version + 1, work=work, note=note, followup="",
-                        storage_until=storage_until, expected_delivery=expected_delivery,
+            history = list(previous.get("history") or [])
+            if previous["version"] and not history:
+                history.append(dict(previous, action="legacy"))
+            calls = list(previous.get("calls") or [])
+            call_result = str(payload.get("call_result") or "")
+            if call_result:
+                if call_result not in {"no_answer", "connected"}:
+                    raise CdekError("CDEK_FORM", "Выберите результат звонка.")
+                try:
+                    instant = datetime.strptime(str(payload.get("call_at") or ""), "%Y-%m-%dT%H:%M").replace(tzinfo=MOSCOW)
+                except ValueError:
+                    raise CdekError("CDEK_FORM", "Укажите дату и время звонка (МСК).") from None
+                if instant.timestamp() > self.clock() + 60:
+                    raise CdekError("CDEK_FORM", "Дата звонка не может быть в будущем.")
+                comment = str(payload.get("call_note") or "").strip()
+                if len(comment) > 2000:
+                    raise CdekError("CDEK_FORM", "Комментарий звонка: до 2000 символов.")
+                calls.append(dict(result=call_result, at=instant.timestamp(), note=comment,
+                                  actor=str(actor)[:100], recorded_at=self.clock()))
+            data = dict(previous, version=version + 1, work=work, note=note,
+                        followup=(followup if "followup" in payload else previous.get("followup", "")) if work != "closed" else "",
+                        next_action=(next_action if "next_action" in payload else previous.get("next_action", "")) if work != "closed" else "",
+                        outcome=outcome if work == "closed" else previous.get("outcome", ""),
+                        outcome_note=outcome_note if work == "closed" else previous.get("outcome_note", ""),
+                        storage_until=payload.get("storage_until", previous.get("storage_until", "")),
+                        expected_delivery=payload.get("expected_delivery", previous.get("expected_delivery", "")),
                         updated_at=self.clock(), actor=str(actor)[:100],
+                        calls=calls, closed_situation=situation(snapshot) if work == "closed" else previous.get("closed_situation", ""),
+                        closed_epoch=(snapshot.get("events") or [{}])[0].get("epoch", 0) if work == "closed" else previous.get("closed_epoch", 0),
                         closed_event=snapshot.get("date_display", "") if work == "closed" else "")
+            history.append({k: v for k, v in data.items() if k not in {"history", "calls"}})
+            data["history"] = history
             self.review_path.mkdir(parents=True, exist_ok=True)
             import tempfile
             fd, temporary = tempfile.mkstemp(prefix=".review-", dir=str(self.review_path))
@@ -186,7 +252,9 @@ class CdekSales:
     def rows(self, sales):
         result = []
         now = self.clock()
-        for group in group_sales(sales):
+        groups = group_sales(sales)
+        contacts = self.contacts(groups) if self.contacts else {}
+        for group in groups:
             data = self.delivery.view(group)
             label, tone = short_status(data, group["tracking"])
             try:
@@ -203,9 +271,11 @@ class CdekSales:
             latest = events[0].get("epoch", now) if events else now
             age = max(0, int((now - latest) // DAY))
             is_delivered = code in DELIVERED and not data.get("is_return")
-            return_closed = (review.get("work") == "closed" and bool(review.get("closed_event"))
-                             and review.get("closed_event") == data.get("date_display")
-                             and data.get("is_return") and code in DELIVERED)
+            milestone = situation(data)
+            reopened = (review.get("work") == "closed" and bool(milestone)
+                        and latest > review.get("closed_epoch", 0)
+                        and milestone != review.get("closed_situation"))
+            return_closed = review.get("work") == "closed" and not reopened
             if review_error:
                 add("data", 1, review_error, "Проверить хранилище отметок")
             if not data.get("configured"):
@@ -255,13 +325,24 @@ class CdekSales:
                     today = datetime.fromtimestamp(now, MOSCOW).date().isoformat()
                     if review["expected_delivery"] < today:
                         add("delay", 2, "Просрочена подтверждённая дата доставки", "Уточнить срок у СДЭК")
-            issues.sort(key=lambda issue: -issue["priority"])
             effective_work = review.get("work", "new")
-            if effective_work == "closed" and not return_closed:
+            if reopened:
                 effective_work = "new"
+                needs_reaction = True
+                if not issues:
+                    add("return", 1, "Новое событие доставки", "Проверить ситуацию")
+            if effective_work != "closed" and review.get("followup"):
+                today = datetime.fromtimestamp(now, MOSCOW).date().isoformat()
+                if review["followup"] <= today:
+                    effective_work, needs_reaction = "new", True
+                    add("followup", 2, "Наступил срок следующего действия", review.get("next_action") or "Проверить ситуацию")
+            if return_closed:
+                issues, needs_reaction = [], False
+            issues.sort(key=lambda issue: -issue["priority"])
             if effective_work == "new" and not needs_reaction:
                 effective_work = ""
-            result.append(dict(group, needs_reaction=needs_reaction, delivery=data, label=label, tone=tone, review=review,
+            contact = contact_states(contacts.get(group["id"], {}), review, is_delivered or code == "REMOVED")
+            result.append(dict(group, contacts=contact, reopened=reopened, needs_reaction=needs_reaction, delivery=data, label=label, tone=tone, review=review,
                 review_error=review_error, issues=issues, priority=max([i["priority"] for i in issues] or [0]),
                 wait=wait, work=effective_work, delivered=is_delivered, event_epoch=latest,
                 checked_display=display_time(data.get("checked_at", 0)),
@@ -269,8 +350,8 @@ class CdekSales:
         return sorted(result, key=lambda r: (-r["priority"], r["work"] == "working", r["event_epoch"], r["id"]))
 
     def summary(self, rows):
-        active = [row for row in rows if row["issues"] or not row["delivered"] or row["event_epoch"] >= self.clock() - 30 * DAY]
-        counts = {label: sum(row["label"] == label for row in active) for label in ("В пути", "В ПВЗ", "У курьера", "Вручён")}
+        active = list(rows)
+        counts = {label: sum(row["label"] == label and (label != "Вручён" or row["event_epoch"] >= self.clock() - 30 * DAY) for row in active) for label in ("В пути", "В ПВЗ", "У курьера", "Вручён")}
         counts.update(total=len(active), problems=sum(bool(r["issues"]) for r in active),
                       urgent=sum(r["priority"] == 2 for r in active),
                       stale=sum(r["stale"] for r in active))

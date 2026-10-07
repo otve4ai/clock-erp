@@ -35,6 +35,7 @@ from app.cdek_routes import register_cdek_routes
 from app.services.cdek_delivery import CdekDelivery
 from app.clients.cdek import CdekError
 from app.services.cdek_sales import CdekSales, shipment_id
+from app.services.cdek_contacts import ContactJournals
 from app.cdek_sales_routes import register_cdek_sales_routes
 from app.cdek_payouts_routes import register_cdek_payouts_routes
 from app.services.cdek_payouts import CdekPayouts, discover_references
@@ -4377,10 +4378,10 @@ register_cdek_routes(
     lambda order_id: apply_local_order_overrides(OrdersSnapshotStore().get(order_id), order_id),
     get_order_tracking,
 )
-CDEK_SALES = CdekSales(CDEK_DELIVERY)
+CDEK_SALES = CdekSales(CDEK_DELIVERY, contacts=ContactJournals(app.config["SMS_DATABASE"], app.config["MAIL_DATABASE"]))
 register_cdek_sales_routes(
     app, CDEK_SALES, lambda: api_sales_records(), can_view_orders,
-    require_csrf_when_authenticated, lambda: (current_auth_user() or {}).get("id", "local"),
+    require_csrf_when_authenticated, lambda: (current_auth_user() or {}).get("display_name") or str((current_auth_user() or {}).get("id", "local")),
     find_orders=lambda number: OrdersSnapshotStore().query({"q": number, "source": "tictactoy", "period": "all", "status": "all"})["rows"],
 )
 
@@ -12603,6 +12604,7 @@ def build_sales_report_records(
                 )
                 or ""
             ),
+            "external_order_id": order_id,
             "product_id": str(
                 operation.get("product_id") or ""
             ),
@@ -12917,6 +12919,7 @@ def build_sales_report_records(
             "order_number": str(
                 stored_sale.get("order_number") or ""
             ),
+            "external_order_id": str(stored_sale.get("external_order_id") or stored_sale.get("order_id") or ""),
             "product_id": str(
                 stored_sale.get("product_id") or ""
             ),

@@ -59,6 +59,7 @@ def normalize_delivery(entity):
             "code": str(item["code"])[:100],
             "name": str(item.get("name") or item["code"])[:250],
             "city": str(item.get("city") or "")[:200],
+            "description": str(item.get("description") or "")[:1000],
             "epoch": epoch, "date_display": display_time(epoch),
         })
     events.sort(key=lambda item: item["epoch"], reverse=True)

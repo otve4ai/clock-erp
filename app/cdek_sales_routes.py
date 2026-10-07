@@ -5,7 +5,8 @@ from flask import jsonify, abort, redirect, render_template, request, url_for
 
 from app.clients.cdek import CdekError
 from app.services.cdek_sync import CdekSync
-from app.services.cdek_sales import CATEGORIES, WORK, group_sales, order_number_key
+from app.services.cdek_sales import CATEGORIES, WORK, OUTCOMES, group_sales, order_number_key
+from app.services.cdek_delivery import display_time
 
 
 def sales_return(value):
@@ -25,6 +26,17 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor, f
             abort(403)
 
     sync = CdekSync(service.delivery)
+
+    @app.get("/sales/cdek/contacts")
+    def cdek_sales_contacts():
+        authorize()
+        keys = request.args.getlist("id")
+        if len(keys) > 51:
+            abort(400)
+        rows = service.rows(load_sales())
+        response = jsonify({row["id"]: row["contacts"] for row in rows if row["id"] in keys})
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.route("/sales/cdek/sync-status", methods=["GET", "POST"])
     def cdek_sales_sync_status():
@@ -75,6 +87,8 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor, f
         if status not in {"В пути", "В ПВЗ", "У курьера", "Вручён"}:
             status = ""
         work = args.get("work", "") if args.get("work", "") in WORK else ""
+        if work == "closed":
+            mode, category = "all", ""
         urgent = args.get("urgent") == "1"
         query = str(args.get("q") or "").strip()[:255]
         sort = args.get("sort", "priority")
@@ -110,7 +124,8 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor, f
             return url_for("cdek_sales_page", **{k: v for k, v in values.items() if v != ""})
         return render_template("cdek_sales.html", rows=rows[(page-1)*size:page*size], counts=counts,
             categories=CATEGORIES, category_counts={k: sum(any(i["category"] == k for i in r["issues"]) for r in all_rows) for k in CATEGORIES},
-            work_labels=WORK, mode=mode, status=status, category=category, work=work, urgent=urgent, query=query,
+            work_labels=WORK, outcomes=OUTCOMES, display_time=display_time, selected_row=selected,
+            mode=mode, status=status, category=category, work=work, urgent=urgent, query=query,
             total=total, page=page, pages=pages, size=size, back=back, link=link, sort=sort,
             selected=args.get("shipment", ""), message=args.get("message", ""),
             configured=service.delivery.client.configured,
