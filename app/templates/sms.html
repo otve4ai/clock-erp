@@ -39,7 +39,6 @@
 
             {% if integration_error %}<div class="sms-alert error" role="alert" aria-atomic="true">{{ integration_error }}</div>{% endif %}
             {% if not integration.configured %}<div class="sms-alert" role="status" aria-atomic="true"><strong>SmsBliss не настроен.</strong> Для активации нужны серверные переменные <code>SMSBLISS_LOGIN</code>, <code>SMSBLISS_PASSWORD</code>, <code>SMSBLISS_API_BASE_URL</code> и <code>SMSBLISS_STATUS_QUEUE_NAME</code>. История и шаблоны доступны; отправка останется безопасно заблокированной.</div>{% endif %}
-            <div class="sms-alert consent" role="note">Рекламные сообщения нельзя отправлять без зафиксированного согласия клиента.</div>
 
             <section data-sms-panel="messages">
                 <form class="sms-filters" method="get" id="smsFilters">
