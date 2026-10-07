@@ -30,7 +30,8 @@ const response = data => ({ok: true, json: async () => ({data})});
 const visibleText = element => element.hidden ? '' : element.value + element.children.map(visibleText).join('\n');
 const picker = container => {
     const root = container.children[0];
-    const [trigger, amount, transit, list] = root.children;
+    const [trigger, transit, list] = root.children;
+    const [, amount] = trigger.children;
     return {root, trigger, amount, transit, list, options: list.children};
 };
 const sample = [
@@ -97,6 +98,13 @@ const sample = [
     assert.equal(container.children.length, 1);
     assert.equal(p.trigger.children[0].textContent, 'Гонконг');
     assert.equal(p.amount.textContent, '2 шт.');
+    assert.equal(p.root.children.length, 3); // Quantity is inside the one clickable border.
+    assert.equal(p.trigger.children.length, 3);
+    assert.equal(p.trigger.children[1], p.amount);
+    assert.equal(p.trigger.children[2].className, 'product-warehouse-picker__arrow');
+    assert.equal(p.trigger.children[2].attributes['aria-hidden'], 'true');
+    assert.equal(p.root.children.includes(p.amount), false);
+    assert.equal(p.trigger.attributes['aria-label'], 'Склад: Гонконг. Остаток: 2 шт.');
     assert.equal(p.transit.textContent, 'В пути: 3 шт.');
     assert.equal(p.list.hidden, true);
     assert.equal(p.trigger.attributes['aria-expanded'], 'false');
@@ -117,6 +125,8 @@ const sample = [
     assert.equal(context.document.activeElement, p.options[0]);
     p.options[0].fire('click');
     assert.equal(p.amount.textContent, '0 шт.');
+    assert.equal(p.trigger.children[1], p.amount);
+    assert.equal(p.trigger.attributes['aria-label'], 'Склад: TTT. Остаток: 0 шт.');
     assert.equal(p.transit.textContent, '');
     assert.equal(p.list.hidden, true);
     assert.equal(context.document.activeElement, p.trigger);
@@ -194,6 +204,18 @@ const sample = [
     p.trigger.fire('click');
     assert.match(visibleText(container), /Гонконг\n0 шт\./);
     assert.match(visibleText(container), /В пути на склад: 4 шт\./);
+
+    // Long names and full quantities remain separate text nodes in the same control.
+    const longName = 'Гонконг — склад с очень длинным названием';
+    for (const quantity of [0, 277, 2147483647]) {
+        reply = async () => response([{...sample[0], name: longName, quantity}]);
+        await api.loadStocks(container, 12, 'default');
+        p = picker(container);
+        assert.equal(p.trigger.children[0].textContent, longName);
+        assert.equal(p.trigger.children[1].textContent, `${quantity} шт.`);
+        assert.equal(p.trigger.title, `${longName}: ${quantity} шт.`);
+        assert.equal(p.trigger.children[2].className, 'product-warehouse-picker__arrow');
+    }
 
     reply = async () => response([{...sample[0], quantity: null, confirmed: false, name: '<img src=x onerror=bad()>'}]);
     await api.loadStocks(container, 12, 'default');

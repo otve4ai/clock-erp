@@ -112,7 +112,7 @@ def seed_catalog(database):
             transfers.transition(doc['id'], action, actor='Демо')
 
 
-def create_preview(root, port, product_card=False):
+def create_preview(root, port, product_card=False, sales_form=False):
     prepare_environment(root)
     disable_outbound_connections()
     from app.schema_migrations import apply_migrations
@@ -137,6 +137,10 @@ def create_preview(root, port, product_card=False):
                       ERP_MAINTENANCE_MARKER=str(root / 'maintenance.json'))
     web.CATALOG_TAXONOMY_PATH = root / 'catalog_taxonomy.json'
     web.WAREHOUSE_CREATED_AT_PATH = root / 'warehouse_created_at.json'
+    if sales_form:
+        # No legacy sales files or external location catalogs in a visual demo.
+        web.api_sales_records = lambda *args, **kwargs: []
+        web.get_tictactoy_location_catalog = lambda: {}
 
     def preview_scope():
         if request.host not in ('127.0.0.1:{}'.format(port), 'localhost:{}'.format(port)):
@@ -151,6 +155,12 @@ def create_preview(root, port, product_card=False):
                 return jsonify(ok=False, message='Эта операция отключена в локальном демо.'), 403
         if request.path == '/':
             return redirect('/app/products')
+        if sales_form and request.method in ('GET', 'HEAD') and request.endpoint in (
+            'sales_page', 'api_catalog_options', 'api_sales_catalog',
+            'api_product_bundle', 'api_product_required_strap',
+            'api_sales_locations', 'api_sales_sources',
+        ):
+            return None
         if product_card and (request.endpoint == 'api_product_resource' or (
             request.method in ('GET', 'HEAD') and request.endpoint in (
                 'warehouse_product_detail', 'api_product_warehouse_stocks',
@@ -196,12 +206,15 @@ def main():
     parser.add_argument('--port', type=int, default=4197)
     parser.add_argument('--product-card', action='store_true',
                         help='Enable product card reads/edits on disposable demo data only')
+    parser.add_argument('--sales-form', action='store_true',
+                        help='Enable sales form preview; all sales writes remain blocked')
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
         parser.error('Use a local unprivileged port (1024..65535)')
     # Each invocation gets a brand-new synthetic database, never an existing path.
     with tempfile.TemporaryDirectory(prefix='erp-multiwarehouse-demo-', ignore_cleanup_errors=True) as directory:
-        app = create_preview(Path(directory), args.port, product_card=args.product_card)
+        app = create_preview(Path(directory), args.port, product_card=args.product_card,
+                             sales_form=args.sales_form)
         print('Synthetic preview: http://127.0.0.1:{}/app/products'.format(args.port), flush=True)
         app.run(host='127.0.0.1', port=args.port, debug=False, use_reloader=False,
                 load_dotenv=False, threaded=False)

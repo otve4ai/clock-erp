@@ -1,4 +1,6 @@
 import re
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -110,6 +112,7 @@ class SalesFormDesignSystemContractTest(unittest.TestCase):
         }
         self.assertTrue(direct_names.issubset(names), direct_names - names)
         for combobox_name in (
+            "warehouse_id",
             "product_id",
             "brand_id",
             "category_id",
@@ -126,6 +129,37 @@ class SalesFormDesignSystemContractTest(unittest.TestCase):
         self.assertIn("if (saleEditSavePending)", self.template)
         self.assertIn("setSaleFormPending(true", self.template)
         self.assertIn('saleSubmitButton.textContent = "Сохраняем…"', self.template)
+
+    def test_warehouse_uses_shared_combobox_inside_pending_form_grid(self):
+        grid = self.modal.split('id="saleFormFields"', 1)[1].split('</fieldset>', 1)[0]
+        warehouse = grid.split('sale-warehouse-field', 1)[1].split('</div>', 1)[0]
+        for marker in (
+            'for="saleWarehouseComboboxTrigger"',
+            'render_catalog_combobox(',
+            '"saleWarehouseCombobox"',
+            '"warehouse_id"',
+            'input_id="saleWarehouse"',
+            'component_class="filter-combobox"',
+            'disabled=true',
+            'floating_layer=true',
+            'search_placeholder="Поиск склада"',
+        ):
+            self.assertIn(marker, warehouse)
+        self.assertLess(grid.index('sale-warehouse-field'), grid.index('>Товар</h3>'))
+        self.assertNotIn('<select id="saleWarehouse"', self.modal)
+        self.assertNotIn('shared_catalog_kind=', warehouse)
+        self.assertIn('"catalog-combobox:change", onSaleWarehouseChange', self.template)
+        self.assertIn('saleFormFields.toggleAttribute("inert", pending)', self.template)
+
+    def test_warehouse_control_behavior(self):
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('Node required for warehouse control behavior')
+        result = subprocess.run(
+            [node, str(ROOT / 'tests/sale_warehouse_control_node.js')],
+            capture_output=True, text=True, encoding='utf-8', timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_validation_error_and_unrelated_actions_remain_distinct(self):
         self.assertIn('id="saleProductError"', self.modal)

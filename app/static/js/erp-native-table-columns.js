@@ -52,6 +52,8 @@
             ? options.actionWidth
             : () => Number(options.actionWidth) || 0;
         const signal = options.signal;
+        // Context-only visibility must not change the user's saved column view.
+        const contextHiddenColumns = options.contextHiddenColumns || [];
         const removers = [];
         let actualWidths = {};
         let lastContainerWidth = -1;
@@ -73,8 +75,12 @@
             }
         }
 
+        function isHidden(key) {
+            return view.hidden.includes(key) || contextHiddenColumns.includes(key);
+        }
+
         function visibleKeys() {
-            return view.order.filter((key) => !view.hidden.includes(key));
+            return view.order.filter((key) => !isHidden(key));
         }
 
         function applyOrder() {
@@ -142,7 +148,7 @@
                 actionColumn.style.width = actionWidth() + "px";
             }
             view.order.forEach((key) => {
-                const hidden = view.hidden.includes(key);
+                const hidden = isHidden(key);
                 const width = hidden ? view.widths[key] : actualWidths[key];
                 table.querySelectorAll(
                     '[data-column-key="' + key + '"]',

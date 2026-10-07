@@ -107,8 +107,19 @@ class HongKongWorkflowsTest(unittest.TestCase):
                 response = case.client.get(path)
                 self.assertEqual(response.status_code,200)
                 self.assertIn('id="'+select_id+'"',response.text)
-                self.assertIn('value="hong-kong"',response.text)
-                self.assertNotIn('value="wb"',response.text)
+                if select_id == 'saleWarehouse':
+                    control = response.text.split('id="saleWarehouseCombobox"', 1)[1]
+                    control = control.split('>Товар</h3>', 1)[0]
+                    self.assertEqual(set(re.findall(r'data-brand="([^"]*)"', control)),
+                                     {'default', 'hong-kong'})
+                    hidden = re.search(r'<input\b[^>]*id="saleWarehouse"[^>]*>', control).group()
+                    self.assertIn('type="hidden"', hidden)
+                    self.assertIn('name="warehouse_id"', hidden)
+                    self.assertIn('disabled', hidden)
+                    self.assertIn('id="saleWarehouseComboboxTrigger"', control)
+                else:
+                    self.assertIn('value="hong-kong"',response.text)
+                    self.assertNotIn('value="wb"',response.text)
                 self.check_inline_scripts(response.text)
 
 
