@@ -128,8 +128,7 @@
     applySelectedTemplate();
   };
   clearOrder?.addEventListener('click', () => { resetRecipient(); applySelectedTemplate(); orderSearch.focus(); });
-  cdekSearch?.addEventListener('click', async () => {
-    const number = orderSearch.value.trim();
+  const findCdekRecipient = async (number) => {
     resetRecipient();
     orderSearch.value = number;
     applySelectedTemplate();
@@ -143,10 +142,11 @@
       selectOrder(payload.data);
     } catch (failure) {
       if (version !== orderSearchVersion) return;
-      selection.textContent = failure.message;
+      selection.textContent = `Поиск в СДЭК: ${failure.message}. Можно ввести телефон и текст SMS вручную.`;
       cdekSearch.hidden = false;
     }
-  });
+  };
+  cdekSearch?.addEventListener('click', () => findCdekRecipient(orderSearch.value.trim()));
   let orderRows = [];
   orderSearch?.addEventListener('input', () => {
     const query = orderSearch.value.trim();
@@ -157,7 +157,7 @@
     cdekSearch.hidden = !/^[0-9]{6,20}$/.test(query);
     const version = orderSearchVersion;
     if (!query) return;
-    selection.textContent = 'Выберите заказ из результатов поиска.';
+    selection.textContent = 'Ищем заказ в ERP…';
     orderTimer = setTimeout(async () => {
       try {
         const response = await fetch(`/api/v1/sms/orders?q=${encodeURIComponent(query)}`);
@@ -165,7 +165,14 @@
         if (version !== orderSearchVersion) return;
         if (!response.ok) throw new Error(payload.message || 'Не удалось найти заказ');
         orderRows = payload.data || [];
-        orderResults.innerHTML = orderRows.map((row, index) => `<button type="button" data-order-index="${index}"><strong>Заказ №${escapeHtml(row.number)}</strong><br><small>${escapeHtml([row.source, row.phone || 'Телефон не указан', row.name].filter(Boolean).join(' · '))}</small></button>`).join('') || '<button type="button" disabled>Заказ не найден</button>';
+        if (!orderRows.length && /^[0-9]{6,20}$/.test(query)) {
+          await findCdekRecipient(query);
+          return;
+        }
+        selection.textContent = orderRows.length
+          ? 'Найдены заказы ERP. Выберите нужный заказ.'
+          : 'Заказ в ERP не найден. Введите телефон и текст SMS вручную или полный номер накладной СДЭК.';
+        orderResults.innerHTML = orderRows.map((row, index) => `<button type="button" data-order-index="${index}"><strong>Заказ №${escapeHtml(row.number)}</strong><br><small>${escapeHtml([row.source, row.phone || 'Телефон не указан', row.name].filter(Boolean).join(' · '))}</small></button>`).join('') || '<button type="button" disabled>Заказ в ERP не найден</button>';
         orderResults.hidden = false;
       } catch (failure) {
         if (version === orderSearchVersion) selection.textContent = failure.message;

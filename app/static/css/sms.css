@@ -493,11 +493,7 @@
   font-size: 13px;
 }
 .sms-customer-results {
-  position: absolute;
-  z-index: 4;
-  top: 66px;
-  left: 0;
-  right: 0;
+  position: static;
   max-height: 220px;
   overflow: auto;
   border: 1px solid #d5dde8;
