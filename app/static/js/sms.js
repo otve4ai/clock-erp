@@ -58,7 +58,9 @@
       submit.disabled = !sendingConfigured;
     } catch (failure) {
       if (version !== previewVersion) return;
-      error.textContent = failure.message;
+      error.textContent = failure.message === 'В выбранном заказе нет однозначной накладной СДЭК. Отправка невозможна.'
+        ? 'Недостаточно данных для автоматического заполнения шаблона. Выберите «Без шаблона» и введите текст сообщения вручную. Перед отправкой проверьте текст и телефон получателя.'
+        : failure.message;
       error.hidden = false;
     }
   };
