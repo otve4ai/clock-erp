@@ -1,6 +1,7 @@
 """Real temporary mail queue, fake CDEK/SMTP only; never contacts a recipient."""
 import copy
 import gc
+import os
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -169,6 +170,19 @@ class ReminderTest(unittest.TestCase):
         self.now += DELAY
         self.worker().deliver()
         self.assertEqual(FakeTransport.smtp_client.messages, [])
+
+    def test_worker_loads_only_allowed_settings_and_requires_private_file(self):
+        from scripts.mail_worker import load_environment
+        path = self.root / "test-config"
+        path.write_text("CDEK_ACCOUNT=test-account\nCDEK_EMAIL_REMINDERS_ENABLED=1\nERP_MAIL_SECRET_KEY=test-key\nUNRELATED_SETTING=forbidden\n", encoding="utf-8")
+        with mock.patch("scripts.mail_worker.Path.stat", return_value=mock.Mock(st_uid=0, st_mode=0o100600)), mock.patch.dict(os.environ, {}, clear=True):
+            load_environment(path)
+            self.assertEqual(os.getenv("CDEK_EMAIL_REMINDERS_ENABLED"), "1")
+            self.assertEqual(os.getenv("ERP_MAIL_SECRET_KEY"), "test-key")
+            self.assertNotIn("UNRELATED_SETTING", os.environ)
+        with mock.patch("scripts.mail_worker.Path.stat", return_value=mock.Mock(st_uid=0, st_mode=0o100644)):
+            with self.assertRaises(ValueError):
+                load_environment(path)
 
 
 if __name__ == "__main__":
