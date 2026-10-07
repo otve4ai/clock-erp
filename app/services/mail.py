@@ -15,6 +15,7 @@ import smtplib
 import socket
 import sqlite3
 import ssl
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header, make_header
@@ -260,6 +261,8 @@ def parse_message(raw):
 
 
 def parse_addresses(value):
+    if "\r" in str(value or "") or "\n" in str(value or ""):
+        raise MailValidationError("Адрес содержит недопустимые символы.")
     addresses = []
     for name, address in getaddresses([str(value or "")]):
         normalized = normalize_email(address)
@@ -577,7 +580,7 @@ class MailStore:
             connection.execute("INSERT INTO mail_sync_requests(account_id,requested_by,requested_at) VALUES(?,?,?)", (account["id"], int(actor_id), utc_now()))
             connection.commit()
 
-    def queue_outbox(self, payload, actor_id, idempotency_key, draft=False):
+    def queue_outbox(self, payload, actor_id, idempotency_key, draft=False, order_ids=()):
         account = self.account(include_disabled=False)
         if not account:
             raise MailValidationError("Почта не подключена.")
@@ -611,6 +614,7 @@ class MailStore:
                 "content_type": str(item.get("content_type") or "application/octet-stream")[:240],
             })
         with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute("SELECT * FROM mail_outbox WHERE idempotency_key=?", (key,)).fetchone()
             if existing:
                 return dict(existing), False
@@ -625,6 +629,9 @@ class MailStore:
                 customer_id = int(payload["customer_id"])
                 connection.execute("UPDATE mail_threads SET customer_id=? WHERE id=?", (customer_id, thread_id))
                 connection.execute("INSERT OR IGNORE INTO mail_links(thread_id,entity_type,entity_id,label,created_by,created_at) VALUES(?,'customer',?,?,?,?)", (thread_id, str(customer_id), "Клиент №{}".format(customer_id), int(actor_id), now))
+            for order_id in set(order_ids):
+                connection.execute("INSERT OR IGNORE INTO mail_links(thread_id,entity_type,entity_id,label,created_by,created_at) VALUES(?,'order',?,?,?,?)",
+                    (thread_id, str(order_id), "Заказ №{}".format(order_id), int(actor_id), now))
             cursor = connection.execute(
                 "INSERT INTO mail_outbox(account_id,thread_id,idempotency_key,state,to_json,cc_json,bcc_json,subject,text_body,in_reply_to,references_json,author_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (account["id"], thread_id, key, "draft" if draft else "queued",
@@ -797,8 +804,9 @@ class MailTransport:
 
 
 class MailSynchronizer:
-    def __init__(self, store, secret_box, transport_factory=MailTransport):
+    def __init__(self, store, secret_box, transport_factory=MailTransport, cdek_reminders=None):
         self.store, self.secret_box, self.transport_factory = store, secret_box, transport_factory
+        self.cdek_reminders = cdek_reminders
 
     @staticmethod
     def _uidvalidity(response):
@@ -911,11 +919,38 @@ class MailSynchronizer:
             return {"sent": 0, "failed": 0, "unknown": 0}
         password = self.secret_box.decrypt(account["encrypted_password"])
         with self.store.connect() as connection:
-            rows = [dict(row) for row in connection.execute("SELECT * FROM mail_outbox WHERE state='queued' ORDER BY id LIMIT 20")]
+            sql = "SELECT * FROM mail_outbox WHERE state='queued'"
+            if self.cdek_reminders is None:
+                sql += " AND idempotency_key NOT LIKE 'cdek-pvz-v1:%'"
+            rows = [dict(row) for row in connection.execute(sql + " ORDER BY updated_at,id LIMIT 20")]
         result = {"sent": 0, "failed": 0, "unknown": 0}
+        cdek_deadline = time.monotonic() + 60
         for row in rows:
+            if row["idempotency_key"].startswith("cdek-pvz-v1:"):
+                # Automated reminders must never bypass their live carrier check,
+                # including when deliver() is invoked outside the scheduled worker.
+                if self.cdek_reminders is None or time.monotonic() >= cdek_deadline:
+                    continue
+                from app.clients.cdek import CdekError
+                try:
+                    payload = self.cdek_reminders.preflight(row)
+                except (CdekError, MailValidationError):
+                    with self.store.connect() as connection:
+                        connection.execute("UPDATE mail_outbox SET error_code='CDEK_RECHECK_PENDING',updated_at=? WHERE id=? AND state='queued'", (utc_now(), row["id"]))
+                        connection.commit()
+                    continue
+                if payload is None:
+                    with self.store.connect() as connection:
+                        connection.execute("UPDATE mail_outbox SET state='failed',error_code='CDEK_REMINDER_NOT_APPLICABLE',updated_at=? WHERE id=? AND state='queued'", (utc_now(), row["id"]))
+                        connection.commit()
+                    continue
+                row.update(subject=payload["subject"], text_body=payload["text_body"],
+                           to_json=json.dumps(parse_addresses(payload["to"]), ensure_ascii=False))
             with self.store.connect() as connection:
                 claimed = connection.execute("UPDATE mail_outbox SET state='sending',updated_at=? WHERE id=? AND state='queued'", (utc_now(), row["id"])).rowcount
+                if claimed and row["idempotency_key"].startswith("cdek-pvz-v1:"):
+                    connection.execute("UPDATE mail_outbox SET subject=?,text_body=?,to_json=?,error_code='' WHERE id=?",
+                                       (row["subject"], row["text_body"], row["to_json"], row["id"]))
                 connection.commit()
             if not claimed:
                 continue

@@ -163,7 +163,7 @@ class SalesDeliveryTest(unittest.TestCase):
 
     def test_verified_return_leaves_problems_but_remains_in_all_and_can_reopen(self):
         group = self.seed("DELIVERED", age=0, is_return=True)
-        self.service.save_review(group, dict(version=0, work="closed", note="Возврат осмотрен"), "1")
+        self.service.save_review(group, dict(version=0, work="closed", outcome="return_checked", note="Возврат осмотрен"), "1")
         row = self.service.rows(self.sales)[0]
         self.assertEqual(row["work"], "closed")
         self.assertFalse(row["issues"])
