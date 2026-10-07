@@ -96,6 +96,7 @@ from app.services.order_status import (
     OrderStatusError,
     OrderStatusService,
 )
+from app.services.sms_order_search import search_orders_by_number
 from app.services.order_lifecycle import OrderLifecycle
 from app.services.order_print import build_order_print_context
 from app.services.order_comments import OrderCommentsService
@@ -25534,7 +25535,7 @@ def sms_order_search_api():
                 return api_error("ORDER_NOT_FOUND", "Заказ не найден.", 404)
             rows = [dict(order, id=order_id)]
         else:
-            rows = store.search_by_number(query) if query else []
+            rows = search_orders_by_number(store, query) if query else []
     except sqlite3.Error:
         return api_error("ORDERS_UNAVAILABLE", "Поиск заказов временно недоступен.", 503)
     return api_success([{

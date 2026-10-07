@@ -364,8 +364,7 @@ class SmsWebTests(unittest.TestCase):
         self.assertEqual(SmsStore(self.path).get(client_message_id="order-no-name")["customer_name"], "")
 
     def test_order_search_error_is_visible(self):
-        with mock.patch.object(self.web, "OrdersSnapshotStore") as snapshots:
-            snapshots.return_value.search_by_number.side_effect = sqlite3.OperationalError("unavailable")
+        with mock.patch.object(self.web, "search_orders_by_number", side_effect=sqlite3.OperationalError("unavailable")):
             self.assertEqual(self.client.get("/api/v1/sms/orders?q=551").status_code, 503)
 
     def test_cdek_preview_and_send_use_saved_template_and_source_order(self):
