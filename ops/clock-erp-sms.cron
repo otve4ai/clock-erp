@@ -1,3 +1,4 @@
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 */5 * * * * root test ! -e /run/clock-erp-maintenance.json && cd /opt/clock-erp-current && flock -n /run/lock/clock-erp-sms-sync.lock /opt/clock-erp/venv/bin/python scripts/sms_status_sync.py --environment-file /etc/clock-erp/clock-erp.env >> /var/log/clock-erp-sms.log 2>&1
+*/5 * * * * root test ! -e /run/clock-erp-maintenance.json && cd /opt/clock-erp-current && flock -n /run/lock/clock-erp-cdek-followups.lock /opt/clock-erp/venv/bin/python scripts/cdek_followup_worker.py --environment-file /etc/clock-erp/clock-erp.env --environment-file /etc/clock-erp/cdek.env >> /var/log/clock-erp-sms.log 2>&1

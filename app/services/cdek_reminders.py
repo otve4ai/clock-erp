@@ -1,4 +1,4 @@
-"""Automatic pickup email only; carrier data is read afresh, SMS is never sent."""
+"""Automatic pickup email; the separate followup worker handles SMS and tasks."""
 import json
 import re
 import time

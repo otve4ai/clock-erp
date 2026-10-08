@@ -126,10 +126,17 @@
         const yes = button('Удалить задачу', () => submit(() => api.request(`/tasks/${task.id}/delete`, 'POST', {version: task.version}), async result => { showTask(result); ui.notice('Задача удалена'); await ui.refresh(true); }, () => taskById(task.id)), 'tm-danger');
         confirm.append(button('Отмена', () => confirm.remove()), yes); body.prepend(confirm); yes.focus();
     }
+    function cdekLink(task, target) {
+        if (task.related_entity_type !== 'cdek_call' || !/^[a-f0-9]{64}$/.test(task.related_entity_label || '')) return;
+        const link = node('a', '', 'Открыть отправление СДЭК');
+        link.href = '/sales/cdek?mode=all&shipment=' + encodeURIComponent(task.related_entity_label);
+        target.append(node('p', '', 'Создана автоматически по сроку СДЭК'), link);
+    }
     function preview(task) {
         const micro = task.task_type === 'micro';
         const current = open(task.title, micro ? '⚡ Микрозадача · 24 часа' : 'Ознакомление с задачей');
         const details = node('div', 'tm-details tm-task-preview');
+        cdekLink(task, details);
         details.append(node('p', '', `Поставил: ${ui.name(task.created_by)}`), node('p', '', `Исполнитель: ${ui.name(task.assigned_to)}`),
             node('p', '', `Статус: ${micro ? (task.status === 'done' ? 'Готово' : 'К выполнению') : ui.statusNames[task.status]}`));
         if (micro) {
@@ -149,6 +156,7 @@
     function showTask(task, focus) {
         const micro = task.task_type === 'micro'; const current = open(task.title, `${micro ? 'Микрозадача' : 'Задача'} #${task.id}${task.deleted_at ? ' · удалена' : ''}`);
         const form = node('form', 'tm-form'); const controls = {};
+        cdekLink(task, form);
         controls.title = field(form, 'title', 'Название', 'text', task.title, true); controls.title.required = true; controls.title.maxLength = 500;
         controls.status = field(form, 'status', 'Статус', 'select'); options(controls.status, micro ? {new: 'К выполнению', done: 'Готово'} : ui.statusNames, task.status);
         controls.assigned_to = field(form, 'assigned_to', 'Исполнитель', 'select'); ui.userOptions(controls.assigned_to, task.assigned_to);

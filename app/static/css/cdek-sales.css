@@ -144,6 +144,8 @@ a.cdek-stat:focus-visible{outline:2px solid var(--erp-primary);outline-offset:3p
 .cdek-contacts{display:flex;gap:5px;flex-wrap:nowrap}
 .cdek-page .cdek-contact{display:inline-flex;align-items:center;gap:3px;padding:5px 6px;min-height:30px;color:var(--cdek-ink);background:var(--cdek-bg);border:1px solid color-mix(in srgb,var(--cdek-point) 50%,var(--cdek-bg));border-radius:7px;font-size:12px}
 .cdek-contact>svg,.cdek-contact>span{color:inherit}
+/* The shared theme forces neutral button colors, including on hover. */
+html[data-theme] .cdek-page .cdek-contacts button.cdek-contact{color:var(--cdek-ink)!important;background-color:var(--cdek-bg)!important;border-color:color-mix(in srgb,var(--cdek-point) 50%,var(--cdek-bg))!important;border-radius:7px!important}
 .cdek-contact::before{display:none}
 .cdek-contacts svg,.cdek-contact-line svg,.cdek-open svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 .cdek-contact:focus-visible{outline:2px solid var(--erp-primary);outline-offset:2px}
@@ -187,6 +189,7 @@ a.cdek-stat:focus-visible{outline:2px solid var(--erp-primary);outline-offset:3p
 .cdek-segmented input:checked+span{color:var(--erp-primary);background:color-mix(in srgb,var(--erp-primary) 10%,var(--erp-surface));box-shadow:inset 0 0 0 1px var(--erp-primary)}
 .cdek-segmented input:focus-visible+span{outline:2px solid var(--erp-primary);outline-offset:-3px}
 .cdek-work-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:16px;align-items:start}
+.cdek-work-grid:has(>[data-work-fields="closed"][hidden]){grid-template-columns:1fr}
 .cdek-work-grid [data-work-fields]>label:first-child{margin-top:0}
 .cdek-field-error{color:var(--erp-danger);font-size:12px;font-weight:400}
 .cdek-drawer [aria-invalid=true]{border-color:var(--erp-danger)}
