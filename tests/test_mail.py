@@ -1,4 +1,5 @@
 import base64
+import gc
 import os
 import socket
 import sqlite3
@@ -102,12 +103,16 @@ class MailServiceTest(unittest.TestCase):
         }, 1, self.box)
 
     def tearDown(self):
+        # Fake SMTP exceptions retain traceback frames and SQLite handles on Windows.
+        FakeTransport.smtp_client = FakeSMTP()
+        gc.collect()
         self.temp.cleanup()
 
     def test_schema_is_repeatable_and_verified(self):
         migrate_database(self.db)
         self.assertIn("mail-v2", validate_database(self.db))
 
+    @unittest.skipIf(os.name == "nt", "POSIX file mode; Windows uses ACLs")
     def test_database_is_private_after_creation_and_repeat_migration(self):
         self.assertEqual(self.db.stat().st_mode & 0o777, 0o600)
         os.chmod(str(self.db), 0o644)

@@ -30,7 +30,7 @@ class CdekClient:
     def configured(self):
         return bool(self._account and self._password)
 
-    def _request(self, method, path, **kwargs):
+    def _request(self, method, path, expected_type=dict, **kwargs):
         try:
             response = self._session.request(
                 method, self.origin + path, timeout=(5, 20),
@@ -52,7 +52,7 @@ class CdekClient:
             result = response.json()
         except (ValueError, TypeError):
             raise CdekError("CDEK_RESPONSE", "Некорректный ответ СДЭК.") from None
-        if not isinstance(result, dict):
+        if not isinstance(result, expected_type):
             raise CdekError("CDEK_RESPONSE", "Некорректный ответ СДЭК.")
         return result
 
@@ -126,3 +126,26 @@ class CdekClient:
         if str(actual or "").strip() != value:
             raise CdekError("CDEK_MISMATCH", "Номер отправления в ответе СДЭК не совпадает с запросом.")
         return entity
+
+    def get_delivery_point(self, code):
+        """Read the exact office, never substitute a similarly named location."""
+        code = str(code or "").strip()
+        if not code or len(code) > 255:
+            raise CdekError("CDEK_POINT", "СДЭК не указал пункт выдачи.")
+        with self._lock:
+            for attempt in range(2):
+                self._authorize()
+                try:
+                    rows = self._request("GET", "/deliverypoints", expected_type=list,
+                        params={"code": code}, headers={"Accept": "application/json",
+                        "Authorization": "Bearer " + self._token})
+                    break
+                except CdekError as error:
+                    if error.code != "CDEK_UNAUTHORIZED" or attempt:
+                        raise
+                    self._token = ""
+                    self._expires = 0
+        matches = [row for row in rows if isinstance(row, dict) and row.get("code") == code]
+        if len(matches) != 1:
+            raise CdekError("CDEK_POINT", "Не удалось однозначно определить пункт выдачи.")
+        return matches[0]

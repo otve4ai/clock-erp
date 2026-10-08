@@ -1,0 +1,9 @@
+{% from '_navigation_icons.html' import navigation_icon %}
+{% macro indicators(row) %}
+<div class="cdek-contacts" aria-label="Контакт с клиентом">
+{% for channel,label,icon in [('email','Email','mail'),('sms','SMS','message'),('call','Звонок','phone')] %}
+{% set contact=row.contacts[channel] %}
+<button type="button" class="cdek-contact cdek-badge cdek-{{ contact.tone }}" title="{{ label }}: {{ contact.tooltip }}" aria-label="{{ label }}: {{ contact.tooltip }}" data-contact-channel="{{ channel }}" data-contact-label="{{ label }}" data-contact-detail="{{ label }}: {{ contact.tooltip }}">{{ navigation_icon(icon) }}<span aria-hidden="true">{{ contact.mark }}</span></button>
+{% endfor %}
+</div>
+{% endmacro %}

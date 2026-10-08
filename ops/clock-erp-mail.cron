@@ -1,1 +1,1 @@
-* * * * * root test ! -e /run/clock-erp-maintenance.json && cd /opt/clock-erp-current && flock -n /run/lock/clock-erp-mail.lock /opt/clock-erp/venv/bin/python scripts/mail_worker.py >> /var/log/clock-erp-mail.log 2>&1
+* * * * * root test ! -e /run/clock-erp-maintenance.json && cd /opt/clock-erp-current && flock -n /run/lock/clock-erp-mail.lock /opt/clock-erp/venv/bin/python scripts/mail_worker.py --environment-file /etc/clock-erp/clock-erp.env >> /var/log/clock-erp-mail.log 2>&1

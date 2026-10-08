@@ -141,3 +141,28 @@ html[data-theme] .cdek-sync-control a.cdek-all-shipments:hover{
 a.cdek-stat,html[data-theme] a.cdek-stat{color:var(--erp-text);text-decoration:none}
 a.cdek-stat:hover,a.cdek-stat[aria-current]{border-color:var(--erp-primary);background:var(--erp-surface-muted)}
 a.cdek-stat:focus-visible{outline:2px solid var(--erp-primary);outline-offset:3px}
+.cdek-contacts{display:flex;gap:5px;flex-wrap:nowrap}
+.cdek-page .cdek-contact{display:inline-flex;align-items:center;gap:3px;padding:5px 6px;min-height:30px;color:var(--cdek-ink);background:var(--cdek-bg);border:1px solid transparent;border-radius:7px;font-size:12px}
+.cdek-contact::before{display:none}
+.cdek-contacts svg,.cdek-contact-line svg,.cdek-open svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.cdek-contact:focus-visible{outline:2px solid var(--erp-primary);outline-offset:2px}
+.cdek-page .cdek-open{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.cdek-open-cell{width:1%;white-space:nowrap}
+.cdek-contact-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0}
+.cdek-contact-line>span:first-child{display:inline-flex;align-items:center;gap:7px;min-width:75px}
+.cdek-contact-line small{margin-left:auto}
+.cdek-call-form label,.cdek-manager-form [data-work-fields] label{margin-top:10px}
+.cdek-call-form summary,.cdek-call-history summary,.cdek-manager-form details>summary{cursor:pointer;font-size:12px;padding:6px 0}
+.cdek-contact-section{padding-bottom:14px;border-bottom:1px solid var(--erp-border)}
+.cdek-drawer-content{padding:16px 24px}
+.cdek-drawer-section p{margin:8px 0}
+.cdek-refresh{margin-top:10px}
+.cdek-action-summary{margin-top:14px;padding:10px 12px}
+.cdek-history{margin-top:16px;padding-top:10px}
+.cdek-timeline{margin:10px 0}
+.cdek-timeline li{padding-bottom:12px}
+.cdek-manager-form{margin-top:16px;padding-top:14px;gap:12px}
+.cdek-error{border-color:var(--erp-danger);color:var(--erp-danger)}
+.cdek-contact-popover{position:fixed;z-index:10000;max-width:min(330px,calc(100vw - 32px));padding:10px 12px;border:1px solid var(--erp-border);border-radius:8px;background:var(--erp-surface);color:var(--erp-text);box-shadow:var(--erp-shadow);font-size:12px;line-height:1.5}
+[data-work-fields][hidden],[data-outcome-note][hidden]{display:none}
+.cdek-drawer{width:min(560px,100%);max-width:100%}

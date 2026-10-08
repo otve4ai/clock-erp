@@ -22,6 +22,7 @@
       "registry_meta"
     ],
     "mail.db": [
+      "mail_outbox",
       "mail_messages",
       "mail_threads",
       "mail_links"
