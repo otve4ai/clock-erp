@@ -54,7 +54,15 @@ class TasksService:
         permissions.require_actor(user)
         return self._create(user, micro_values(payload, creating=True), "micro")
 
-    def _create(self, user, values, task_type):
+    def create_automated_micro(self, user, title, source_key, source_label):
+        """Trusted worker entry point, never exposed through the generic API."""
+        permissions.require_actor(user)
+        values = micro_values({"title": title}, creating=True)
+        values.update(related_entity_type="cdek_call", related_entity_id=source_key,
+                      related_entity_label=source_label)
+        return self._create(user, values, "micro", source_key=source_key)
+
+    def _create(self, user, values, task_type, source_key=None):
         assigned_to = values.get("assigned_to", user["id"])
         self._assignee(assigned_to)
         now = self.now()
@@ -74,6 +82,13 @@ class TasksService:
         if task["status"] == "done":
             task["completed_at"] = now
         with self.repository.transaction(write=True) as session:
+            if source_key:
+                # Include completed, deleted and converted tasks: never recreate.
+                existing = session.connection.execute(
+                    "SELECT * FROM tasks WHERE related_entity_type='cdek_call' AND related_entity_id=? LIMIT 1",
+                    (source_key,)).fetchone()
+                if existing:
+                    return dict(existing)
             self._project(session, user, task["project_id"])
             task = session.create(task)
             session.add_activity(task, user["id"], "created", now, {"task": task})
