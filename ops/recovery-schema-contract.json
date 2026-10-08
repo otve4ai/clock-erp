@@ -24,6 +24,8 @@
     "mail.db": [
       "mail_accounts",
       "mail_sync_requests",
+      "mail_attachments",
+      "mail_recipients",
       "mail_outbox",
       "mail_messages",
       "mail_threads",
