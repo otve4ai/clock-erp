@@ -147,6 +147,7 @@ class SecretBox:
 
 
 class _SafeHTML(HTMLParser):
+    DROP_CONTENT = {"style", "script", "title", "template", "iframe", "object", "noscript"}
     TAGS = {"a", "b", "blockquote", "br", "code", "div", "em", "h1", "h2", "h3", "hr", "i", "li", "ol", "p", "pre", "span", "strong", "table", "tbody", "td", "th", "thead", "tr", "u", "ul", "img"}
     VOID = {"br", "hr", "img"}
 
@@ -155,9 +156,15 @@ class _SafeHTML(HTMLParser):
         self.parts = []
         self.show_images = show_images
         self.external_images = False
+        self.suppressed = []
 
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
+        if tag in self.DROP_CONTENT:
+            self.suppressed.append(tag)
+            return
+        if self.suppressed:
+            return
         if tag not in self.TAGS:
             return
         safe = []
@@ -182,11 +189,17 @@ class _SafeHTML(HTMLParser):
 
     def handle_endtag(self, tag):
         tag = tag.lower()
+        if self.suppressed:
+            if tag in self.suppressed:
+                index = len(self.suppressed) - 1 - self.suppressed[::-1].index(tag)
+                del self.suppressed[index:]
+            return
         if tag in self.TAGS and tag not in self.VOID:
             self.parts.append("</{}>".format(tag))
 
     def handle_data(self, data):
-        self.parts.append(escape(data))
+        if not self.suppressed:
+            self.parts.append(escape(data))
 
 
 def sanitize_html(value, show_images=False):
