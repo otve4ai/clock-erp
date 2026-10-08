@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from app.clients.cdek import CdekError
 from app.services.cdek_delivery import MOSCOW, display_time
-from app.services.cdek_contacts import contact_states
+from app.services.cdek_contacts import contact_states, interaction_history
 from app.time_ranking import parse_erp_datetime
 
 DAY = 86400
@@ -34,8 +34,8 @@ LABELS = {
     "POSTOMAT_SEIZED": ("Возврат", "red"),
 }
 WORK = {"new": "Нужна реакция", "working": "В работе", "closed": "Обработан"}
-OUTCOMES = {"collected": "Получатель забрал заказ", "refused": "Клиент отказался",
-            "return_checked": "Возврат проверен", "other": "Другое"}
+OUTCOMES = {"collected": "Заказ получен", "refused": "Клиент отказался",
+            "unreachable": "Не удалось связаться", "return_checked": "Возврат проверен", "other": "Другое"}
 LEGACY_WORK = {"today": "new", "tomorrow": "new"}
 CATEGORIES = {"pvz": "Не забирают", "delay": "Задержки", "return": "Возвраты",
               "data": "Ошибки данных"}
@@ -170,39 +170,48 @@ class CdekSales:
 
     def save_review(self, shipment, payload, actor):
         key = shipment["id"]
+        unified = payload.get("form_mode") == "unified"
+        request_hash = hashlib.sha256(json.dumps({"actor": str(actor), "payload": dict(payload)}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        def invalid(field, message):
+            error = CdekError("CDEK_FORM", message)
+            error.field = field
+            raise error
         work = str(payload.get("work") or "new")
         note = str(payload.get("note") or "").strip()
         if work not in WORK or len(note) > 2000:
-            raise CdekError("CDEK_FORM", "Проверьте отметку и длину заметки (до 2000 символов).")
+            invalid("note" if len(note) > 2000 else "review_work", "Проверьте статус и длину комментария (до 2000 символов).")
         followup = str(payload.get("followup") or "").strip()
         next_action = str(payload.get("next_action") or "").strip()
         outcome = str(payload.get("outcome") or "").strip()
-        outcome_note = str(payload.get("outcome_note") or "").strip()
+        outcome_note = note if unified else str(payload.get("outcome_note") or "").strip()
         if len(next_action) > 500 or len(outcome_note) > 2000:
-            raise CdekError("CDEK_FORM", "Слишком длинное пояснение или следующее действие.")
-        for value in (payload.get("storage_until"), payload.get("expected_delivery"), followup):
+            invalid("next_action" if len(next_action) > 500 else "note", "Слишком длинный комментарий или следующее действие.")
+        for field in ("storage_until", "expected_delivery", "followup"):
+            value = payload.get(field)
             if not value:
                 continue
             try:
                 if datetime.strptime(value, "%Y-%m-%d").strftime("%Y-%m-%d") != value:
                     raise ValueError("Noncanonical date")
             except (TypeError, ValueError):
-                raise CdekError("CDEK_FORM", "Некорректная подтверждённая дата.") from None
+                invalid(field, "Укажите корректную дату.")
         try:
             version = int(payload.get("version", -1))
         except (ValueError, TypeError):
             raise CdekError("CDEK_FORM", "Обновите страницу перед сохранением.") from None
         with self.delivery.lock():
             previous = self.review(key)
+            if any(entry.get("request_hash") == request_hash for entry in previous.get("history", [])):
+                return previous
             if previous["version"] != version:
                 raise CdekError("CDEK_CONFLICT", "Другой сотрудник изменил отметку. Обновите страницу.")
             snapshot = self.delivery.view(shipment)
             if work == "closed" and outcome not in OUTCOMES:
-                raise CdekError("CDEK_FORM", "Выберите результат обработки.")
-            if work == "closed" and outcome == "other" and not outcome_note:
-                raise CdekError("CDEK_FORM", "Поясните результат «Другое».")
+                invalid("outcome", "Выберите результат обработки.")
+            if work == "closed" and outcome in {"other", "unreachable"} and not outcome_note:
+                invalid("note" if unified else "outcome_note", "Добавьте комментарий к результату обработки.")
             if work == "closed" and outcome == "return_checked" and not (snapshot.get("is_return") and snapshot.get("status_code") in DELIVERED):
-                raise CdekError("CDEK_FORM", "Подтвердить возврат можно после его получения по данным СДЭК.")
+                invalid("outcome", "Подтвердить возврат можно после его получения по данным СДЭК.")
             history = list(previous.get("history") or [])
             if previous["version"] and not history:
                 history.append(dict(previous, action="legacy"))
@@ -210,21 +219,21 @@ class CdekSales:
             call_result = str(payload.get("call_result") or "")
             if call_result:
                 if call_result not in {"no_answer", "connected"}:
-                    raise CdekError("CDEK_FORM", "Выберите результат звонка.")
+                    invalid("call_result", "Выберите результат звонка.")
                 try:
-                    instant = datetime.strptime(str(payload.get("call_at") or ""), "%Y-%m-%dT%H:%M").replace(tzinfo=MOSCOW)
+                    instant = datetime.fromtimestamp(self.clock(), MOSCOW) if unified else datetime.strptime(str(payload.get("call_at") or ""), "%Y-%m-%dT%H:%M").replace(tzinfo=MOSCOW)
                 except ValueError:
                     raise CdekError("CDEK_FORM", "Укажите дату и время звонка (МСК).") from None
                 if instant.timestamp() > self.clock() + 60:
                     raise CdekError("CDEK_FORM", "Дата звонка не может быть в будущем.")
-                comment = str(payload.get("call_note") or "").strip()
+                comment = note if unified else str(payload.get("call_note") or "").strip()
                 if len(comment) > 2000:
                     raise CdekError("CDEK_FORM", "Комментарий звонка: до 2000 символов.")
                 calls.append(dict(result=call_result, at=instant.timestamp(), note=comment,
-                                  actor=str(actor)[:100], recorded_at=self.clock()))
-            data = dict(previous, version=version + 1, work=work, note=note,
-                        followup=(followup if "followup" in payload else previous.get("followup", "")) if work != "closed" else "",
-                        next_action=(next_action if "next_action" in payload else previous.get("next_action", "")) if work != "closed" else "",
+                                  actor=str(actor)[:100], recorded_at=self.clock(), review_version=version + 1))
+            data = dict(previous, version=version + 1, work=work, note=note or (previous.get("note", "") if unified else ""),
+                        followup=(followup if "followup" in payload else previous.get("followup", "")) if (work == "working" if unified else work != "closed") else "",
+                        next_action=(next_action if "next_action" in payload else previous.get("next_action", "")) if (work == "working" if unified else work != "closed") else "",
                         outcome=outcome if work == "closed" else previous.get("outcome", ""),
                         outcome_note=outcome_note if work == "closed" else previous.get("outcome_note", ""),
                         storage_until=payload.get("storage_until", previous.get("storage_until", "")),
@@ -233,7 +242,10 @@ class CdekSales:
                         calls=calls, closed_situation=situation(snapshot) if work == "closed" else previous.get("closed_situation", ""),
                         closed_epoch=(snapshot.get("events") or [{}])[0].get("epoch", 0) if work == "closed" else previous.get("closed_epoch", 0),
                         closed_event=snapshot.get("date_display", "") if work == "closed" else "")
-            history.append({k: v for k, v in data.items() if k not in {"history", "calls"}})
+            entry = {k: v for k, v in data.items() if k not in {"history", "calls"}}
+            entry.update(request_hash=request_hash, unified=unified, comment=note,
+                         call_result=call_result, call_at=calls[-1]["at"] if call_result else 0)
+            history.append(entry)
             data["history"] = history
             self.review_path.mkdir(parents=True, exist_ok=True)
             import tempfile
@@ -289,7 +301,10 @@ class CdekSales:
             needs_reaction = False
             wait = "—"
             if not is_delivered and not return_closed:
-                if code in PICKUP and not data.get("is_return"):
+                if code and code not in {"REMOVED", "INVALID"} and not data.get("is_return") and data.get("delivery_kind") not in {"pvz", "courier"}:
+                    needs_reaction = True
+                    add("data", 1, "Проверить способ доставки", "Обновить данные СДЭК и уточнить способ доставки; автоматическое письмо заблокировано")
+                if code in PICKUP and not data.get("is_return") and data.get("delivery_kind") == "pvz":
                     # Consecutive pickup events belong to one storage episode.
                     start = latest
                     for event in events:
@@ -297,7 +312,7 @@ class CdekSales:
                             break
                         start = min(start, event["epoch"])
                     days = max(0, int((now - start) // DAY))
-                    needs_reaction = days >= 7
+                    needs_reaction = needs_reaction or days >= 7
                     wait = "{} сут. в ПВЗ".format(days)
                     if days >= self.pvz_warning:
                         add("pvz", 2 if days >= self.pvz_urgent else 1,
@@ -342,7 +357,7 @@ class CdekSales:
             if effective_work == "new" and not needs_reaction:
                 effective_work = ""
             contact = contact_states(contacts.get(group["id"], {}), review, is_delivered or code == "REMOVED")
-            result.append(dict(group, contacts=contact, reopened=reopened, needs_reaction=needs_reaction, delivery=data, label=label, tone=tone, review=review,
+            result.append(dict(group, interactions=interaction_history(review, contacts.get(group["id"], {}), WORK, OUTCOMES), contacts=contact, reopened=reopened, needs_reaction=needs_reaction, delivery=data, label=label, tone=tone, review=review,
                 review_error=review_error, issues=issues, priority=max([i["priority"] for i in issues] or [0]),
                 wait=wait, work=effective_work, delivered=is_delivered, event_epoch=latest,
                 checked_display=display_time(data.get("checked_at", 0)),

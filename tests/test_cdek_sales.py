@@ -44,7 +44,7 @@ class SalesDeliveryTest(unittest.TestCase):
         group = group_sales(sales)[0]
         at = datetime.fromtimestamp(self.now - age * 86400, MOSCOW).isoformat()
         self.api.get_order.return_value = dict(cdek_number=group["tracking"] or "1234567890", number=group["number"],
-            is_return=is_return, statuses=[dict(code=code, name=code, date_time=at)])
+            tariff_code=136, delivery_point="TEST1", is_return=is_return, statuses=[dict(code=code, name=code, date_time=at)])
         self.delivery.sync(group)
         return group
 
@@ -65,6 +65,27 @@ class SalesDeliveryTest(unittest.TestCase):
         self.assertNotEqual(shipment_id(changed), shipment_id(self.sales[0]))
         self.assertEqual(self.service.rows([changed])[0]["label"], "Нет данных")
         self.assertEqual(self.service.rows([sale(track="")])[0]["label"], "Нет трека")
+
+    def test_ambiguous_delivery_needs_manager_without_blame_for_noncollection(self):
+        group = self.seed()
+        for tariff, point in ((None, "TEST1"), (137, "TEST1"), (137, None), (136, None)):
+            self.api.get_order.return_value.update(tariff_code=tariff, delivery_point=point)
+            self.now += 61
+            self.delivery.sync(group)
+            row = self.service.rows(self.sales)[0]
+            self.assertTrue(row["needs_reaction"])
+            self.assertIn("Проверить способ доставки", [i["reason"] for i in row["issues"]])
+            self.assertFalse(any(i["category"] == "pvz" for i in row["issues"]))
+
+    def test_courier_failure_retains_manager_followup(self):
+        group = self.seed("NOT_DELIVERED", age=0)
+        self.api.get_order.return_value.update(tariff_code=137, delivery_point=None)
+        self.now += 61
+        self.delivery.sync(group)
+        row = self.service.rows(self.sales)[0]
+        self.assertEqual(row["delivery"]["delivery_kind"], "courier")
+        self.assertTrue(row["needs_reaction"])
+        self.assertTrue(any(i["category"] == "return" for i in row["issues"]))
 
     def test_pickup_threshold_and_duplicate_events_keep_original_arrival(self):
         group = self.seed(age=2)
@@ -126,7 +147,7 @@ class SalesDeliveryTest(unittest.TestCase):
 
     def test_repeated_pickup_events_do_not_reset_storage_clock(self):
         group = group_sales(self.sales)[0]
-        self.api.get_order.return_value = dict(cdek_number=group["tracking"], statuses=[
+        self.api.get_order.return_value = dict(cdek_number=group["tracking"], tariff_code=136, delivery_point="TEST1", statuses=[
             dict(code="ACCEPTED_AT_PICK_UP_POINT", name="В ПВЗ", date_time="2026-09-30T10:00:00+0300"),
             dict(code="ACCEPTED_AT_PICK_UP_POINT", name="В ПВЗ", date_time="2026-09-25T10:00:00+0300"),
             dict(code="SENT_TO_RECIPIENT_CITY", name="В пути", date_time="2026-09-24T10:00:00+0300")])

@@ -18,6 +18,24 @@ from app.time_ranking import parse_erp_datetime
 MOSCOW = timezone(timedelta(hours=3))
 TERMINAL = frozenset(("DELIVERED", "POSTOMAT_RECEIVED", "NOT_DELIVERED", "REMOVED", "INVALID"))
 
+# Verified parcel/economy tariffs from https://apidoc.cdek.ru/ (2026-10-07).
+# Other tariffs fail closed until their destination mode is verified.
+PVZ_TARIFFS = frozenset((136, 138, 232, 234))
+COURIER_TARIFFS = frozenset((137, 139, 231, 233))
+
+
+def delivery_kind(entity):
+    tariff = entity.get("tariff_code")
+    if type(tariff) is not int:
+        return "unknown"
+    point = entity.get("delivery_point")
+    has_point = isinstance(point, str) and bool(point.strip())
+    if tariff in COURIER_TARIFFS:
+        return "conflict" if point else "courier"
+    if tariff in PVZ_TARIFFS:
+        return "pvz" if has_point else "conflict"
+    return "unknown"
+
 
 def display_time(epoch):
     return datetime.fromtimestamp(epoch, MOSCOW).strftime("%d.%m.%Y %H:%M") if epoch else ""
@@ -64,10 +82,14 @@ def normalize_delivery(entity):
         })
     events.sort(key=lambda item: item["epoch"], reverse=True)
     current = events[0] if events else {}
+    kind = delivery_kind(entity)
+    if kind == "courier" and current.get("code") in {"ACCEPTED_AT_PICK_UP_POINT", "POSTOMAT_POSTED"}:
+        kind = "conflict"
     return {
         "cdek_number": str(entity["cdek_number"]),
         "shop_number": str(entity.get("number") or ""),
         "is_return": bool(entity.get("is_return")),
+        "delivery_kind": kind,
         "status": current.get("name", "Статус ещё не получен"),
         "status_code": current.get("code", ""),
         "date_display": current.get("date_display", ""),
