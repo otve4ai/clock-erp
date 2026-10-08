@@ -197,6 +197,18 @@ class SmsStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def has_waybill_notification(self, order_id, phone, tracking):
+        """Include manual sends; an uncertain attempt must not be resent either."""
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT message_text FROM sms_messages WHERE order_id=? "
+                "AND normalized_phone=? AND repair_id IS NULL "
+                "AND status IN ('sending','unknown','sent','accepted','queued','smsc_submit','delivered')",
+                (order_id, phone),
+            ).fetchall()
+        pattern = r"(?<!\d)" + re.escape(str(tracking)) + r"(?!\d)"
+        return any(re.search(pattern, row['message_text'] or '') for row in rows)
+
     def create_once(self, payload, actor):
         client_id = str(payload.get("client_message_id") or "").strip()
         if not CLIENT_ID_PATTERN.fullmatch(client_id):

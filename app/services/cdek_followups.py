@@ -66,6 +66,8 @@ class CdekFollowups:
                 order_ids = shipment.get('order_ids') or []
                 if len(order_ids) != 1:
                     raise ValueError('Ambiguous ERP order link')
+                if self.sms.store.has_waybill_notification(order_ids[0], next(iter(phones)), number):
+                    return
                 name = ' '.join(str(recipient.get('name') or '').split())
                 if not name:
                     raise ValueError('Missing CDEK recipient name')

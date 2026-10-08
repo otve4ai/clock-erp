@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 from app.services.cdek_delivery import normalize_delivery
 from app.services.cdek_followups import CdekFollowups, DAY, trigger
-from app.services.sms import SmsStore, SmsService
+from app.services.sms import SmsStore, SmsService, normalize_phone
 from app.tasks.migrations import migrate_database
 from app.tasks.repository import TasksRepository
 from app.tasks.services import TasksService
@@ -129,6 +129,46 @@ class FollowupsTest(unittest.TestCase):
         self.worker.process(self.shipment)
         self.worker.process(self.shipment)
         self.assertEqual(self.provider.send.call_count,1)
+
+    def manual_sms(self, status='delivered', tracking='1234567890'):
+        message, _ = self.store.create_once(dict(client_message_id='manual-test',
+            phone='+79991234567', text='Ваш заказ. Трекинг ' + tracking,
+            order_id='123'), {'id':'2','name':'Лера'})
+        return self.store.update_status(message['id'], status)
+
+    def test_manual_delivered_or_uncertain_sms_blocks_auto_but_not_task(self):
+        message = self.manual_sms()
+        self.now = self.start + 7*DAY
+        for status in ('delivered', 'accepted', 'unknown', 'sending'):
+            self.store.update_status(message['id'], status)
+            self.worker.process(self.shipment)
+        self.provider.send.assert_not_called()
+        self.assertEqual(self.count_tasks(), 1)
+
+    def test_other_waybill_or_failed_sms_does_not_block(self):
+        message = self.manual_sms(tracking='12345678901')
+        phone = normalize_phone('+79991234567')
+        self.assertTrue(self.store.has_waybill_notification('123',phone,'12345678901'))
+        self.assertFalse(self.store.has_waybill_notification('123',phone,'1234567890'))
+        self.assertFalse(self.store.has_waybill_notification('other',phone,'12345678901'))
+        self.store.update_status(message['id'], 'failed')
+        self.assertFalse(self.store.has_waybill_notification('123',phone,'12345678901'))
+        self.worker.process(self.shipment)
+        self.provider.send.assert_called_once()
+
+    def test_successful_contact_survives_later_unknown_attempt(self):
+        from app.services.cdek_contacts import ContactJournals, contact_states
+        message = self.manual_sms()
+        from app.clients.smsbliss import SmsBlissUnknownDelivery
+        self.provider.send.side_effect = SmsBlissUnknownDelivery('uncertain')
+        self.worker.sms.send(dict(client_message_id='later-test', phone='+79991234567',
+            text='Трекинг 1234567890', order_id='123'), {'id':'system','name':'Auto'})
+        records = ContactJournals(self.store.path, None)([self.shipment])[self.shipment['id']]
+        self.assertEqual(records['sms']['status'], 'delivered')
+        self.assertEqual(len(records['events']), 1)
+        contact = contact_states(records, {})['sms']
+        self.assertEqual(contact['tone'], 'green')
+        self.assertIn('Более поздняя попытка', contact['tooltip'])
 
     def test_stale_cache_cannot_send_after_receipt(self):
         cached=normalize_delivery(self.entity)

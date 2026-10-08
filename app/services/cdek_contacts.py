@@ -46,6 +46,8 @@ def contact_states(records, review, not_applicable=False):
                    else "pending" if raw in {"draft", "created", "queued", "sending", "cancelled"}
                    else "unknown")
             result[channel] = state(key, item.get("at"), "Отправлено не означает доставлено или прочитано" if key == "sent" else "")
+            if item.get('uncertain_after'):
+                result[channel]['tooltip'] += ' · Более поздняя попытка: статус неизвестен · ' + display_time(timestamp(item['uncertain_after'])) + ' МСК'
             result[channel].update(url=item.get("url", ""), text=item.get("text", ""))
         else:
             result[channel] = state("na" if not_applicable else "unknown", detail=(
@@ -83,6 +85,7 @@ class ContactJournals:
                     prefix = "" if channel == "sms" else "o."
                     extras = "".join(", " + (prefix + name if name in columns else "NULL") + " AS " + name for name in optional)
                     seen = set()
+                    successful = {}
                     ids = list(unique)
                     for offset in range(0, len(ids), 400):
                         batch = ids[offset:offset + 400]
@@ -114,9 +117,17 @@ class ContactJournals:
                             if not previous or previous["rank"] < item["rank"]:
                                 result[key][channel] = item
                             if accepted:
+                                prior = successful.get(key)
+                                if not prior or prior['rank'] < item['rank']:
+                                    successful[key] = item
                                 result[key].setdefault("events", []).append(dict(channel=channel,
                                     at=timestamp(at), actor=author, title="Email отправлен" if channel == "email" else "SMS отправлено",
                                     text=body, url=url))
+                    if channel == 'sms':
+                        for key, sent in successful.items():
+                            latest = result[key].get(channel)
+                            if latest and latest['status'] == 'unknown' and latest['rank'] > sent['rank']:
+                                result[key][channel] = dict(sent, uncertain_after=latest['at'])
                 finally:
                     connection.close()
             except (sqlite3.Error, OSError, ValueError):
