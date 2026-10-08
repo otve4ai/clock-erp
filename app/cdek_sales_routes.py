@@ -75,7 +75,9 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor, f
     @app.get("/sales/cdek")
     def cdek_sales_page():
         authorize()
-        args = request.args
+        return render_page(request.args)
+
+    def render_page(args, submitted=None, error=None):
         raw_rows = service.rows(load_sales())
         all_rows, counts = service.summary(raw_rows)
         selected = next((r for r in raw_rows if r["id"] == args.get("shipment")), None)
@@ -125,6 +127,8 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor, f
         return render_template("cdek_sales.html", rows=rows[(page-1)*size:page*size], counts=counts,
             categories=CATEGORIES, category_counts={k: sum(any(i["category"] == k for i in r["issues"]) for r in all_rows) for k in CATEGORIES},
             work_labels=WORK, outcomes=OUTCOMES, display_time=display_time, selected_row=selected,
+            form_values=submitted, form_error=str(error) if error else "",
+            error_field=getattr(error, "field", "") if error else "",
             mode=mode, status=status, category=category, work=work, urgent=urgent, query=query,
             total=total, page=page, pages=pages, size=size, back=back, link=link, sort=sort,
             selected=args.get("shipment", ""), message=args.get("message", ""),
@@ -146,10 +150,11 @@ def register_cdek_sales_routes(app, service, load_sales, allowed, csrf, actor, f
             payload = dict(request.form)
             payload["work"] = request.form.get("review_work", "new")
             service.save_review(item, payload, actor())
-        except CdekError as error:
-            # Preserve the submitted text on conflicts instead of discarding it.
-            return render_template("cdek_review_error.html", message=str(error), note=request.form.get("note", ""),
-                back=url_for("cdek_sales_page", shipment=key, back=sales_return(request.form.get("back")))), 409 if error.code == "CDEK_CONFLICT" else 400
+        except (CdekError, OSError) as error:
+            if isinstance(error, OSError):
+                error = CdekError("CDEK_SAVE", "Не удалось сохранить изменения. Введённые данные сохранены в форме; повторите попытку.")
+            args = dict(request.form, shipment=key)
+            return render_page(args, submitted=dict(request.form), error=error), 409 if error.code == "CDEK_CONFLICT" else 400
         return finish(key, "Отметка менеджера сохранена")
 
     @app.post("/sales/cdek/<key>/sync")
