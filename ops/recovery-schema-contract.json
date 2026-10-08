@@ -47,6 +47,7 @@
     ],
     "sms.db": [
       "sms_messages",
+      "sms_status_history",
       "sms_templates",
       "sms_meta"
     ],
