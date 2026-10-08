@@ -33,9 +33,8 @@ def sync_due(store, now=None):
                     else account.get("last_sync_at"))
     if not last_attempt:
         return True
-    last_attempt = datetime.fromisoformat(last_attempt)
-    if last_attempt.tzinfo is None:
-        last_attempt = last_attempt.replace(tzinfo=timezone.utc)
+    # MailStore writes UTC timestamps; retain Python 3.6 production compatibility.
+    last_attempt = datetime.strptime(str(last_attempt)[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
     return (now or datetime.now(timezone.utc)) - last_attempt >= timedelta(minutes=15)
 
 
