@@ -47,10 +47,17 @@
             detail?.querySelectorAll('[data-contact-summary]').forEach(line => {
                 const value = data[detail.dataset.shipment]?.[line.dataset.contactSummary];
                 if (!value) return;
-                const badge = line.querySelector('.cdek-badge');
-                badge.className = 'cdek-badge cdek-' + value.tone;
+                const badge = line.querySelector('[data-contact-state]');
+                badge.className = 'cdek-contact-state cdek-dot-colors cdek-' + value.tone;
                 badge.textContent = value.label;
-                line.querySelector('small').textContent = value.date ? value.date + ' МСК' : 'Дата неизвестна';
+                line.querySelector('[data-contact-date]').textContent = value.date ? value.date + ' МСК' : '';
+                const email = line.querySelector('[data-email-open]');
+                if (email) { email.hidden = !value.url; email.href = value.url || '/app/mail'; }
+                if (line.dataset.contactSummary === 'sms') {
+                    const preview = detail.querySelector('[data-sms-preview]');
+                    preview.hidden = !value.text;
+                    preview.querySelector('[data-sms-text]').textContent = value.text || '';
+                }
                 line.title = value.tooltip;
             });
         } catch (_) { /* Keep the last confirmed journal state on transport failure. */ }
@@ -60,20 +67,33 @@
     if (form) {
         const updateFields = () => {
             const work = form.elements.review_work.value;
-            form.querySelectorAll('[data-work-fields]').forEach(node => { node.hidden = node.dataset.workFields !== work; });
+            form.querySelectorAll('[data-work-fields]').forEach(node => {
+                node.hidden = node.dataset.workFields !== work;
+                node.querySelectorAll('input,select').forEach(input => { input.disabled = node.hidden; });
+            });
             form.elements.outcome.required = work === 'closed';
-            const other = work === 'closed' && form.elements.outcome.value === 'other';
-            form.querySelector('[data-outcome-note]').hidden = !other;
-            form.elements.outcome_note.required = other;
-            form.elements.call_at.required = !!form.elements.call_result.value;
+            const required = work === 'closed' && ['other', 'unreachable'].includes(form.elements.outcome.value);
+            form.elements.note.required = required;
+            form.querySelector('[data-comment-required]').hidden = !required;
         };
         form.addEventListener('change', updateFields);
+        form.addEventListener('submit', event => {
+            if (form.dataset.saving) { event.preventDefault(); return; }
+            form.dataset.saving = '1';
+            document.querySelector('[form="cdek-manager-form"]').disabled = true;
+        });
+        window.addEventListener('pageshow', () => {
+            delete form.dataset.saving;
+            const save = document.querySelector('[form="cdek-manager-form"]');
+            if (save && !form.hasAttribute('data-storage-error')) save.disabled = false;
+        });
         updateFields();
     }
     const drawer = document.querySelector('.cdek-drawer');
     if (!drawer || typeof drawer.showModal !== 'function') return;
     drawer.removeAttribute('open');
     drawer.showModal();
+    drawer.querySelector('[data-form-error]')?.focus();
     document.body.classList.add('cdek-drawer-visible');
     const close = () => drawer.close();
     drawer.querySelectorAll('[data-cdek-close]').forEach(link => {

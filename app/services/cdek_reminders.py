@@ -42,6 +42,8 @@ class CdekReminders:
         data = normalize_delivery(entity)
         if data["cdek_number"] != number:
             raise CdekError("CDEK_MISMATCH", "СДЭК вернул другую накладную.")
+        if data["delivery_kind"] != "pvz":
+            return None
         start = arrival(data)
         if start is None or self.clock() - start < DELAY:
             return None
@@ -58,6 +60,9 @@ class CdekReminders:
         if len(addresses) != 1:
             raise MailValidationError("Нет однозначного email получателя СДЭК.")
         point = self.client.get_delivery_point(entity.get("delivery_point"))
+        # A pickup status or office code alone does not prove PVZ delivery.
+        if point.get("type") != "PVZ":
+            raise CdekError("CDEK_POINT", "СДЭК не подтвердил тип пункта выдачи.")
         location = point.get("location") or {}
         if not isinstance(location, dict):
             raise CdekError("CDEK_POINT", "Некорректный адрес пункта выдачи.")

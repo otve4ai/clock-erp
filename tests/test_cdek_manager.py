@@ -140,7 +140,7 @@ class ManagerRoutesTest(unittest.TestCase):
         group = self.seed()
         before = self.api.get_order.call_count
         html = self.client.get('/sales/cdek?shipment='+group['id']).get_data(as_text=True)
-        self.assertLess(html.index('class="cdek-history" open'), html.index('id="cdek-manager-form"'))
+        self.assertLess(html.index('aria-label="История доставки"'), html.index('id="cdek-manager-form"'))
         self.assertNotIn('Сроки хранения и доставки', html)
         self.assertIn('<th>Контакт с клиентом</th><th>Обработка</th>', html)
         response = self.client.get('/sales/cdek/contacts?id='+group['id'])
