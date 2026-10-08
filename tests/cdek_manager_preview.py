@@ -11,6 +11,8 @@ fixture = CdekSalesRoutesTest()
 fixture.setUp()
 fixture.now = datetime(2026, 10, 8, 12, tzinfo=MOSCOW).timestamp()
 fixture.app.static_folder = str(Path(__file__).resolve().parents[1] / 'app/static')
+# Keep the real global theme cascade in this otherwise isolated preview.
+fixture.app.jinja_loader.loaders[0].mapping['_sidebar.html'] = '<link rel="stylesheet" href="/static/css/themes.css"><script src="/static/js/theme.js"></script>'
 fixture.sales = []
 examples = [('10428','1080000001','ACCEPTED_AT_PICK_UP_POINT',8,False),('10431','1080000002','NOT_DELIVERED',1,False),('10439','1080000003','DELIVERED',0,True),('10445','1080000004','SENT_TO_RECIPIENT_CITY',1,False),('10450','1080000005','DELIVERED',0,False)]
 for number, track, code, age, returned in examples:
