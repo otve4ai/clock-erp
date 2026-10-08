@@ -7,7 +7,7 @@
     <title>Vechasu ERP — Почта</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/themes.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/erp-components.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/mail.css', v='2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/mail.css', v='3') }}">
 </head>
 <body class="mail-page">
 <div class="app">
@@ -63,15 +63,13 @@
     </div>
 
     <div class="mail-layout" id="mailWorkspace"{% if not account or not account.enabled %} hidden{% endif %}>
-        <nav class="mail-folders" aria-label="Разделы почты">
-            {% for value,label in [("all","Все письма"),("inbox","Входящие"),("needs_reply","Требуют ответа"),("mine","Назначенные мне"),("sent","Отправленные"),("drafts","Черновики"),("archive","Архив")] %}
-            <button type="button" data-mail-view="{{ value }}"{% if value == 'all' %} class="active" aria-current="page"{% endif %}>
-                <span>{{ label }}</span>{% if value == 'needs_reply' %}<span id="attentionCount"></span>{% endif %}
-            </button>
-            {% endfor %}
-        </nav>
         <section class="mail-workspace" aria-label="Переписка">
             <form class="mail-toolbar" id="mailFilters">
+                <label class="mail-folder-field"><span class="sr-only">Раздел почты</span><select id="mailFolder">
+                    {% for value,label in [("inbox","Входящие"),("needs_reply","Требуют ответа"),("mine","Назначенные мне"),("sent","Отправленные"),("drafts","Черновики"),("archive","Архив")] %}
+                    <option value="{{ value }}"{% if value == 'needs_reply' %} id="attentionCount"{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select></label>
                 <label class="mail-search-field"><span class="sr-only">Поиск писем</span><input id="mailSearch" type="search" placeholder="Поиск по теме, адресу и тексту"></label>
                 <label><span class="sr-only">Ответственный</span><select id="mailAssignee"><option value="">Все ответственные</option>{% for user in users %}<option value="{{ user.id }}">{{ (user.first_name ~ ' ' ~ user.last_name)|trim or user.email }}</option>{% endfor %}</select></label>
                 <label><span class="sr-only">Статус</span><select id="mailStatus"><option value="">Все статусы</option><option value="new">Новое</option><option value="in_progress">В работе</option><option value="waiting_customer">Ждём клиента</option><option value="answered">Отвечено</option><option value="closed">Закрыто</option></select></label>
@@ -191,6 +189,6 @@
 <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
 <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
-<script src="{{ url_for('static', filename='js/mail.js', v='2') }}"></script>
+<script src="{{ url_for('static', filename='js/mail.js', v='3') }}"></script>
 </body>
 </html>
