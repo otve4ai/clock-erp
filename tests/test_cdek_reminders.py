@@ -30,11 +30,11 @@ class ReminderTest(unittest.TestCase):
         self.start = datetime(2026, 10, 1, 10, tzinfo=timezone.utc).timestamp()
         self.now = self.start + DELAY
         self.entity = dict(cdek_number="1234567890", number="42", is_return=False,
-            delivery_point="MSK1", recipient={"name": "Тест", "email": "client@example.test"},
+            tariff_code=136, delivery_point="MSK1", recipient={"name": "Тест", "email": "client@example.test"},
             statuses=[dict(code="ACCEPTED_AT_PICK_UP_POINT", date_time="2026-10-01T10:00:00Z")])
         self.api = mock.Mock(configured=True)
         self.api.get_order.side_effect = lambda **kw: copy.deepcopy(self.entity)
-        self.api.get_delivery_point.return_value = dict(code="MSK1", work_time="Пн–Вс 10–20",
+        self.api.get_delivery_point.return_value = dict(code="MSK1", type="PVZ", work_time="Пн–Вс 10–20",
             location={"address_full": "Тестовый город, Тестовая улица, 1"})
         self.delivery = CdekDelivery(self.root / "cdek", self.api, clock=lambda: self.now)
         self.reminders = CdekReminders(self.delivery, self.store, clock=lambda: self.now)
@@ -64,6 +64,49 @@ class ReminderTest(unittest.TestCase):
     def test_repeated_pickup_status_does_not_reset_timer(self):
         self.entity["statuses"].append(dict(code="ACCEPTED_AT_PICK_UP_POINT", date_time="2026-10-03T10:00:00Z"))
         self.assertIsNotNone(self.reminders.build("1234567890"))
+
+    def test_only_verified_pvz_tariffs_can_queue(self):
+        for tariff in (136, 138, 232, 234):
+            self.entity["tariff_code"] = tariff
+            self.assertIsNotNone(self.reminders.build("1234567890"))
+        for tariff in (137, 139, 231, 233, 368, 378, 999999, None, "136", 136.0):
+            self.entity["tariff_code"] = tariff
+            with self.subTest(tariff=tariff):
+                self.assertEqual(self.reminders.prepare([self.shipment])["queued"], 0)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM mail_outbox").fetchone()[0], 0)
+
+    def test_missing_point_and_unconfirmed_office_block_mail(self):
+        for point in (None, "", "  ", {}):
+            self.entity["delivery_point"] = point
+            self.assertIsNone(self.reminders.build("1234567890"))
+        self.entity["delivery_point"] = "MSK1"
+        for office_type in (None, "POSTAMAT", "UNKNOWN"):
+            self.api.get_delivery_point.return_value["type"] = office_type
+            with self.assertRaises(CdekError):
+                self.reminders.build("1234567890")
+
+    def test_switch_to_courier_after_queue_suppresses_smtp(self):
+        self.reminders.prepare([self.shipment])
+        # Even a stale PVZ status and code must not override the courier tariff.
+        self.entity["tariff_code"] = 137
+        self.worker().deliver()
+        self.assertEqual(self.row()["error_code"], "CDEK_REMINDER_NOT_APPLICABLE")
+        self.assertEqual(FakeTransport.smtp_client.messages, [])
+
+    def test_unknown_tariff_after_queue_suppresses_smtp(self):
+        self.reminders.prepare([self.shipment])
+        self.entity.pop("tariff_code")
+        self.worker().deliver()
+        self.assertEqual(self.row()["error_code"], "CDEK_REMINDER_NOT_APPLICABLE")
+        self.assertEqual(FakeTransport.smtp_client.messages, [])
+
+    def test_changed_office_type_after_queue_defers_without_smtp(self):
+        self.reminders.prepare([self.shipment])
+        self.api.get_delivery_point.return_value["type"] = "POSTAMAT"
+        self.worker().deliver()
+        self.assertEqual(self.row()["error_code"], "CDEK_RECHECK_PENDING")
+        self.assertEqual(FakeTransport.smtp_client.messages, [])
 
     def test_terminal_return_and_unknown_are_not_eligible(self):
         for status in ("DELIVERED", "POSTOMAT_RECEIVED", "NOT_DELIVERED", "REMOVED", "UNKNOWN", "POSTOMAT_POSTED"):

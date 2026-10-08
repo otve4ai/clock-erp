@@ -142,7 +142,8 @@ a.cdek-stat,html[data-theme] a.cdek-stat{color:var(--erp-text);text-decoration:n
 a.cdek-stat:hover,a.cdek-stat[aria-current]{border-color:var(--erp-primary);background:var(--erp-surface-muted)}
 a.cdek-stat:focus-visible{outline:2px solid var(--erp-primary);outline-offset:3px}
 .cdek-contacts{display:flex;gap:5px;flex-wrap:nowrap}
-.cdek-page .cdek-contact{display:inline-flex;align-items:center;gap:3px;padding:5px 6px;min-height:30px;color:var(--cdek-ink);background:var(--cdek-bg);border:1px solid transparent;border-radius:7px;font-size:12px}
+.cdek-page .cdek-contact{display:inline-flex;align-items:center;gap:3px;padding:5px 6px;min-height:30px;color:var(--cdek-ink);background:var(--cdek-bg);border:1px solid color-mix(in srgb,var(--cdek-point) 50%,var(--cdek-bg));border-radius:7px;font-size:12px}
+.cdek-contact>svg,.cdek-contact>span{color:inherit}
 .cdek-contact::before{display:none}
 .cdek-contacts svg,.cdek-contact-line svg,.cdek-open svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 .cdek-contact:focus-visible{outline:2px solid var(--erp-primary);outline-offset:2px}
@@ -166,3 +167,46 @@ a.cdek-stat:focus-visible{outline:2px solid var(--erp-primary);outline-offset:3p
 .cdek-contact-popover{position:fixed;z-index:10000;max-width:min(330px,calc(100vw - 32px));padding:10px 12px;border:1px solid var(--erp-border);border-radius:8px;background:var(--erp-surface);color:var(--erp-text);box-shadow:var(--erp-shadow);font-size:12px;line-height:1.5}
 [data-work-fields][hidden],[data-outcome-note][hidden]{display:none}
 .cdek-drawer{width:min(560px,100%);max-width:100%}
+/* Unified customer workflow; layout stays inside the existing drawer. */
+.cdek-contact-section{border:1px solid var(--erp-border);border-radius:9px;padding:0 10px}
+.cdek-contact-line{display:grid;grid-template-columns:76px minmax(0,1fr) auto;gap:4px 8px;margin:0;padding:10px 0;border-bottom:1px solid var(--erp-border)}
+.cdek-contact-line:last-child{border-bottom:0}
+.cdek-contact-line>span:first-child{grid-column:1;grid-row:1/3;min-width:0}
+.cdek-contact-line [data-contact-date]{grid-column:2;margin:0;font-size:11px;color:var(--erp-muted)}
+.cdek-contact-line>a{grid-column:3;grid-row:1/3;align-self:center;font-size:11px;color:var(--erp-primary);text-decoration:none}
+.cdek-contact-state{display:inline-flex;gap:6px;align-items:center;font-size:12px}
+.cdek-contact-state::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--cdek-point);flex-shrink:0}
+.cdek-dot-colors{--cdek-point:#94a3b8}
+.cdek-dot-colors.cdek-green{--cdek-point:#22c55e}.cdek-dot-colors.cdek-yellow{--cdek-point:#eab308}.cdek-dot-colors.cdek-red{--cdek-point:#ef4444}
+.cdek-call-choice{border:0;padding:0;margin:0;min-width:0}.cdek-call-choice legend{font-size:12px;font-weight:650;margin-bottom:8px}
+.cdek-segmented{display:flex;border:1px solid var(--erp-border);border-radius:8px;overflow:hidden}
+.cdek-segmented label{flex:1;min-width:0;position:relative;display:block;cursor:pointer;font-weight:400}
+.cdek-segmented label+label{border-left:1px solid var(--erp-border)}
+.cdek-segmented input{position:absolute;opacity:0;width:1px;height:1px}
+.cdek-segmented span{display:flex;align-items:center;justify-content:center;min-height:38px;padding:4px;text-align:center;box-sizing:border-box;color:var(--erp-muted);font-size:12px}
+.cdek-segmented input:checked+span{color:var(--erp-primary);background:color-mix(in srgb,var(--erp-primary) 10%,var(--erp-surface));box-shadow:inset 0 0 0 1px var(--erp-primary)}
+.cdek-segmented input:focus-visible+span{outline:2px solid var(--erp-primary);outline-offset:-3px}
+.cdek-work-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:16px;align-items:start}
+.cdek-work-grid [data-work-fields]>label:first-child{margin-top:0}
+.cdek-field-error{color:var(--erp-danger);font-size:12px;font-weight:400}
+.cdek-drawer [aria-invalid=true]{border-color:var(--erp-danger)}
+.cdek-manager-form textarea{min-height:72px}
+.cdek-drawer p.cdek-contact-help{margin:0;font-size:11px}
+.cdek-delivery-events{list-style:none;margin:0 0 6px;padding:0 10px;border:1px solid var(--erp-border);border-radius:8px}
+.cdek-delivery-events li{padding:10px 0;border-bottom:1px solid var(--erp-border);font-size:12px;line-height:1.4}
+.cdek-delivery-events li:last-child{border-bottom:0}.cdek-delivery-events span{display:block;color:var(--erp-muted);font-size:11px;margin:2px 0}
+.cdek-message-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;font-weight:400}
+.cdek-drawer .cdek-timeline p{margin:3px 0}.cdek-timeline strong{font-weight:550}
+.cdek-message-preview summary{font-size:12px;cursor:pointer;padding:6px 0;color:var(--erp-primary)}
+.cdek-attention{color:var(--erp-danger);font-size:12px}.cdek-interactions summary{color:var(--erp-primary)}
+.cdek-drawer-footer{padding-bottom:max(16px,env(safe-area-inset-bottom))}
+.cdek-drawer [hidden]{display:none!important}
+.cdek-drawer-footer button:disabled{opacity:.6;cursor:wait}
+@media(max-width:500px){.cdek-work-grid{grid-template-columns:1fr;gap:12px}.cdek-drawer-content{padding:16px}.cdek-contact-line{grid-template-columns:64px minmax(0,1fr)}.cdek-contact-line>a{grid-column:2;grid-row:3;justify-self:start}.cdek-drawer-head{padding:16px}.cdek-drawer h2{font-size:20px}}
+.cdek-delivery-events li{display:grid;grid-template-columns:112px minmax(0,1fr);column-gap:12px}
+.cdek-delivery-events li>span:first-child{grid-column:1;grid-row:1/5;margin-top:0}
+.cdek-delivery-events li>strong,.cdek-delivery-events li>span:not(:first-child){grid-column:2;font-family:inherit}
+.cdek-delivery-events li>strong{font-weight:650}
+@media(max-width:500px){.cdek-delivery-events li{grid-template-columns:86px minmax(0,1fr);column-gap:10px}}
+html:has(.cdek-drawer[open]){overflow:hidden}
+.cdek-interactions .cdek-timeline li>a{display:block;margin-top:4px}
