@@ -486,9 +486,11 @@ class SharedCatalog:
             if query:
                 register_catalog_search(connection)
             brand_rows = scope.execute(connection,
-                "SELECT b.id, b.name, b.active, b.bitrix_brand_id, b.image_path, "
-                "b.image_source, b.image_sha256, b.image_external_id, "
-                "b.image_updated_at, COUNT(p.id) AS product_count, "
+                "SELECT b.id AS id, b.name AS name, b.active AS active, "
+                "b.bitrix_brand_id AS bitrix_brand_id, b.image_path AS image_path, "
+                "b.image_source AS image_source, b.image_sha256 AS image_sha256, "
+                "b.image_external_id AS image_external_id, "
+                "b.image_updated_at AS image_updated_at, COUNT(p.id) AS product_count, "
                 "COALESCE(SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END), 0) "
                 "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
                 "FROM erp_brands b LEFT JOIN reporting_products p "
@@ -502,7 +504,8 @@ class SharedCatalog:
             if brand_ids:
                 placeholders = ", ".join("?" for _ in brand_ids)
                 category_rows = scope.execute(connection,
-                    "SELECT bc.brand_id, c.id, c.name, c.normalized_name, "
+                    "SELECT bc.brand_id AS brand_id, c.id AS id, c.name AS name, "
+                    "c.normalized_name AS normalized_name, "
                     "COUNT(p.id) AS product_count, "
                     "COALESCE(SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END), 0) "
                     "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total, "
@@ -529,7 +532,7 @@ class SharedCatalog:
                     brand_ids,
                 ).fetchall()
                 uncategorized_rows = scope.execute(connection,
-                    "SELECT p.brand_id, COUNT(p.id) AS product_count, "
+                    "SELECT p.brand_id AS brand_id, COUNT(p.id) AS product_count, "
                     "COALESCE(SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END), 0) "
                     "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
                     "FROM reporting_products p "
@@ -841,7 +844,7 @@ class SharedCatalog:
             use_name_fast_path = sort_by == "name"
             if normal_limit and use_name_fast_path:
                 category_rows = scope.execute(connection,
-                    "SELECT c.id, c.brand_id, c.name, c.active, "
+                    "SELECT c.id AS id, c.brand_id AS brand_id, c.name AS name, c.active AS active, "
                     "COALESCE(category_duplicates.duplicate_count, 1) "
                     "AS duplicate_count FROM erp_categories c "
                     "LEFT JOIN (SELECT normalized_name, COUNT(*) "
@@ -861,7 +864,7 @@ class SharedCatalog:
                     product_metrics = {
                         int(row["category_id"]): row
                         for row in scope.execute(connection,
-                            "SELECT category_id, COUNT(*) AS product_count, "
+                            "SELECT category_id AS category_id, COUNT(*) AS product_count, "
                             "COALESCE(SUM(CASE WHEN available_stock > 0 THEN 1 ELSE 0 END), 0) "
                             "AS nonzero_count, COALESCE(SUM(stock), 0) AS stock_total "
                             "FROM reporting_products WHERE active = 1 "
@@ -874,7 +877,7 @@ class SharedCatalog:
                     brand_counts = {
                         int(row["category_id"]): int(row["brand_count"])
                         for row in scope.execute(connection,
-                            "SELECT category_id, COUNT(*) AS brand_count FROM ("
+                            "SELECT category_id AS category_id, COUNT(*) AS brand_count FROM ("
                             "SELECT bc.category_id, bc.brand_id "
                             "FROM erp_brand_categories bc WHERE bc.category_id "
                             "IN ({0}) UNION SELECT p.category_id, "
@@ -898,7 +901,7 @@ class SharedCatalog:
                     rows.append(prepared)
             elif normal_limit:
                 rows.extend(scope.execute(connection,
-                    "SELECT c.id, c.brand_id, c.name, c.active, "
+                    "SELECT c.id AS id, c.brand_id AS brand_id, c.name AS name, c.active AS active, "
                     "COALESCE(MAX(category_duplicates.duplicate_count), 1) "
                     "AS duplicate_count, "
                     "COUNT(p.id) AS product_count, "
@@ -931,7 +934,7 @@ class SharedCatalog:
             if include_brands and category_ids:
                 placeholders = ", ".join("?" for _ in category_ids)
                 brand_rows = scope.execute(connection,
-                    "SELECT pairs.category_id, pairs.brand_id AS id, "
+                    "SELECT pairs.category_id AS category_id, pairs.brand_id AS id, "
                     "COALESCE(b.name, 'Без бренда') AS name, "
                     "COUNT(p.id) AS product_count, "
                     "COALESCE(SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END), 0) "
@@ -972,7 +975,7 @@ class SharedCatalog:
             if category_ids:
                 placeholders = ", ".join("?" for _ in category_ids)
                 model_rows.extend(scope.execute(connection,
-                    "SELECT p.category_id, p.brand_id, "
+                    "SELECT p.category_id AS category_id, p.brand_id AS brand_id, "
                     "COALESCE(b.name, 'Без бренда') AS brand_name, "
                     "MIN(trim(p.model)) AS name, COUNT(*) AS product_count "
                     "FROM reporting_products p LEFT JOIN erp_brands b "
@@ -988,7 +991,7 @@ class SharedCatalog:
                 ).fetchall())
             if any(int(row["id"]) == 0 for row in rows):
                 model_rows.extend(scope.execute(connection,
-                    "SELECT 0 AS category_id, p.brand_id, "
+                    "SELECT 0 AS category_id, p.brand_id AS brand_id, "
                     "COALESCE(b.name, 'Без бренда') AS brand_name, "
                     "MIN(trim(p.model)) AS name, COUNT(*) AS product_count "
                     "FROM reporting_products p LEFT JOIN erp_brands b "

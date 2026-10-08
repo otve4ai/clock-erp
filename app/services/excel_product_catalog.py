@@ -1312,8 +1312,9 @@ class ExcelProductCatalog:
         """
         self.database.initialize()
         visible_products_sql = (
-            "SELECT p.id, p.excel_name_raw, p.model, p.excel_article, "
-            "p.excel_brand, p.brand_id, p.category_id, p.stock "
+            "SELECT p.id AS id, p.excel_name_raw AS excel_name_raw, p.model AS model, "
+            "p.excel_article AS excel_article, p.excel_brand AS excel_brand, "
+            "p.brand_id AS brand_id, p.category_id AS category_id, p.stock AS stock "
             "FROM reporting_products p "
             "LEFT JOIN catalog_excel_batches batch ON batch.id = p.current_batch_id "
             "WHERE p.active = 1 AND "
@@ -1323,7 +1324,7 @@ class ExcelProductCatalog:
         with self.database.connect() as connection:
             scope = WarehouseStockScope(connection, warehouse_id)
             category_rows = scope.execute(connection,
-                "SELECT c.id, c.name, COUNT(visible.id) AS model_count "
+                "SELECT c.id AS id, c.name AS name, COUNT(visible.id) AS model_count "
                 "FROM erp_categories c LEFT JOIN (" + visible_products_sql + ") visible "
                 "ON visible.category_id = c.id WHERE c.active = 1 "
                 "GROUP BY c.id, c.name ORDER BY c.name COLLATE NOCASE, c.id"
@@ -1380,7 +1381,11 @@ class ExcelProductCatalog:
                     else [selected_category["id"]]
                 )
                 product_rows = scope.execute(connection,
-                    "SELECT visible.*, canonical_brand.name AS canonical_brand "
+                    "SELECT visible.id AS id, visible.excel_name_raw AS excel_name_raw, "
+                    "visible.model AS model, visible.excel_article AS excel_article, "
+                    "visible.excel_brand AS excel_brand, visible.brand_id AS brand_id, "
+                    "visible.category_id AS category_id, visible.stock AS stock, "
+                    "canonical_brand.name AS canonical_brand "
                     "FROM (" + visible_products_sql + ") visible "
                     "LEFT JOIN erp_brands canonical_brand "
                     "ON canonical_brand.id = visible.brand_id WHERE "
