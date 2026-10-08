@@ -38,7 +38,7 @@
                 </div>
             </div>
         {% else %}
-            <a class="products-workspace-button is-primary" href="{{ url_for('warehouse_page', open_bitrix=1) }}">Добавить из Bitrix</a>
+            <a class="products-workspace-button is-primary" href="{{ url_for('warehouse_page', open_bitrix=1, warehouse_id=selected_warehouse if selected_warehouse != 'all' else 'default') }}">Добавить из Bitrix</a>
         {% endif %}
     </div>
 </header>
@@ -49,7 +49,7 @@
         ('categories', 'Категории', none),
         ('analytics', 'Аналитика', none)
     ) %}
-        <a class="erp-section-tab{% if active_view == view %} is-active{% endif %}" href="{{ url_for('warehouse_page', view=view) if view != 'products' else url_for('warehouse_page') }}" data-products-tab="{{ view }}"{% if active_view == view %} aria-current="page"{% endif %}>{{ label }}{% if count is not none %}<span class="warehouse-tab-badge">{{ count }}</span>{% endif %}</a>
+        <a class="erp-section-tab{% if active_view == view %} is-active{% endif %}" href="{{ url_for('warehouse_page', view=view, warehouse_id=(request.args.get('warehouse_id') if request is defined else none)) if view != 'products' else url_for('warehouse_page', warehouse_id=(request.args.get('warehouse_id') if request is defined else none)) }}" data-products-tab="{{ view }}"{% if active_view == view %} aria-current="page"{% endif %}>{{ label }}{% if count is not none %}<span class="warehouse-tab-badge">{{ count }}</span>{% endif %}</a>
     {% endfor %}
 </nav>
 <section id="productAnalyticsMetrics" class="products-workspace-metrics erp-workspace-metrics" aria-label="Аналитика товаров" data-state="ready" style="--erp-workspace-metric-count:4">

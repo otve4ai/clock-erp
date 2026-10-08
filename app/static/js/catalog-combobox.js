@@ -1220,10 +1220,13 @@
         return [
             kind,
             scope?.dataset.warehouseId || 'default',
+            scope?.dataset.catalogScope || '',
+            scope?.dataset.catalogScope === 'warehouse_filter'
+                ? new URL(window.location.href).searchParams.get('stock_state') || 'all' : '',
             kind === "brand" ? "" : selectedSharedCatalogId(
                 sharedCatalogCombobox(scope, "brand")
             ),
-            kind === "product" ? selectedSharedCatalogId(
+            (kind === "product" || kind === "model") ? selectedSharedCatalogId(
                 sharedCatalogCombobox(scope, "category")
             ) : "",
         ].join("|");
@@ -1617,6 +1620,9 @@
         }
         if (scope?.dataset.warehouseId) {
             parameters.set('warehouse_id', scope.dataset.warehouseId);
+        }
+        if (scope?.dataset.catalogScope === 'warehouse_filter') {
+            parameters.set('stock_state', new URL(window.location.href).searchParams.get('stock_state') || 'all');
         }
         if (scope?.dataset.productKind) {
             parameters.set("product_kind", scope.dataset.productKind);

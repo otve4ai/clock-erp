@@ -2664,6 +2664,9 @@
                             {{ sale.brand or "Без бренда" }}
                             {% if sale.category %} · {{ sale.category }}{% endif %}
                         </div>
+                        <div class="mobile-erp-card-meta sales-mobile-warehouse">
+                            Склад: {{ sale.warehouse_name or "—" }}
+                        </div>
                         <div
                             class="sales-mobile-article"
                             title="{{ sale.article or '—' }}"
@@ -2715,7 +2718,7 @@
                             <summary>Подробнее</summary>
                             <div class="mobile-erp-detail-grid">
                                 {% for column in sales_columns %}
-                                    {% if column.key not in ["created_at", "source", "brand", "category", "product_name", "article", "quantity_display", "unit_price_display"] %}
+                                    {% if column.key not in ["created_at", "source", "warehouse_name", "brand", "category", "product_name", "article", "quantity_display", "unit_price_display"] %}
                                         <div class="mobile-erp-detail-row">
                                             <span>{{ column.label }}</span>
                                             <span>
@@ -5272,6 +5275,7 @@
             "created_at",
             "order_number",
             "source",
+            "warehouse_name",
             "product_name",
             "article",
             "brand",
@@ -5318,6 +5322,7 @@
             cdek_status: 122,
             barcode: 128,
             source: 104,
+            warehouse_name: 132,
             brand: 104,
             category: 132,
             product_name: 300,
@@ -5371,6 +5376,7 @@
             cdek_status: 122,
             barcode: 112,
             source: 90,
+            warehouse_name: 112,
             brand: 90,
             category: 108,
             product_name: 220,
@@ -5398,6 +5404,7 @@
             track_number: 3,
             barcode: 1.5,
             source: 0.35,
+            warehouse_name: 0.75,
             brand: 2,
             category: 2.5,
             product_name: 5,
@@ -5479,6 +5486,11 @@
             if ((!Array.isArray(value) || !value.includes("cdek_status")) && order.includes("cdek_status")) {
                 order.splice(order.indexOf("cdek_status"), 1);
                 order.splice(order.indexOf("track_number") + 1, 0, "cdek_status");
+            }
+            if ((!Array.isArray(value) || !value.includes("warehouse_name")) && order.includes("warehouse_name")) {
+                order.splice(order.indexOf("warehouse_name"), 1);
+                const anchor = order.includes("source") ? "source" : "order_number";
+                order.splice(order.indexOf(anchor) + 1, 0, "warehouse_name");
             }
             return [
                 ...pinnedColumns.filter(

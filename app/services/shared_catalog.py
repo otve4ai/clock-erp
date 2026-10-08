@@ -9,6 +9,7 @@ import unicodedata
 from app.catalog_db import CatalogDatabase
 from app.services.audit_journal import AuditJournal
 from app.services.inventory_lock import unlocked_product_sql
+from app.services.warehouse_stock_scope import WarehouseStockScope
 
 
 ASSEMBLABLE_STOCK_SQL = (
@@ -467,7 +468,7 @@ class SharedCatalog:
             product_kind=PRODUCT_KIND_STRAP_COMPONENT,
         )
 
-    def list_brand_overviews(self, query="", limit=200, brand_id=None):
+    def list_brand_overviews(self, query="", limit=200, brand_id=None, warehouse_id="all"):
         """Load brands and their category aggregates in two batch queries."""
         self.database.initialize()
         query = catalog_search_key(query)
@@ -481,15 +482,16 @@ class SharedCatalog:
             parameters.append(catalog_prefix_pattern(query))
         parameters.append(max(1, min(int(limit), 500)))
         with self.database.connect() as connection:
+            scope = WarehouseStockScope(connection, warehouse_id)
             if query:
                 register_catalog_search(connection)
-            brand_rows = connection.execute(
+            brand_rows = scope.execute(connection,
                 "SELECT b.id, b.name, b.active, b.bitrix_brand_id, b.image_path, "
                 "b.image_source, b.image_sha256, b.image_external_id, "
                 "b.image_updated_at, COUNT(p.id) AS product_count, "
-                "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END), 0) "
                 "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
-                "FROM erp_brands b LEFT JOIN catalog_excel_products p "
+                "FROM erp_brands b LEFT JOIN reporting_products p "
                 "ON p.brand_id = b.id AND p.active = 1 " + where +
                 " GROUP BY b.id ORDER BY b.name COLLATE NOCASE LIMIT ?",
                 parameters,
@@ -499,10 +501,10 @@ class SharedCatalog:
             uncategorized_rows = []
             if brand_ids:
                 placeholders = ", ".join("?" for _ in brand_ids)
-                category_rows = connection.execute(
+                category_rows = scope.execute(connection,
                     "SELECT bc.brand_id, c.id, c.name, c.normalized_name, "
                     "COUNT(p.id) AS product_count, "
-                    "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
+                    "COALESCE(SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END), 0) "
                     "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total, "
                     "(SELECT COUNT(DISTINCT all_bc.brand_id) "
                     "FROM erp_brand_categories all_bc "
@@ -520,17 +522,17 @@ class SharedCatalog:
                     "AS global_product_count "
                     "FROM erp_brand_categories bc JOIN erp_categories c "
                     "ON c.id = bc.category_id AND c.active = 1 "
-                    "LEFT JOIN catalog_excel_products p ON p.brand_id = bc.brand_id "
+                    "LEFT JOIN reporting_products p ON p.brand_id = bc.brand_id "
                     "AND p.category_id = c.id AND p.active = 1 "
                     "WHERE bc.brand_id IN ({}) GROUP BY bc.brand_id, c.id "
                     "ORDER BY c.name COLLATE NOCASE".format(placeholders),
                     brand_ids,
                 ).fetchall()
-                uncategorized_rows = connection.execute(
+                uncategorized_rows = scope.execute(connection,
                     "SELECT p.brand_id, COUNT(p.id) AS product_count, "
-                    "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
+                    "COALESCE(SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END), 0) "
                     "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
-                    "FROM catalog_excel_products p "
+                    "FROM reporting_products p "
                     "WHERE p.active = 1 AND p.category_id IS NULL "
                     "AND p.brand_id IN ({}) GROUP BY p.brand_id".format(
                         placeholders
@@ -597,7 +599,7 @@ class SharedCatalog:
             ),
         } for row in brand_rows]
 
-    def list_brand_summaries(self, query="", limit=200):
+    def list_brand_summaries(self, query="", limit=200, warehouse_id="all"):
         """Load list-page brand metrics without building category details."""
         self.database.initialize()
         query = catalog_search_key(query)
@@ -608,9 +610,10 @@ class SharedCatalog:
             parameters.append(catalog_prefix_pattern(query))
         parameters.append(max(1, min(int(limit), 500)))
         with self.database.connect() as connection:
+            scope = WarehouseStockScope(connection, warehouse_id)
             if query:
                 register_catalog_search(connection)
-            brand_rows = connection.execute(
+            brand_rows = scope.execute(connection,
                 "SELECT b.id AS id, b.name AS name, b.active AS active, "
                 "b.bitrix_brand_id AS bitrix_brand_id, "
                 "b.image_path AS image_path, b.image_source AS image_source, "
@@ -618,9 +621,9 @@ class SharedCatalog:
                 "b.image_external_id AS image_external_id, "
                 "b.image_updated_at AS image_updated_at, "
                 "COUNT(p.id) AS product_count, "
-                "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END), 0) "
                 "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
-                "FROM erp_brands b LEFT JOIN catalog_excel_products p "
+                "FROM erp_brands b LEFT JOIN reporting_products p "
                 "ON p.brand_id = b.id AND p.active = 1 " + where +
                 " GROUP BY b.id ORDER BY b.name COLLATE NOCASE LIMIT ?",
                 parameters,
@@ -629,14 +632,14 @@ class SharedCatalog:
             category_rows = []
             if brand_ids:
                 placeholders = ", ".join("?" for _ in brand_ids)
-                category_rows = connection.execute(
+                category_rows = scope.execute(connection,
                     "SELECT bc.brand_id AS brand_id, "
                     "c.normalized_name AS category_key "
                     "FROM erp_brand_categories bc JOIN erp_categories c "
                     "ON c.id = bc.category_id AND c.active = 1 "
                     "WHERE bc.brand_id IN ({0}) UNION SELECT "
                     "p.brand_id AS brand_id, '' AS category_key "
-                    "FROM catalog_excel_products p WHERE p.active = 1 "
+                    "FROM reporting_products p WHERE p.active = 1 "
                     "AND p.category_id IS NULL AND p.brand_id IN ({0})".format(
                         placeholders
                     ),
@@ -653,7 +656,7 @@ class SharedCatalog:
             "category_count": category_counts.get(int(row["id"]), 0),
         } for row in brand_rows]
 
-    def get_brand_overview(self, brand_id):
+    def get_brand_overview(self, brand_id, warehouse_id="all"):
         try:
             brand_id = int(brand_id)
         except (TypeError, ValueError):
@@ -663,7 +666,7 @@ class SharedCatalog:
                 item
                 for item in self.list_brand_overviews(
                     limit=1,
-                    brand_id=brand_id,
+                    brand_id=brand_id, warehouse_id=warehouse_id,
                 )
                 if item["id"] == brand_id
             ),
@@ -770,6 +773,7 @@ class SharedCatalog:
         sort_by="name",
         sort_dir="asc",
         include_brands=True,
+        warehouse_id="all",
     ):
         """Return the global category registry with product-derived metrics."""
         self.database.initialize()
@@ -793,7 +797,7 @@ class SharedCatalog:
             "name": "c.name COLLATE NOCASE",
             "brands": "COALESCE(MAX(category_relations.brand_count), 0)",
             "products": "COUNT(p.id)",
-            "in_stock": "SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END)",
+            "in_stock": "SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END)",
             "stock": "SUM(COALESCE(p.stock, 0))",
         }
         if sort_by in sort_expressions:
@@ -808,9 +812,10 @@ class SharedCatalog:
             and (not query or query in catalog_search_key("Без категории"))
         )
         with self.database.connect() as connection:
+            scope = WarehouseStockScope(connection, warehouse_id)
             if query:
                 register_catalog_search(connection)
-            total = connection.execute(
+            total = scope.execute(connection,
                 "SELECT COUNT(*) FROM erp_categories c WHERE " + where_sql,
                 parameters,
             ).fetchone()[0] + (1 if system_matches else 0)
@@ -818,14 +823,14 @@ class SharedCatalog:
             system_offset = 0
             rows = []
             if system_matches and offset == 0:
-                system_row = connection.execute(
+                system_row = scope.execute(connection,
                     "SELECT 0 AS id, 0 AS brand_id, 'Без категории' AS name, "
                     "1 AS active, 1 AS duplicate_count, "
                     "COUNT(p.id) AS product_count, "
                     "COUNT(DISTINCT COALESCE(p.brand_id, 0)) AS brand_count, "
-                    "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
+                    "COALESCE(SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END), 0) "
                     "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
-                    "FROM catalog_excel_products p "
+                    "FROM reporting_products p "
                     "WHERE p.active = 1 AND p.category_id IS NULL"
                 ).fetchone()
                 rows.append(system_row)
@@ -835,7 +840,7 @@ class SharedCatalog:
             normal_offset = max(0, offset - (1 if system_matches else 0))
             use_name_fast_path = sort_by == "name"
             if normal_limit and use_name_fast_path:
-                category_rows = connection.execute(
+                category_rows = scope.execute(connection,
                     "SELECT c.id, c.brand_id, c.name, c.active, "
                     "COALESCE(category_duplicates.duplicate_count, 1) "
                     "AS duplicate_count FROM erp_categories c "
@@ -855,11 +860,11 @@ class SharedCatalog:
                     placeholders = ", ".join("?" for _ in category_ids)
                     product_metrics = {
                         int(row["category_id"]): row
-                        for row in connection.execute(
+                        for row in scope.execute(connection,
                             "SELECT category_id, COUNT(*) AS product_count, "
-                            "COALESCE(SUM(CASE WHEN stock > 0 THEN 1 ELSE 0 END), 0) "
+                            "COALESCE(SUM(CASE WHEN available_stock > 0 THEN 1 ELSE 0 END), 0) "
                             "AS nonzero_count, COALESCE(SUM(stock), 0) AS stock_total "
-                            "FROM catalog_excel_products WHERE active = 1 "
+                            "FROM reporting_products WHERE active = 1 "
                             "AND category_id IN ({}) GROUP BY category_id".format(
                                 placeholders
                             ),
@@ -868,12 +873,12 @@ class SharedCatalog:
                     }
                     brand_counts = {
                         int(row["category_id"]): int(row["brand_count"])
-                        for row in connection.execute(
+                        for row in scope.execute(connection,
                             "SELECT category_id, COUNT(*) AS brand_count FROM ("
                             "SELECT bc.category_id, bc.brand_id "
                             "FROM erp_brand_categories bc WHERE bc.category_id "
                             "IN ({0}) UNION SELECT p.category_id, "
-                            "COALESCE(p.brand_id, 0) FROM catalog_excel_products p "
+                            "COALESCE(p.brand_id, 0) FROM reporting_products p "
                             "WHERE p.active = 1 AND p.category_id IN ({0})) "
                             "category_brands GROUP BY category_id".format(
                                 placeholders
@@ -892,22 +897,22 @@ class SharedCatalog:
                     })
                     rows.append(prepared)
             elif normal_limit:
-                rows.extend(connection.execute(
+                rows.extend(scope.execute(connection,
                     "SELECT c.id, c.brand_id, c.name, c.active, "
                     "COALESCE(MAX(category_duplicates.duplicate_count), 1) "
                     "AS duplicate_count, "
                     "COUNT(p.id) AS product_count, "
                     "COALESCE(MAX(category_relations.brand_count), 0) "
                     "AS brand_count, "
-                    "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
+                    "COALESCE(SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END), 0) "
                     "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total "
-                    "FROM erp_categories c LEFT JOIN catalog_excel_products p "
+                    "FROM erp_categories c LEFT JOIN reporting_products p "
                     "ON p.category_id = c.id AND p.active = 1 "
                     "LEFT JOIN (SELECT category_id, COUNT(*) AS brand_count "
                     "FROM (SELECT bc.category_id, bc.brand_id "
                     "FROM erp_brand_categories bc WHERE bc.category_id <> 0 "
                     "UNION SELECT p.category_id, COALESCE(p.brand_id, 0) "
-                    "FROM catalog_excel_products p WHERE p.active = 1 "
+                    "FROM reporting_products p WHERE p.active = 1 "
                     "AND p.category_id IS NOT NULL) category_brands "
                     "GROUP BY category_id) category_relations "
                     "ON category_relations.category_id = c.id "
@@ -925,11 +930,11 @@ class SharedCatalog:
             brand_rows = []
             if include_brands and category_ids:
                 placeholders = ", ".join("?" for _ in category_ids)
-                brand_rows = connection.execute(
+                brand_rows = scope.execute(connection,
                     "SELECT pairs.category_id, pairs.brand_id AS id, "
                     "COALESCE(b.name, 'Без бренда') AS name, "
                     "COUNT(p.id) AS product_count, "
-                    "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
+                    "COALESCE(SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END), 0) "
                     "AS nonzero_count, COALESCE(SUM(p.stock), 0) AS stock_total, "
                     "EXISTS (SELECT 1 FROM erp_brand_categories relation "
                     "WHERE relation.category_id = pairs.category_id "
@@ -937,10 +942,10 @@ class SharedCatalog:
                     "FROM (SELECT bc.category_id, bc.brand_id "
                     "FROM erp_brand_categories bc WHERE bc.category_id IN ({0}) "
                     "UNION SELECT p.category_id, COALESCE(p.brand_id, 0) "
-                    "FROM catalog_excel_products p WHERE p.active = 1 "
+                    "FROM reporting_products p WHERE p.active = 1 "
                     "AND p.category_id IN ({0})) pairs "
                     "LEFT JOIN erp_brands b ON b.id = pairs.brand_id "
-                    "LEFT JOIN catalog_excel_products p ON p.active = 1 "
+                    "LEFT JOIN reporting_products p ON p.active = 1 "
                     "AND p.category_id = pairs.category_id "
                     "AND COALESCE(p.brand_id, 0) = pairs.brand_id "
                     "GROUP BY pairs.category_id, pairs.brand_id "
@@ -950,14 +955,14 @@ class SharedCatalog:
                     category_ids + category_ids,
                 ).fetchall()
             if include_brands and any(int(row["id"]) == 0 for row in rows):
-                brand_rows.extend(connection.execute(
+                brand_rows.extend(scope.execute(connection,
                     "SELECT 0 AS category_id, COALESCE(b.id, 0) AS id, "
                     "COALESCE(b.name, 'Без бренда') AS name, COUNT(p.id) "
-                    "AS product_count, COALESCE(SUM(CASE WHEN p.stock > 0 "
+                    "AS product_count, COALESCE(SUM(CASE WHEN p.available_stock > 0 "
                     "THEN 1 ELSE 0 END), 0) AS nonzero_count, "
                     "COALESCE(SUM(p.stock), 0) AS stock_total, "
                     "0 AS explicit_relation "
-                    "FROM catalog_excel_products p LEFT JOIN erp_brands b "
+                    "FROM reporting_products p LEFT JOIN erp_brands b "
                     "ON b.id = p.brand_id WHERE p.active = 1 "
                     "AND p.category_id IS NULL GROUP BY COALESCE(b.id, 0) "
                     "ORDER BY name COLLATE NOCASE, id"
@@ -966,11 +971,11 @@ class SharedCatalog:
             model_rows = []
             if category_ids:
                 placeholders = ", ".join("?" for _ in category_ids)
-                model_rows.extend(connection.execute(
+                model_rows.extend(scope.execute(connection,
                     "SELECT p.category_id, p.brand_id, "
                     "COALESCE(b.name, 'Без бренда') AS brand_name, "
                     "MIN(trim(p.model)) AS name, COUNT(*) AS product_count "
-                    "FROM catalog_excel_products p LEFT JOIN erp_brands b "
+                    "FROM reporting_products p LEFT JOIN erp_brands b "
                     "ON b.id = p.brand_id WHERE p.active = 1 "
                     "AND p.category_id IN ({}) "
                     "AND trim(COALESCE(p.model, '')) <> '' "
@@ -982,11 +987,11 @@ class SharedCatalog:
                     category_ids,
                 ).fetchall())
             if any(int(row["id"]) == 0 for row in rows):
-                model_rows.extend(connection.execute(
+                model_rows.extend(scope.execute(connection,
                     "SELECT 0 AS category_id, p.brand_id, "
                     "COALESCE(b.name, 'Без бренда') AS brand_name, "
                     "MIN(trim(p.model)) AS name, COUNT(*) AS product_count "
-                    "FROM catalog_excel_products p LEFT JOIN erp_brands b "
+                    "FROM reporting_products p LEFT JOIN erp_brands b "
                     "ON b.id = p.brand_id WHERE p.active = 1 "
                     "AND p.category_id IS NULL "
                     "AND trim(COALESCE(p.model, '')) <> '' "
@@ -1047,13 +1052,13 @@ class SharedCatalog:
         return {"items": items, "total": int(total), "limit": limit,
                 "offset": offset}
 
-    def get_category_overview(self, category_id):
+    def get_category_overview(self, category_id, warehouse_id="all"):
         try:
             category_id = int(category_id)
         except (TypeError, ValueError):
             return None
         result = self.list_category_overviews(
-            category_id=category_id, limit=1
+            category_id=category_id, warehouse_id=warehouse_id, limit=1
         )
         return result["items"][0] if result["items"] else None
 
@@ -1787,6 +1792,49 @@ class SharedCatalog:
                         capacities.append(int(part['stock'] // part['quantity']) if part['active'] else 0)
                     item['available_to_assemble'] = max(0, min(capacities or [0]))
         return items
+
+    def warehouse_filter_options(self, kind, warehouse_id, query='', limit=200,
+                                 brand_id=None, category_id=None, stock_state='all'):
+        """Read-only product filters; never use company totals for a sale picker."""
+        if kind not in {'brand', 'category', 'model'}:
+            return None
+        if stock_state not in {'all', 'in', 'out'}:
+            raise ValueError('Неизвестный фильтр наличия.')
+        if kind == 'model' and (brand_id in (None, '') or category_id in (None, '')):
+            raise ValueError('Сначала выберите бренд и категорию.')
+        self.database.initialize()
+        field = {'brand': 'brand_id', 'category': 'category_id', 'model': 'model_id'}[kind]
+        table = {'brand': 'erp_brands', 'category': 'erp_categories', 'model': 'erp_models'}[kind]
+        empty = {'brand': 'Без бренда', 'category': 'Без категории', 'model': 'Без модели'}[kind]
+        where, parameters = ['p.active=1'], []
+        for column, value in [('brand_id', brand_id if kind != 'brand' else None),
+                              ('category_id', category_id if kind == 'model' else None)]:
+            if value not in (None, ''):
+                if int(value) == 0:
+                    where.append('p.' + column + ' IS NULL')
+                else:
+                    where.append('p.' + column + '=?')
+                    parameters.append(int(value))
+        if kind == 'model':
+            where.append('d.id IS NOT NULL AND d.active=1')
+        if stock_state == 'in':
+            where.append('p.available_stock>0')
+        elif stock_state == 'out':
+            where.append('p.available_stock=0')
+        with self.database.connect() as connection:
+            scope = WarehouseStockScope(connection, warehouse_id)
+            rows = scope.execute(connection,
+                'SELECT COALESCE(d.id,0) AS id,COALESCE(d.name,?) AS name, '
+                'COUNT(p.id) AS product_count,COALESCE(SUM(p.stock),0) AS stock_total '
+                'FROM reporting_products p LEFT JOIN ' + table + ' d ON d.id=p.' + field
+                + ' WHERE ' + ' AND '.join(where) + ' GROUP BY d.id,d.name ORDER BY name,id',
+                [empty] + parameters).fetchall()
+        key = catalog_search_key(query)
+        items = [dict(row, count=row['product_count'],
+                      stock_total=normalized_stock_value(row['stock_total']),
+                      stock_display=format_stock_value(row['stock_total']))
+                 for row in rows if not key or catalog_search_key(row['name']).startswith(key)]
+        return items[:max(1, min(int(limit), 200))], len(items)
 
     def warehouse_options(self, kind, warehouse_id, query='', limit=200, brand_id=None, category_id=None,
                           in_stock=False, include_assemblable=False, product_kind=''):
