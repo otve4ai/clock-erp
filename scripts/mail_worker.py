@@ -7,6 +7,7 @@ import argparse
 import os
 import stat
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,28 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.services.mail import MailStore, MailSynchronizer, SecretBox, safe_error
+
+
+def sync_due(store, now=None):
+    """Poll incoming mail every 15 minutes; explicit requests bypass the delay."""
+    account = store.account(include_disabled=False)
+    if not account:
+        return False
+    with store.connect() as connection:
+        pending = connection.execute(
+            "SELECT 1 FROM mail_sync_requests WHERE account_id=? AND state='pending' LIMIT 1",
+            (account["id"],),
+        ).fetchone()
+    if pending:
+        return True
+    last_attempt = (account.get("updated_at") if account.get("last_sync_status") == "error"
+                    else account.get("last_sync_at"))
+    if not last_attempt:
+        return True
+    last_attempt = datetime.fromisoformat(last_attempt)
+    if last_attempt.tzinfo is None:
+        last_attempt = last_attempt.replace(tzinfo=timezone.utc)
+    return (now or datetime.now(timezone.utc)) - last_attempt >= timedelta(minutes=15)
 
 
 def load_environment(path):
@@ -69,7 +92,7 @@ def main():
                 print("CDEK_EMAIL=prepare_failed", file=sys.stderr)
         worker = MailSynchronizer(store, SecretBox(), cdek_reminders=reminders)
         delivery = worker.deliver()
-        sync = worker.sync()
+        sync = worker.sync() if sync_due(store) else {"messages": 0, "threads": 0}
         print("MAIL_WORKER=ok sent={} imported={} threads={}".format(delivery["sent"], sync["messages"], sync["threads"]))
     return 0
 

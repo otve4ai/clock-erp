@@ -19237,13 +19237,6 @@ def get_current_navigation_preferences(definitions=None):
 
 def get_navigation_items(include_disabled=False):
     active_key = get_active_navigation_key(request.path)
-    mail_badge = 0
-    try:
-        user = current_auth_user() or {}
-        if user.get("id"):
-            mail_badge = _mail_store().unread_count()
-    except (MigrationRequiredError, sqlite3.Error):
-        mail_badge = 0
     definitions = get_available_navigation_definitions()
     preferences = get_current_navigation_preferences(definitions)
     definitions_by_key = {
@@ -19259,7 +19252,7 @@ def get_navigation_items(include_disabled=False):
             **definition,
             "enabled": key not in hidden_keys,
             "active": key == active_key,
-            "badge": mail_badge if key == "mail" else 0,
+            "badge": 0,
         })
     return items
 

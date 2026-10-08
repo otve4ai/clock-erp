@@ -22,6 +22,8 @@
       "registry_meta"
     ],
     "mail.db": [
+      "mail_accounts",
+      "mail_sync_requests",
       "mail_outbox",
       "mail_messages",
       "mail_threads",

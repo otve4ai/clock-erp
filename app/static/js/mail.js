@@ -11,10 +11,12 @@
     const backdrop = $("#mailBackdrop");
     const syncStatus = $("#syncStatus");
     const serverWarning = $("#mailServerWarning");
-    let view = "all";
+    let view = "inbox";
     let page = 1;
     let current = null;
     let linkedCustomer = false;
+    let loadVersion = 0;
+    let loading = false;
 
     const escapeHtml = (value) => {
         const node = document.createElement("span");
@@ -89,10 +91,13 @@
         return '<div class="mail-empty"><div><strong>В рабочем ящике пока нет писем</strong><span>Новые входящие появятся здесь после синхронизации.</span></div></div>';
     }
 
-    async function load() {
+    async function load(background = false) {
         if (!workspace || workspace.hidden) return;
+        if (background && (loading || document.hidden)) return;
+        const version = ++loadVersion;
+        loading = true;
         list.setAttribute("aria-busy", "true");
-        list.innerHTML = '<div class="mail-empty"><div>Загружаем переписку…</div></div>';
+        if (!background) list.innerHTML = '<div class="mail-empty"><div>Загружаем переписку…</div></div>';
         const params = new URLSearchParams({
             view,
             page,
@@ -103,6 +108,7 @@
         });
         try {
             const data = await api("/api/v1/mail/threads?" + params);
+            if (version !== loadVersion) return;
             if (!data.account || !data.account.enabled) {
                 setConnected(data.account);
                 return;
@@ -132,11 +138,19 @@
             pagination.querySelector("span").textContent = `Страница ${data.page} из ${data.pages}`;
             pagination.querySelector("[data-page=prev]").disabled = data.page <= 1;
             pagination.querySelector("[data-page=next]").disabled = data.page >= data.pages;
-            $("#attentionCount").textContent = data.unread_count || "";
+            $("#attentionCount").textContent = "Требуют ответа" + (data.unread_count ? ` (${data.unread_count})` : "");
         } catch (error) {
-            list.innerHTML = `<div class="mail-empty"><div><strong>Не удалось загрузить переписку</strong><span>${escapeHtml(error.message)}</span></div></div>`;
+            if (version !== loadVersion) return;
+            if (background) {
+                syncStatus.textContent = "Не удалось обновить список писем. Повторим автоматически.";
+            } else {
+                list.innerHTML = `<div class="mail-empty"><div><strong>Не удалось загрузить переписку</strong><span>${escapeHtml(error.message)}</span></div></div>`;
+            }
         } finally {
-            list.setAttribute("aria-busy", "false");
+            if (version === loadVersion) {
+                loading = false;
+                list.setAttribute("aria-busy", "false");
+            }
         }
     }
 
@@ -288,17 +302,11 @@
         }
     }
 
-    document.querySelectorAll("[data-mail-view]").forEach((button) => button.addEventListener("click", () => {
-        document.querySelectorAll("[data-mail-view]").forEach((item) => {
-            item.classList.remove("active");
-            item.removeAttribute("aria-current");
-        });
-        button.classList.add("active");
-        button.setAttribute("aria-current", "page");
-        view = button.dataset.mailView;
+    $("#mailFolder")?.addEventListener("change", (event) => {
+        view = event.target.value;
         page = 1;
         load();
-    }));
+    });
     $("#mailFilters")?.addEventListener("submit", (event) => { event.preventDefault(); page = 1; load(); });
     $("#mailPagination")?.addEventListener("click", (event) => {
         const direction = event.target.dataset.page;
@@ -309,8 +317,10 @@
     $("#syncMail")?.addEventListener("click", async () => {
         try {
             await api("/api/v1/mail/sync", {method: "POST", body: "{}"});
-            notify("Синхронизация запущена");
+            notify("Синхронизация запрошена");
             syncStatus.innerHTML = '<span class="mail-sync-spinner" aria-hidden="true"></span> Синхронизация ожидает ближайшего фонового запуска';
+            load(true);
+            window.setTimeout(() => load(true), 65000);
         } catch (error) {
             notify(error.message, "error");
         }
@@ -588,6 +598,6 @@
     const requestedThread = new URLSearchParams(window.location.search).get("thread");
     if (workspace && !workspace.hidden) {
         load().then(() => { if (requestedThread) openThread(requestedThread); });
-        window.setInterval(load, 10000);
+        window.setInterval(() => load(true), 15 * 60 * 1000);
     }
 })();
