@@ -423,7 +423,10 @@ class CategoryManagementTest(unittest.TestCase):
 
         self.assertEqual(detail["product_count"], 3)
         self.assertEqual(detail["nonzero_count"], 1)
-        self.assertEqual(detail["stock_total"], 0)
+        # The company ledger is nonnegative; explicit TTT preserves legacy debt.
+        self.assertEqual(detail["stock_total"], 5)
+        self.assertEqual(self.catalog.get_category_overview(
+            first["category_id"], warehouse_id="default")["stock_total"], 0)
         self.assertEqual(
             sum(item["product_count"] for item in detail["brands"]),
             detail["product_count"],
@@ -498,7 +501,10 @@ class CategoryManagementTest(unittest.TestCase):
         self.assertEqual(result["items"][0]["detail_brand_count"], 2)
         self.assertEqual(result["items"][0]["product_count"], 2)
         self.assertEqual(result["items"][0]["nonzero_count"], 1)
-        self.assertEqual(result["items"][0]["stock_total"], 2)
+        self.assertEqual(result["items"][0]["stock_total"], 4)
+        self.assertEqual(self.catalog.list_category_overviews(
+            sort_by="products", sort_dir="desc", limit=100,
+            warehouse_id="default")["items"][0]["stock_total"], 2)
 
     def test_pagination_and_numeric_sort_are_server_side(self):
         brand = self.catalog.create_brand("Casio")

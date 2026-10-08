@@ -149,6 +149,7 @@ class SalesReportingRoutes:
     def pdf(self):
         from html import escape
         from io import BytesIO
+        from os import environ
         from pathlib import Path
 
         from reportlab.lib import colors
@@ -178,17 +179,20 @@ class SalesReportingRoutes:
                 "Не найден шрифт с поддержкой кириллицы для PDF"
             )
 
+        windows_fonts = Path(environ.get('WINDIR', 'C:/Windows')) / 'Fonts'
         regular_font = first_existing_font([
             "/usr/share/fonts/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/System/Library/Fonts/Supplemental/Arial.ttf",
             "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
             "/Library/Fonts/Arial Unicode.ttf",
+            str(windows_fonts / 'arial.ttf'),
         ])
         bold_font = first_existing_font([
             "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            str(windows_fonts / 'arialbd.ttf'),
             regular_font,
         ])
         registered = pdfmetrics.getRegisteredFontNames()

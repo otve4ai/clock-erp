@@ -16,6 +16,7 @@ from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
 from app.catalog_db import CatalogDatabase
+from app.services.warehouse_stock_scope import WarehouseStockScope
 
 
 ERP_TIMEZONE_LABEL = "Europe/Moscow (UTC+03:00)"
@@ -51,7 +52,7 @@ METRIC_REGISTRY = {
         "limitations": "Не рассчитывается при неполных ценах; при отсутствии продаж равен 0.",
     },
     "stock_recommendation": {
-        "label": "Рекомендация закупки", "source": "Остатки, продажи ERP и локальный контур закупок",
+        "label": "Рекомендация закупки", "source": "Доступные остатки всех складов (без пути), продажи ERP и локальный контур закупок",
         "formula": "max(0, средние продажи за 90 дней × горизонт − остаток − открытый заказ)",
         "exclusions": "Отменённые заказы поставщика и закрытые клиентские запросы",
         "limitations": "Lead time и страховой запас не хранятся: количество предварительное, срочность подтверждается спросом.",
@@ -361,6 +362,7 @@ class BusinessAnalytics(object):
             return result
 
     def _product_rows(self, connection, filters, revenue_complete):
+        stock = WarehouseStockScope(connection, "all").available
         where, values = self._sale_where(filters)
         if filters["q"]:
             where += " AND (p.excel_name_raw LIKE ? OR coalesce(p.excel_article,'') LIKE ? OR coalesce(b.name,p.excel_brand,'') LIKE ?)"
@@ -369,7 +371,7 @@ class BusinessAnalytics(object):
         rows = [dict(row) for row in connection.execute(
             "SELECT p.id, p.excel_name_raw name, coalesce(p.excel_article,'') article, coalesce(p.bitrix_thumbnail_url,p.bitrix_primary_image_url,'') image_url, coalesce(b.name,p.excel_brand,'Без бренда') brand, "
             "coalesce(c.name,p.excel_category,'Без категории') category, coalesce(m.name,p.model,'—') model, "
-            "p.stock, count(DISTINCT CASE WHEN i.quantity-i.returned_quantity>0 THEN s.id END) sales, coalesce(sum(max(i.quantity-i.returned_quantity,0)),0) units, "
+            + stock + " AS stock, count(DISTINCT CASE WHEN i.quantity-i.returned_quantity>0 THEN s.id END) sales, coalesce(sum(max(i.quantity-i.returned_quantity,0)),0) units, "
             "coalesce(sum(max(i.quantity-i.returned_quantity,0)*coalesce(i.unit_price,0)),0) revenue, "
             "sum(CASE WHEN i.quantity-i.returned_quantity>0 AND i.unit_price IS NULL THEN 1 ELSE 0 END) unknown_prices, max(s.created_at) last_sale "
             + self._joins() + " WHERE " + where + " GROUP BY p.id",
@@ -461,6 +463,7 @@ class BusinessAnalytics(object):
         return item
 
     def _stock_rows(self, connection, filters):
+        stock = WarehouseStockScope(connection, "all").available
         anchor = _date(filters["to"], date.today())
         cut30 = (anchor - timedelta(days=29)).isoformat()
         cut60 = (anchor - timedelta(days=59)).isoformat()
@@ -492,9 +495,9 @@ class BusinessAnalytics(object):
             pattern = "%{}%".format(filters["q"])
             catalog_values.extend([pattern, pattern, pattern])
         if filters["stock_state"] == "out":
-            catalog_clauses.append("p.stock<=0")
+            catalog_clauses.append(stock + "<=0")
         elif filters["stock_state"] == "positive":
-            catalog_clauses.append("p.stock>0")
+            catalog_clauses.append(stock + ">0")
         demand_query = (
             "SELECT i.product_id,"
             "coalesce(sum(CASE WHEN date(s.created_at) BETWEEN ? AND ? THEN max(i.quantity-i.returned_quantity,0) ELSE 0 END),0) units_30,"
@@ -508,7 +511,7 @@ class BusinessAnalytics(object):
             demand_query, demand_values,
         ).fetchall()}
         catalog_query = (
-            "SELECT p.id,p.excel_name_raw name,coalesce(b.name,p.excel_brand,'Без бренда') brand,p.stock "
+            "SELECT p.id,p.excel_name_raw name,coalesce(b.name,p.excel_brand,'Без бренда') brand," + stock + " AS stock "
             "FROM catalog_excel_products p LEFT JOIN erp_brands b ON b.id=p.brand_id "
             "LEFT JOIN erp_categories c ON c.id=p.category_id LEFT JOIN erp_models m ON m.id=p.model_id "
             "WHERE " + " AND ".join(catalog_clauses)

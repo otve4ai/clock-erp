@@ -67,7 +67,7 @@ const selector = {
 };
 let destination;
 const location = {
-    href: 'https://erp.test/app/products?q=eclipse&brand=Ziiiro&page=3',
+    href: 'https://erp.test/app/products?q=eclipse&brand=Ziiiro&page=3&site_issue=in_stock_inactive&check_state=complete',
     assign: value => { destination = value; },
 };
 const context = {
@@ -87,6 +87,8 @@ assert.equal(target.searchParams.get('warehouse_id'), 'hong-kong');
 assert.equal(target.searchParams.get('q'), 'eclipse');
 assert.equal(target.searchParams.get('brand'), 'Ziiiro');
 assert.equal(target.searchParams.has('page'), false);
+assert.equal(target.searchParams.has('site_issue'), false);
+assert.equal(target.searchParams.has('check_state'), false);
 selector.value = 'default';
 selector.selectedOptions = [{textContent: 'Основной TTT'}];
 windowListeners.pageshow();
@@ -96,5 +98,48 @@ context.document.getElementById = () => null;
 vm.runInNewContext(source, context); // Other catalog tabs need no warehouse selector.
 """
         result = subprocess.run(['node', '-e', script, str(ROOT / 'app/static/js/multiwarehouse.js')],
+                                capture_output=True, text=True, encoding='utf-8', timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_tab_state_and_link_handlers_preserve_explicit_warehouse_only(self):
+        script = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const sources = process.argv.slice(1).map(path => fs.readFileSync(path, 'utf8'));
+function navigate(from, selected, target, view) {
+    const events = [];
+    class Element {
+        constructor() { this.href = 'https://erp.test' + target; this.dataset = view ? {productsTab:view} : {}; }
+        matches(query) { return query === '[data-products-tab]' && !!view; }
+        closest(query) { return query === 'a[href]' || (query === '[data-products-tab]' && view) ? this : null; }
+    }
+    const link = new Element();
+    const selector = { value:selected, selectedOptions:[{textContent:selected}],
+        parentElement:{querySelector:()=>({textContent:''})}, addEventListener:()=>{} };
+    const location = new URL('https://erp.test' + from);
+    const stored = new Map([['vechasu.products.tab-state.v1.categories', 'q=Watch&warehouse_id=default']]);
+    const context = {URL, URLSearchParams, Element, location,
+        sessionStorage:{getItem:key=>stored.get(key),setItem:(key,value)=>stored.set(key,value)},
+        window:{location, URL, addEventListener:()=>{}},
+        document:{readyState:'complete',getElementById:()=>selector,
+            querySelectorAll:query=>query==='[data-products-tab]' && view ? [link] : [],
+            addEventListener:(name,callback,capture)=>events.push({name,callback,capture:capture===true})}};
+    sources.forEach(source=>vm.runInNewContext(source,context));
+    events.filter(e=>e.name==='click').sort((a,b)=>Number(b.capture)-Number(a.capture))
+        .forEach(e=>e.callback({target:link}));
+    return new URL(link.href);
+}
+assert.equal(navigate('/app/products','default','/app/products?view=brands','brands').searchParams.get('warehouse_id'),null);
+assert.equal(navigate('/app/products?view=brands','all','/app/products','products').searchParams.get('warehouse_id'),null);
+assert.equal(navigate('/app/products?view=brands','all','/app/products?brand_id=1',null).searchParams.get('warehouse_id'),'all');
+const hk = navigate('/app/products?warehouse_id=hong-kong','hong-kong','/app/products?view=categories','categories');
+assert.equal(hk.searchParams.get('warehouse_id'),'hong-kong');
+assert.equal(hk.searchParams.get('q'),'Watch');
+assert.equal(navigate('/app/products?view=brands&warehouse_id=all','all','/app/products?open_bitrix=1&warehouse_id=default',null).searchParams.get('warehouse_id'),'default');
+"""
+        result = subprocess.run(['node', '-e', script,
+                                 str(ROOT / 'app/static/js/products-tabs.js'),
+                                 str(ROOT / 'app/static/js/multiwarehouse.js')],
                                 capture_output=True, text=True, encoding='utf-8', timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)

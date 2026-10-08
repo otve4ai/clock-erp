@@ -809,7 +809,7 @@
                             <col data-column-key="site_status"{% if hide_ttt_site_status %} hidden{% endif %}>
                             <col class="warehouse-col-created" data-column-key="created">
                             <col class="warehouse-col-cell" data-column-key="cell">
-                            {% if out_of_stock %}<col data-column-key="platform_checks">{% endif %}
+                            {% if out_of_stock and selected_warehouse == 'default' %}<col data-column-key="platform_checks">{% endif %}
                             <col class="warehouse-col-actions" data-system-column="actions">
                         </colgroup>
                         <thead>
@@ -937,7 +937,7 @@
                                     </span>
                                 </th>
 
-                                {% if out_of_stock %}<th data-column-key="platform_checks">Проверка отключения</th>{% endif %}
+                                {% if out_of_stock and selected_warehouse == 'default' %}<th data-column-key="platform_checks">Проверка отключения</th>{% endif %}
 
                                 <th data-system-column="actions">Действия</th>
                             </tr>
@@ -1020,7 +1020,7 @@
                                         <div>{{ item.cell or "—" }}</div>
                                     </td>
 
-                                    {% if out_of_stock %}
+                                    {% if out_of_stock and selected_warehouse == 'default' %}
                                     <td data-column-key="platform_checks">
                                         <div class="out-of-stock-checks" data-cycle-id="{{ item.out_of_stock_cycle.cycle_id }}">
                                             {% set cycle_checks = item.out_of_stock_cycle.get("checks", {}) %}
@@ -1301,7 +1301,10 @@
             method="get"
             action="/warehouse"
             data-shared-catalog-scope
+            data-catalog-scope="warehouse_filter"
+            data-warehouse-id="{{ selected_warehouse }}"
         >
+            <input type="hidden" name="warehouse_id" value="{{ selected_warehouse }}">
             <input type="hidden" name="per_page" value="{{ per_page }}">
             {% if stock_state != 'all' %}<input type="hidden" name="stock_state" value="{{ stock_state }}">{% endif %}
             {% if site_issue %}<input type="hidden" name="site_issue" value="{{ site_issue }}">{% endif %}
@@ -1426,7 +1429,7 @@
                 </div>
             </div>
 
-            {% if out_of_stock %}
+            {% if out_of_stock and selected_warehouse == 'default' %}
                 <label class="warehouse-add-field" for="warehouseCheckState">
                     <span>Статус проверки</span>
                     <select
@@ -2777,6 +2780,14 @@
                 document.getElementById("detailPhotoEditor").hidden = true;
                 form.classList.remove("is-editing");
                 setDetailPhotoStatus(payload.meta?.image_message || "Карточка обновлена.");
+                // Refresh from the selected warehouse, not PATCH's legacy TTT stock.
+                // Invalidate snapshots so clearing search cannot revive pre-edit totals.
+                warehouseSearchSnapshots.clear();
+                warehouseSearchBaseline = null;
+                const refreshed = await loadWarehouseResultsUrl(new URL(window.location.href));
+                if (!refreshed) {
+                    setDetailPhotoStatus("Карточка сохранена, но список не обновлён. Нажмите «Повторить» над таблицей.", true);
+                }
             } catch (error) {
                 setDetailPhotoStatus(error.message || "Не удалось сохранить карточку.", true);
             } finally {

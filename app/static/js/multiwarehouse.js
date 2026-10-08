@@ -1,6 +1,7 @@
 (() => {
-    const warehouse = new URL(location.href).searchParams.get('warehouse_id') || 'default';
     const selector = document.getElementById('warehouseSelector');
+    const explicitWarehouse = new URL(location.href).searchParams.get('warehouse_id');
+    const warehouse = explicitWarehouse || selector?.value || 'default';
     function syncSelectedCaption() {
         const caption = selector?.selectedOptions[0]?.textContent || '';
         const value = selector?.parentElement.querySelector('.products-warehouse-select__value');
@@ -14,6 +15,10 @@
         const url = new window.URL(window.location.href);
         url.searchParams.set('warehouse_id', event.currentTarget.value);
         url.searchParams.delete('page');
+        if (event.currentTarget.value !== 'default') {
+            url.searchParams.delete('site_issue');
+            url.searchParams.delete('check_state');
+        }
         window.location.assign(url.href);
     });
     function preserveWarehouse(form) {
@@ -39,9 +44,12 @@
     document.addEventListener('click', event => {
         const link = event.target.closest('a[href]');
         if (!link) return;
+        // Unselected tabs use their own defaults; an explicit choice is shared.
+        if (link.matches('[data-products-tab]') && !explicitWarehouse) return;
         const url = new URL(link.href, location.href);
         if (url.origin === location.origin && ['/warehouse', '/app/products'].includes(url.pathname)) {
-            url.searchParams.set('warehouse_id', warehouse); link.href = url.href;
+            if (!url.searchParams.has('warehouse_id')) url.searchParams.set('warehouse_id', warehouse);
+            link.href = url.href;
         }
     }, true);
     document.addEventListener('keydown', event => {

@@ -21,6 +21,7 @@ from app.services.inventory_lock import (
     unlocked_product_sql,
 )
 from app.services.out_of_stock import OutOfStockChecks
+from app.services.warehouse_stock_scope import WarehouseStockScope
 from app.services.product_reconciliation import (
     AUTOMATIC_STATUSES,
     article_quality,
@@ -888,26 +889,17 @@ class ExcelProductCatalog:
                       check_state="all", site_issue="", warehouse_id=None):
         self.database.initialize()
         stock_sql = 'p.stock'
-        available_sql = None
+        available_sql = stock_sql
         warehouse_scope = ''
         if warehouse_id:
-            from app.services.component_inventory import PHYSICAL_STOCK_SQL
             with self.database.connect() as warehouse_connection:
-                if warehouse_id != 'all' and not warehouse_connection.execute('SELECT 1 FROM erp_warehouses WHERE id=? AND active=1', (warehouse_id,)).fetchone():
-                    raise ValueError('Склад не найден.')
-                # SQLite quote produces a safe literal for the correlated read
-                # expression reused in filters, sorting, counts and pagination.
-                quoted = warehouse_connection.execute('SELECT quote(?)', (warehouse_id,)).fetchone()[0]
-            if warehouse_id == 'default':
-                stock_sql = PHYSICAL_STOCK_SQL
-            elif warehouse_id == 'all':
-                available_sql = '(COALESCE((SELECT SUM(quantity) FROM erp_warehouse_stocks ws WHERE ws.product_id=p.id),0))'
-                stock_sql = '(COALESCE((SELECT SUM(quantity) FROM erp_warehouse_stocks ws WHERE ws.product_id=p.id),0) + COALESCE((SELECT SUM(ti.quantity) FROM erp_stock_transfer_items ti JOIN erp_stock_transfers t ON t.id=ti.transfer_id WHERE ti.product_id=p.id AND t.status=\'in_transit\'),0))'
-            else:
-                stock_sql = '(COALESCE((SELECT quantity FROM erp_warehouse_stocks ws WHERE ws.product_id=p.id AND ws.warehouse_id={}),0))'.format(quoted)
-                warehouse_scope = '(EXISTS(SELECT 1 FROM erp_warehouse_stocks ws WHERE ws.product_id=p.id AND ws.warehouse_id={0}) OR EXISTS(SELECT 1 FROM erp_stock_transfer_items ti JOIN erp_stock_transfers t ON t.id=ti.transfer_id WHERE ti.product_id=p.id AND t.to_warehouse_id={0} AND t.status=\'in_transit\'))'.format(quoted)
-        available_sql = available_sql or stock_sql
-        if stock_state == "out" or check_state != "all":
+                scope = WarehouseStockScope(warehouse_connection, warehouse_id)
+            stock_sql, available_sql = scope.total, scope.available
+            warehouse_scope = scope.predicate
+        ttt_scope = warehouse_id in (None, '', 'default')
+        if not ttt_scope:
+            site_issue, check_state = '', 'all'
+        if ttt_scope and (stock_state == "out" or check_state != "all"):
             OutOfStockChecks(self.database).sync()
         page = max(1, int(page))
         per_page = max(1, min(int(per_page), 100000))
@@ -1193,17 +1185,18 @@ class ExcelProductCatalog:
             "active_batch": dict(active_batch) if active_batch else None,
         }
 
-    def stock_tab_counts(self):
+    def stock_tab_counts(self, warehouse_id="all"):
         """Return unfiltered active-product counts for persistent catalog tabs."""
         self.database.initialize()
         with self.database.connect() as connection:
-            row = connection.execute(
+            scope = WarehouseStockScope(connection, warehouse_id)
+            row = scope.execute(connection,
                 "SELECT COUNT(*) AS positions, "
-                "COALESCE(SUM(CASE WHEN stock > 0 THEN 1 ELSE 0 END), 0) "
-                "AS in_stock, COALESCE(SUM(CASE WHEN stock = 0 THEN 1 ELSE 0 END), 0) "
-                "AS out_of_stock, COALESCE(SUM(CASE WHEN stock > 0 THEN stock ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN available_stock > 0 THEN 1 ELSE 0 END), 0) "
+                "AS in_stock, COALESCE(SUM(CASE WHEN available_stock = 0 THEN 1 ELSE 0 END), 0) "
+                "AS out_of_stock, COALESCE(SUM(CASE WHEN available_stock > 0 THEN available_stock ELSE 0 END), 0) "
                 "AS units_in_stock, COALESCE(SUM(stock), 0) AS units_total "
-                "FROM catalog_excel_products p "
+                "FROM reporting_products p "
                 "LEFT JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
                 "WHERE p.active = 1 AND " + VISIBLE_PRODUCT_SQL
             ).fetchone()
@@ -1215,7 +1208,7 @@ class ExcelProductCatalog:
             "units_total": float(row["units_total"] or 0),
         }
 
-    def product_analytics(self, limit=8):
+    def product_analytics(self, limit=8, warehouse_id="all"):
         """Return bounded read-only aggregates for the products dashboard."""
         self.database.initialize()
         limit = max(1, min(int(limit), 20))
@@ -1238,15 +1231,16 @@ class ExcelProductCatalog:
 
         ranking_sql = (
             "SELECT {label} AS name, COUNT(*) AS positions, "
-            "COALESCE(SUM(CASE WHEN p.stock > 0 THEN 1 ELSE 0 END), 0) "
+            "COALESCE(SUM(CASE WHEN p.available_stock > 0 THEN 1 ELSE 0 END), 0) "
             "AS in_stock, COALESCE(SUM(p.stock), 0) AS units "
-            "FROM catalog_excel_products p "
+            "FROM reporting_products p "
             "LEFT JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
             "WHERE " + visible_where + " GROUP BY {label} "
             "ORDER BY positions DESC, name COLLATE NOCASE LIMIT ?"
         )
         with self.database.connect() as connection:
-            top_brands = prepare_ranking(connection.execute(
+            scope = WarehouseStockScope(connection, warehouse_id)
+            top_brands = prepare_ranking(scope.execute(connection,
                 ranking_sql.format(
                     label=(
                         "COALESCE(NULLIF(trim(p.excel_brand), ''), 'Без бренда')"
@@ -1254,7 +1248,7 @@ class ExcelProductCatalog:
                 ),
                 (limit,),
             ).fetchall())
-            top_categories = prepare_ranking(connection.execute(
+            top_categories = prepare_ranking(scope.execute(connection,
                 ranking_sql.format(
                     label=(
                         "COALESCE(NULLIF(trim(p.excel_category), ''), "
@@ -1263,22 +1257,22 @@ class ExcelProductCatalog:
                 ),
                 (limit,),
             ).fetchall())
-            stock_row = connection.execute(
+            stock_row = scope.execute(connection,
                 "SELECT "
-                "COALESCE(SUM(CASE WHEN p.stock = 0 THEN 1 ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN p.available_stock = 0 THEN 1 ELSE 0 END), 0) "
                 "AS empty, "
-                "COALESCE(SUM(CASE WHEN p.stock = 1 THEN 1 ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN p.available_stock = 1 THEN 1 ELSE 0 END), 0) "
                 "AS single, "
-                "COALESCE(SUM(CASE WHEN p.stock BETWEEN 2 AND 5 THEN 1 ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN p.available_stock BETWEEN 2 AND 5 THEN 1 ELSE 0 END), 0) "
                 "AS regular, "
-                "COALESCE(SUM(CASE WHEN p.stock BETWEEN 6 AND 25 THEN 1 ELSE 0 END), 0) "
+                "COALESCE(SUM(CASE WHEN p.available_stock BETWEEN 6 AND 25 THEN 1 ELSE 0 END), 0) "
                 "AS high, "
-                "COALESCE(SUM(CASE WHEN p.stock > 25 THEN 1 ELSE 0 END), 0) "
-                "AS bulk FROM catalog_excel_products p "
+                "COALESCE(SUM(CASE WHEN p.available_stock > 25 THEN 1 ELSE 0 END), 0) "
+                "AS bulk FROM reporting_products p "
                 "LEFT JOIN catalog_excel_batches b ON b.id = p.current_batch_id "
                 "WHERE " + visible_where
             ).fetchone()
-            top_cells = prepare_ranking(connection.execute(
+            top_cells = prepare_ranking(scope.execute(connection,
                 ranking_sql.format(
                     label=(
                         "COALESCE(NULLIF(trim(p.cell), ''), 'Без ячейки')"
@@ -1309,31 +1303,32 @@ class ExcelProductCatalog:
             "top_cells": top_cells,
         }
 
-    def stock_analytics(self, category_id=None):
+    def stock_analytics(self, category_id=None, warehouse_id="all"):
         """Return the current stock structure for one ERP category.
 
         The product predicate intentionally matches ``list_products`` and the
         existing catalog counters: active cards from the current visible
-        source are read directly from ``catalog_excel_products.stock``.
+        source are projected through the explicit warehouse reporting scope.
         """
         self.database.initialize()
         visible_products_sql = (
             "SELECT p.id, p.excel_name_raw, p.model, p.excel_article, "
             "p.excel_brand, p.brand_id, p.category_id, p.stock "
-            "FROM catalog_excel_products p "
-            "JOIN catalog_excel_batches batch ON batch.id = p.current_batch_id "
+            "FROM reporting_products p "
+            "LEFT JOIN catalog_excel_batches batch ON batch.id = p.current_batch_id "
             "WHERE p.active = 1 AND "
             + VISIBLE_PRODUCT_SQL.replace("b.", "batch.")
         )
 
         with self.database.connect() as connection:
-            category_rows = connection.execute(
+            scope = WarehouseStockScope(connection, warehouse_id)
+            category_rows = scope.execute(connection,
                 "SELECT c.id, c.name, COUNT(visible.id) AS model_count "
                 "FROM erp_categories c LEFT JOIN (" + visible_products_sql + ") visible "
                 "ON visible.category_id = c.id WHERE c.active = 1 "
                 "GROUP BY c.id, c.name ORDER BY c.name COLLATE NOCASE, c.id"
             ).fetchall()
-            uncategorized = connection.execute(
+            uncategorized = scope.execute(connection,
                 "SELECT COUNT(*) AS model_count FROM (" + visible_products_sql + ") "
                 "visible WHERE visible.category_id IS NULL"
             ).fetchone()
@@ -1384,7 +1379,7 @@ class ExcelProductCatalog:
                     [] if selected_category["id"] == 0
                     else [selected_category["id"]]
                 )
-                product_rows = connection.execute(
+                product_rows = scope.execute(connection,
                     "SELECT visible.*, canonical_brand.name AS canonical_brand "
                     "FROM (" + visible_products_sql + ") visible "
                     "LEFT JOIN erp_brands canonical_brand "

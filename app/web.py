@@ -5444,7 +5444,7 @@ def inventory_page():
     control = InventoryControl()
     view = (request.args.get("view") or "history").strip()
     if view == "start":
-        return redirect(url_for("inventory_run_page"))
+        return redirect(url_for("inventory_run_page", warehouse_id=request.args.get('warehouse_id', 'default')))
     active_inventories = service.list_active()
     facets = service.history_facets()
     page, per_page = parse_erp_pagination()
@@ -5513,6 +5513,12 @@ def inventory_page():
 @app.route("/app/inventory/run")
 def inventory_run_page():
     service = BrandInventory()
+    warehouses = ManualReceipts().warehouses()
+    selected_warehouse = request.args.get('warehouse_id', 'default')
+    if selected_warehouse == 'all':
+        selected_warehouse = ''  # A count must belong to one explicitly chosen warehouse.
+    if selected_warehouse and selected_warehouse not in {w['id'] for w in warehouses}:
+        abort(400, 'Склад не найден')
     inventory_id = (request.args.get("inventory_id") or "").strip()
     inventory = None
     items = []
@@ -5527,11 +5533,13 @@ def inventory_run_page():
             ))
     return render_template(
         "warehouse_inventory.html",
-        warehouses=ManualReceipts().warehouses(),
+        warehouses=warehouses,
+        selected_warehouse=selected_warehouse,
         inventory=inventory,
         items=items,
         active_inventories=service.list_active(),
-        brands=SharedCatalog().list_brands(limit=500),
+        brands=(SharedCatalog().warehouse_options('brand', selected_warehouse, limit=200)[0]
+                if selected_warehouse else []),
     )
 
 
@@ -5631,7 +5639,8 @@ def warehouse_inventory_page():
             else "inventory_document_page"
         )
         return redirect(url_for(endpoint, inventory_id=inventory_id), code=302)
-    return redirect(url_for("inventory_page", view="start"), code=302)
+    return redirect(url_for("inventory_page", view="start",
+                            warehouse_id=request.args.get('warehouse_id', 'default')), code=302)
 
 
 @app.route("/api/v1/inventories", methods=["POST"])
@@ -5767,10 +5776,12 @@ def warehouse_page():
     from app.services.manual_receipts import ManualReceipts
     from app.services.warehouse_transfers import distribution
     warehouses = ManualReceipts(product_catalog.database).warehouses()
-    selected_warehouse = request.args.get('warehouse_id', 'default')
+    selected_warehouse = request.args.get(
+        'warehouse_id', 'all' if warehouse_view in {'brands', 'categories', 'analytics'} else 'default'
+    )
     if selected_warehouse not in {row['id'] for row in warehouses} | {'all'}:
         abort(400, 'Склад не найден')
-    tab_counts = product_catalog.stock_tab_counts()
+    tab_counts = product_catalog.stock_tab_counts(warehouse_id=selected_warehouse)
     if not isinstance(tab_counts, dict):
         # Keeps route-level test doubles and extensions that predate tab counts
         # compatible while the real catalog service always returns this shape.
@@ -5792,7 +5803,7 @@ def warehouse_page():
     }
     if warehouse_view == "analytics":
         stock_analytics = product_catalog.stock_analytics(
-            request.args.get("category_id")
+            request.args.get("category_id"), warehouse_id=selected_warehouse
         )
         selected_brand_key = (request.args.get("brand") or "").strip()
         selected_brand = next((
@@ -5801,7 +5812,8 @@ def warehouse_page():
         ), None)
         return render_template(
             "warehouse_analytics.html",
-            analytics=product_catalog.product_analytics(),
+            analytics=product_catalog.product_analytics(warehouse_id=selected_warehouse),
+            warehouses=warehouses, selected_warehouse=selected_warehouse,
             stock_analytics=stock_analytics,
             analytics_mode=(
                 request.args.get("mode")
@@ -5827,12 +5839,13 @@ def warehouse_page():
         sort_dir = (request.args.get("sort_dir") or "asc").strip()
         page, per_page = parse_erp_pagination()
         category = (
-            shared_catalog.get_category_overview(category_id)
+            shared_catalog.get_category_overview(category_id, warehouse_id=selected_warehouse)
             if category_id else None
         )
         if category_id and category is None:
             return redirect(url_for(
                 "warehouse_page", view="categories", notice="error",
+                warehouse_id=selected_warehouse,
                 message="Категория не найдена.",
             ))
         show_empty = request.args.get("show_empty") == "1"
@@ -5843,10 +5856,11 @@ def warehouse_page():
             sort_by=sort_by,
             sort_dir=sort_dir,
             include_brands=False,
+            warehouse_id=selected_warehouse,
         )
         available_categories = (
             unpaged_result["items"] if show_empty else
-            [item for item in unpaged_result["items"] if item["nonzero_count"] > 0]
+            [item for item in unpaged_result["items"] if item["nonzero_count"] > 0 or item["stock_total"] > 0]
         )
         result = {
             "items": available_categories[(page - 1) * per_page:page * per_page],
@@ -5858,6 +5872,7 @@ def warehouse_page():
             result["items"] = available_categories[(page - 1) * per_page:page * per_page]
         return render_template(
             "warehouse_categories.html",
+            warehouses=warehouses, selected_warehouse=selected_warehouse,
             categories=result["items"],
             category=category,
             query=query,
@@ -5874,22 +5889,26 @@ def warehouse_page():
     if warehouse_view == "brands":
         shared_catalog = SharedCatalog(product_catalog.database)
         brand_id = (request.args.get("brand_id") or "").strip()
-        brand = shared_catalog.get_brand_overview(brand_id) if brand_id else None
+        brand = shared_catalog.get_brand_overview(brand_id, warehouse_id=selected_warehouse) if brand_id else None
         if brand_id and brand is None:
             return redirect(url_for(
                 "warehouse_page", view="brands", notice="error",
+                warehouse_id=selected_warehouse,
                 message="Бренд не найден.",
             ))
         show_empty = request.args.get("show_empty") == "1"
         brands = shared_catalog.list_brand_summaries(
             query=(request.args.get("q") or "").strip(), limit=500,
+            warehouse_id=selected_warehouse,
         )
         if not show_empty:
-            brands = [item for item in brands if item["nonzero_count"] > 0]
+            brands = [item for item in brands if item["nonzero_count"] > 0 or item["stock_total"] > 0]
         brand = _with_brand_image_url(brand) if brand else None
         brands = [_with_brand_image_url(item) for item in brands]
         return render_template(
             "warehouse_brands.html",
+            warehouses=warehouses, selected_warehouse=selected_warehouse,
+            brand_delete=(shared_catalog.get_brand_overview(brand_id, warehouse_id='all') if brand_id else None),
             brands=brands,
             brand=brand,
             query=(request.args.get("q") or "").strip(),
@@ -6004,6 +6023,8 @@ def warehouse_page():
         selected_model = ""
     selected_cell = request.args.get("cell", "").strip()
     site_issue = normalize_product_site_issue(request.args.get("site_issue"))
+    if selected_warehouse != 'default':
+        site_issue = ''
     site_issue_label = PRODUCT_SITE_ISSUE_LABELS.get(site_issue, "")
     created_date_from = request.args.get("date_from", "").strip()
     created_date_to = request.args.get("date_to", "").strip()
@@ -6019,7 +6040,7 @@ def warehouse_page():
     check_state = (request.args.get("check_state") or "all").strip()
     if check_state not in {"all", "unchecked", "partial", "complete"}:
         check_state = "all"
-    if not out_of_stock:
+    if not out_of_stock or selected_warehouse != 'default':
         check_state = "all"
     requested_sort_by = request.args.get("sort_by")
     sort_by = (requested_sort_by or "created_at").strip()
@@ -6113,7 +6134,7 @@ def warehouse_page():
     for item in items:
         item['other_warehouses'] = [row for row in stocks_by_warehouse.get(int(item['id']), []) if row['id'] != selected_warehouse or row['in_transit']]
         item['ttt_stock'] = next((row['quantity'] for row in stocks_by_warehouse.get(int(item['id']), []) if row['id'] == 'default'), 0)
-    if out_of_stock:
+    if out_of_stock and selected_warehouse == 'default':
         cycles = OutOfStockChecks().current_for_products(
             [item["id"] for item in items]
         )
@@ -9565,6 +9586,7 @@ SALES_TABLE_COLUMNS = {
         ("track_number", "Трекинг"),
         ("barcode", "Баркод"),
         ("source", "Источник"),
+        ("warehouse_name", "Склад"),
         ("brand", "Бренд"),
         ("category", "Категория"),
         ("product_name", "Товар"),
@@ -9577,6 +9599,7 @@ SALES_TABLE_COLUMNS = {
     ],
     "tictactoy": [
         ("created_at", "Дата"),
+        ("warehouse_name", "Склад"),
         ("barcode", "Баркод"),
         ("brand", "Бренд"),
         ("category", "Категория"),
@@ -9598,6 +9621,7 @@ SALES_TABLE_COLUMNS = {
     ],
     "wildberries": [
         ("created_at", "Дата"),
+        ("warehouse_name", "Склад"),
         ("barcode", "Баркод"),
         ("brand", "Бренд"),
         ("category", "Категория"),
@@ -9612,6 +9636,7 @@ SALES_TABLE_COLUMNS = {
     ],
     "amazon": [
         ("created_at", "Дата"),
+        ("warehouse_name", "Склад"),
         ("barcode", "Баркод"),
         ("brand", "Бренд"),
         ("category", "Категория"),
@@ -13121,8 +13146,22 @@ def build_sales_report_records(
         })
 
     sales = manual_sales + automatic_sales
+    warehouse_names = {}
+    if sales:
+        database = CatalogDatabase(cache_initialization=True)
+        database.initialize()
+        with database.connect() as connection:
+            # Include inactive warehouses: historical sales keep their origin.
+            warehouse_names = {
+                row["id"]: row["name"]
+                for row in connection.execute("SELECT id, name FROM erp_warehouses")
+            }
 
     for sale in sales:
+        sale["warehouse_name"] = warehouse_names.get(
+            sale["warehouse_id"],
+            "Неизвестный склад ({})".format(sale["warehouse_id"]),
+        )
         sale["_canonical_timestamp"] = erp_timestamp(
             sale.get("created_at")
         )
@@ -17872,6 +17911,7 @@ def _validate_product_force_delete(payload):
 
 def _brands_redirect(brand_id=None, notice="success", message=""):
     arguments = {"view": "brands", "notice": notice, "message": message}
+    arguments['warehouse_id'] = request.form.get('warehouse_id') or request.args.get('warehouse_id', 'all')
     if brand_id is not None:
         arguments["brand_id"] = int(brand_id)
     return redirect(url_for("warehouse_page", **arguments))
@@ -18237,6 +18277,7 @@ def purchases_supplier_item_receive(item_id):
 
 def _categories_redirect(category_id=None, notice="success", message=""):
     arguments = {"view": "categories", "notice": notice, "message": message}
+    arguments['warehouse_id'] = request.form.get('warehouse_id') or request.args.get('warehouse_id', 'all')
     if category_id is not None:
         arguments["category_id"] = int(category_id)
     return redirect(url_for("warehouse_page", **arguments))
@@ -18307,11 +18348,12 @@ def api_category_overviews():
             offset=offset,
             sort_by=(request.args.get("sort_by") or "name").strip(),
             sort_dir=(request.args.get("sort_dir") or "asc").strip(),
+            warehouse_id=request.args.get("warehouse_id", "all"),
         )
         if request.args.get("show_empty") == "0":
             result["items"] = [
                 item for item in result["items"]
-                if item["nonzero_count"] > 0
+                if item["nonzero_count"] > 0 or item["stock_total"] > 0
             ]
             result["total"] = len(result["items"])
     except (TypeError, ValueError) as error:
@@ -18443,12 +18485,15 @@ def warehouse_rename_global_category(brand_id, category_id):
 @app.route("/api/v1/brands", methods=["GET"])
 def api_brand_overviews():
     query = (request.args.get("q") or "").strip()
-    brands = [
-        _with_brand_image_url(item)
-        for item in _catalog_application.brand_overviews(query)
-    ]
+    try:
+        brands = [
+            _with_brand_image_url(item)
+            for item in _catalog_application.brand_overviews(query, request.args.get("warehouse_id", "all"))
+        ]
+    except ValueError as error:
+        return api_error("WAREHOUSE_INVALID", str(error), 422)
     if request.args.get("show_empty") == "0":
-        brands = [item for item in brands if item["nonzero_count"] > 0]
+        brands = [item for item in brands if item["nonzero_count"] > 0 or item["stock_total"] > 0]
     return api_success({"items": brands, "query": query})
 
 
@@ -20749,6 +20794,9 @@ def api_products_collection():
         require_csrf_when_authenticated()
         return warehouse_add_product()
     catalog_service = ExcelProductCatalog()
+    warehouse_id = request.args.get('warehouse_id', 'default')
+    if warehouse_id not in {w['id'] for w in ManualReceipts(catalog_service.database).warehouses()} | {'all'}:
+        return api_error('WAREHOUSE_INVALID', 'Склад не найден или отключён.', 422)
 
     sort_by = (
         request.args.get("sort_by")
@@ -20818,6 +20866,7 @@ def api_products_collection():
         stock_state=(request.args.get("stock_state") or "all").strip(),
         check_state=(request.args.get("check_state") or "all").strip(),
         site_issue=normalize_product_site_issue(request.args.get("site_issue")),
+        warehouse_id=warehouse_id,
     )
     items = [serialize_api_product(item) for item in listing.get("items", [])]
     if request.args.get("include_component_inventory") == "1":
@@ -21737,6 +21786,7 @@ def api_catalog_options():
             product_kind=request.args.get("product_kind") or "",
             catalog_scope=(request.args.get("catalog_scope") or "").strip(),
             warehouse_id=request.args.get('warehouse_id'),
+            stock_state=request.args.get('stock_state', 'all'),
         )
         if result is None:
             return api_error(

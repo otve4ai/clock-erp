@@ -72,6 +72,7 @@ class CatalogApplication:
         offset,
         sort_by,
         sort_dir,
+        warehouse_id="all",
     ):
         return self._shared_catalog_factory().list_category_overviews(
             query=query,
@@ -79,6 +80,7 @@ class CatalogApplication:
             offset=offset,
             sort_by=sort_by,
             sort_dir=sort_dir,
+            warehouse_id=warehouse_id,
         )
 
     def category_delete_plan(self, category_id):
@@ -127,10 +129,11 @@ class CatalogApplication:
         self._invalidate_product_caches()
         return result
 
-    def brand_overviews(self, query):
+    def brand_overviews(self, query, warehouse_id="all"):
         return self._shared_catalog_factory().list_brand_summaries(
             query=query,
             limit=500,
+            warehouse_id=warehouse_id,
         )
 
     def brand_for_delete(self, brand_id):
@@ -290,8 +293,13 @@ class CatalogApplication:
         product_kind="",
         catalog_scope="",
         warehouse_id=None,
+        stock_state="all",
     ):
         catalog = self._shared_catalog_factory()
+        if catalog_scope == 'warehouse_filter':
+            return catalog.warehouse_filter_options(
+                kind, warehouse_id or 'default', query=query, limit=limit,
+                brand_id=brand_id, category_id=category_id, stock_state=stock_state)
         if warehouse_id not in (None, '', 'default'):
             return catalog.warehouse_options(kind, warehouse_id, query=query, limit=limit,
                 brand_id=brand_id, category_id=category_id, in_stock=in_stock or available_for_sale,

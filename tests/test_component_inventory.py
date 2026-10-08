@@ -181,6 +181,9 @@ class ComponentInventoryTest(unittest.TestCase):
             for query in ('Head','HEAD'):
                 result=client.get('/api/v1/products?include_component_inventory=1&q='+query).get_json()['data']
                 self.assertIn(int(h['id']),[int(r['id']) for r in result])
+                component = next(r for r in result if int(r['id']) == int(h['id']))
+                self.assertEqual(component['stock'], 0)
+                self.assertFalse(component['physical_inventory_initialized'])
             response=client.post(url,data={'action':'confirm_physical','physical_product_id':h['id'],'physical_stock':'3'})
             self.assertEqual(response.status_code,200)
             self.assertEqual(self.physical(h),3);self.assertEqual(self.stock(h['id']),998)
@@ -188,7 +191,15 @@ class ComponentInventoryTest(unittest.TestCase):
             component=next(row for row in found if int(row['id'])==int(h['id']))
             self.assertTrue(component['physical_inventory_initialized'])
             self.assertEqual(component['physical_stock'],3)
-            self.assertEqual(component['stock'],998)
+            # The warehouse-scoped API exposes physical TTT stock, not the
+            # untouched legacy import value used by older diagnostics.
+            self.assertEqual(component['stock'],3)
+            for warehouse in ('default', 'all'):
+                scoped = client.get('/api/v1/products?include_component_inventory=1&q=HEAD&warehouse_id=' + warehouse).get_json()['data']
+                component = next(row for row in scoped if int(row['id']) == int(h['id']))
+                self.assertEqual(component['stock'], 3)
+                self.assertEqual(component['physical_stock'], 3)
+            self.assertEqual(self.stock(h['id']), 998)
             self.assertIn('Физический остаток ERP: 3'.encode(),client.get(url).data)
 
     def test_legacy_bundle_sale_preserves_original_inventory_domain(self):

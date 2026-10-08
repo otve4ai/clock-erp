@@ -110,7 +110,10 @@ class BrandManagementTest(unittest.TestCase):
             )
         overview = self.catalog.get_brand_overview(first["brand_id"])
 
-        self.assertEqual(overview["stock_total"], 0)
+        # Company reporting uses the nonnegative warehouse ledger, not legacy debt.
+        self.assertEqual(overview["stock_total"], 5)
+        self.assertEqual(self.catalog.get_brand_overview(
+            first["brand_id"], warehouse_id="default")["stock_total"], 0)
         self.assertEqual(overview["nonzero_count"], 1)
         self.assertEqual(overview["categories"][0]["nonzero_count"], 1)
 

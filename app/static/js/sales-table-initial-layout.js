@@ -2,7 +2,7 @@
     "use strict";
 
     const recommendedOrder = [
-        "created_at", "order_number", "source", "product_name", "article",
+        "created_at", "order_number", "source", "warehouse_name", "product_name", "article",
         "brand", "category", "quantity_display", "unit_price_display",
         "commission", "order_status_label", "delivery_cost_display",
         "track_number", "cdek_status", "barcode", "sticker_number", "recipient_name",
@@ -12,7 +12,7 @@
     const pinnedColumns = ["created_at", "order_number"];
     const defaultWidths = {
         created_at: 108, order_number: 132, track_number: 124, cdek_status: 122, barcode: 128,
-        source: 104, brand: 104, category: 132, product_name: 300,
+        source: 104, warehouse_name: 132, brand: 104, category: 132, product_name: 300,
         article: 144, quantity_display: 96, unit_price_display: 124,
         commission: 260, order_status_label: 118,
         delivery_cost_display: 128, region: 132, city: 132,
@@ -32,7 +32,7 @@
     };
     const minimumWidths = {
         created_at: 108, order_number: 118, track_number: 108, cdek_status: 122, barcode: 112,
-        source: 90, brand: 90, category: 108, product_name: 220,
+        source: 90, warehouse_name: 112, brand: 90, category: 108, product_name: 220,
         article: 108, quantity_display: 90, unit_price_display: 112,
         commission: 220, order_status_label: 104,
         delivery_cost_display: 112, region: 100, city: 100,
@@ -42,7 +42,7 @@
     };
     const growWeights = {
         created_at: 0.25, order_number: 0.75, track_number: 3, barcode: 1.5,
-        source: 0.35, brand: 2, category: 2.5, product_name: 5,
+        source: 0.35, warehouse_name: 0.75, brand: 2, category: 2.5, product_name: 5,
         article: 2, quantity_display: 0.2, unit_price_display: 0.25,
         commission: 2, order_status_label: 0.5,
         delivery_cost_display: 0.25, region: 1.5, city: 1.5,
@@ -84,6 +84,11 @@
         if (!sourceHasArticle && order.includes("article")) {
             order.splice(order.indexOf("article"), 1);
             order.splice(order.indexOf("product_name") + 1, 0, "article");
+        }
+        if (!sourceOrder.includes("warehouse_name") && order.includes("warehouse_name")) {
+            order.splice(order.indexOf("warehouse_name"), 1);
+            const anchor = order.includes("source") ? "source" : "order_number";
+            order.splice(order.indexOf(anchor) + 1, 0, "warehouse_name");
         }
         const normalizedOrder = [
             ...pinnedColumns.filter((key) => order.includes(key)),

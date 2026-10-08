@@ -8,13 +8,15 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/erp-components.css') }}">
     <link rel="stylesheet" href="{{ static_asset_url('css/products-workspace.css') }}">
     <script defer src="{{ static_asset_url('js/products-tabs.js') }}"></script>
+    <link rel="stylesheet" href="{{ static_asset_url('css/multiwarehouse.css') }}">
+    <script defer src="{{ static_asset_url('js/multiwarehouse.js') }}"></script>
 </head>
 <body class="products-analytics-page">
 <div class="app">
     {% include "_sidebar.html" %}
     <main class="main" id="main-content" tabindex="-1">
         {% from "_products_workspace.html" import products_workspace_header %}
-        {{ products_workspace_header('analytics', product_metrics) }}
+        {{ products_workspace_header('analytics', product_metrics, warehouses=warehouses, selected_warehouse=selected_warehouse) }}
 
         <section class="stock-analytics" aria-labelledby="stockAnalyticsTitle">
             <div class="stock-analytics-header">
@@ -22,8 +24,9 @@
                     <h2 id="stockAnalyticsTitle">Аналитика остатков</h2>
                     <p>Фактическая структура текущих складских остатков по категории.</p>
                 </div>
-                <form class="stock-analytics-category" method="get" action="{{ url_for('warehouse_page') }}">
+                <form class="stock-analytics-category" method="get" action="{{ url_for('warehouse_page', warehouse_id=selected_warehouse) }}">
                     <input type="hidden" name="view" value="analytics">
+                    <input type="hidden" name="warehouse_id" value="{{ selected_warehouse }}">
                     <label for="stockAnalyticsCategory">Категория</label>
                     <select id="stockAnalyticsCategory" name="category_id" onchange="this.form.submit()" {% if not stock_analytics.categories %}disabled{% endif %}>
                         {% if not stock_analytics.categories %}<option>Категорий нет</option>{% endif %}
@@ -48,11 +51,11 @@
 
                 <div class="stock-analytics-toolbar">
                     <nav class="stock-analytics-switch" aria-label="Разбивка аналитики остатков">
-                        <a class="{% if analytics_mode == 'brands' %}is-active{% endif %}" href="{{ url_for('warehouse_page', view='analytics', category_id=stock_analytics.selected_category.id, mode='brands') }}" {% if analytics_mode == 'brands' %}aria-current="page"{% endif %}>По брендам</a>
-                        <a class="{% if analytics_mode == 'models' %}is-active{% endif %}" href="{{ url_for('warehouse_page', view='analytics', category_id=stock_analytics.selected_category.id, mode='models') }}" {% if analytics_mode == 'models' %}aria-current="page"{% endif %}>По моделям</a>
+                        <a class="{% if analytics_mode == 'brands' %}is-active{% endif %}" href="{{ url_for('warehouse_page', warehouse_id=selected_warehouse, view='analytics', category_id=stock_analytics.selected_category.id, mode='brands') }}" {% if analytics_mode == 'brands' %}aria-current="page"{% endif %}>По брендам</a>
+                        <a class="{% if analytics_mode == 'models' %}is-active{% endif %}" href="{{ url_for('warehouse_page', warehouse_id=selected_warehouse, view='analytics', category_id=stock_analytics.selected_category.id, mode='models') }}" {% if analytics_mode == 'models' %}aria-current="page"{% endif %}>По моделям</a>
                     </nav>
                     {% if selected_brand %}
-                        <a class="stock-analytics-back" href="{{ url_for('warehouse_page', view='analytics', category_id=stock_analytics.selected_category.id, mode='brands') }}">← Все бренды</a>
+                        <a class="stock-analytics-back" href="{{ url_for('warehouse_page', warehouse_id=selected_warehouse, view='analytics', category_id=stock_analytics.selected_category.id, mode='brands') }}">← Все бренды</a>
                     {% endif %}
                 </div>
 
@@ -92,8 +95,8 @@
                             <thead><tr><th scope="col">Бренд</th><th scope="col">Остаток, шт.</th><th scope="col">Моделей</th><th scope="col">Доля от категории</th></tr></thead>
                             <tbody>
                             {% for item in stock_analytics.brands %}
-                                <tr data-href="{{ url_for('warehouse_page', view='analytics', category_id=stock_analytics.selected_category.id, mode='brands', brand=item.key) }}" tabindex="0" onclick="window.location.href=this.dataset.href" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.location.href=this.dataset.href}">
-                                    <td title="{{ item.name }}"><a href="{{ url_for('warehouse_page', view='analytics', category_id=stock_analytics.selected_category.id, mode='brands', brand=item.key) }}">{{ item.name }}</a></td>
+                                <tr data-href="{{ url_for('warehouse_page', warehouse_id=selected_warehouse, view='analytics', category_id=stock_analytics.selected_category.id, mode='brands', brand=item.key) }}" tabindex="0" onclick="window.location.href=this.dataset.href" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.location.href=this.dataset.href}">
+                                    <td title="{{ item.name }}"><a href="{{ url_for('warehouse_page', warehouse_id=selected_warehouse, view='analytics', category_id=stock_analytics.selected_category.id, mode='brands', brand=item.key) }}">{{ item.name }}</a></td>
                                     <td><div class="stock-analytics-value"><span>{{ format_stock_number(item.stock) }}</span><progress max="100" value="{{ item.stock_percent }}" aria-label="Остаток бренда {{ item.name }}: {{ format_stock_number(item.stock) }} штук"></progress></div></td>
                                     <td>{{ item.models }}</td>
                                     <td><div class="stock-analytics-value"><span>{{ "%.1f"|format(item.share) }}%</span><progress max="100" value="{{ item.share }}" aria-label="Доля бренда {{ item.name }} в категории: {{ item.share }}%"></progress></div></td>
