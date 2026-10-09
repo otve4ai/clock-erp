@@ -188,12 +188,30 @@ class BitrixERPProductSync:
         external_id = _text(product.get("external_product_id"))
         rows = connection.execute(
             "SELECT * FROM catalog_excel_products WHERE active = 1 "
-            "AND (bitrix_external_product_id = ? OR bitrix_catalog_product_id IN "
-            "(SELECT id FROM catalog_products WHERE external_source = 'bitrix' "
-            "AND external_product_id = ?)) ORDER BY id",
-            (external_id, external_id),
+            "AND bitrix_external_product_id = ? ORDER BY id",
+            (external_id,),
         ).fetchall()
         if rows:
+            return {"method": "bitrix_id", "products": rows}
+        # A legacy catalog link must never override the card's explicit identity.
+        rows = connection.execute(
+            "SELECT * FROM catalog_excel_products WHERE active = 1 "
+            "AND trim(COALESCE(bitrix_external_product_id, '')) = '' "
+            "AND bitrix_catalog_product_id IN "
+            "(SELECT id FROM catalog_products WHERE external_source = 'bitrix' "
+            "AND external_product_id = ?) ORDER BY id",
+            (external_id,),
+        ).fetchall()
+        if rows:
+            article = _text(product.get("external_sku")).casefold()
+            if article and any(
+                _text(row["excel_article"]).casefold() not in ("", article)
+                for row in rows
+            ):
+                raise ValueError(
+                    "Связь с каталогом Bitrix указывает на другой артикул ERP. "
+                    "Количество не добавлено. Требуется исправить сопоставление."
+                )
             return {"method": "bitrix_id", "products": rows}
         xml_id = _text(product.get("external_xml_id"))
         if xml_id:

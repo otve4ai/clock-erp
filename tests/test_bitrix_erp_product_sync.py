@@ -111,6 +111,67 @@ def excel_result(row, name, brand, stock, article="", category=""):
 
 
 class BitrixERPProductSyncTest(unittest.TestCase):
+    def test_single_import_does_not_add_18mm_stock_to_stale_20mm_catalog_link(self):
+        source18 = product("243767", name="Time Studio Black (18 мм)", sku="TSB-18mm")
+        source20 = product("244358", name="Time Studio Black (20 мм)", sku="TSB-20mm")
+        service = BitrixERPProductSync(self.database)
+        saved20 = service.apply_single(source20, "create", quantity=2)["erp_product_id"]
+        BitrixCatalogImporter(self.database).import_products([source18], mode="full_sync")
+        with self.database.transaction() as connection:
+            catalog18 = connection.execute(
+                "SELECT id FROM catalog_products WHERE external_product_id = '243767'"
+            ).fetchone()[0]
+            connection.execute(
+                "UPDATE catalog_excel_products SET bitrix_catalog_product_id = ? WHERE id = ?",
+                (catalog18, saved20),
+            )
+        self.assertFalse(service.preview_single(source18)["duplicate"])
+        saved18 = service.apply_single(source18, "create", quantity=3)["erp_product_id"]
+        self.assertNotEqual(saved18, saved20)
+        self.assertEqual(service.preview_single(source18)["existing"]["id"], saved18)
+        service.apply_single(source18, "update", quantity=1)
+        catalog = ExcelProductCatalog(self.database)
+        self.assertEqual(catalog.get_product(saved18)["stock"], 4)
+        self.assertEqual(catalog.get_product(saved20)["stock"], 2)
+
+    def test_single_import_rejects_catalog_only_link_with_other_article(self):
+        source18 = product("243767", name="Time Studio Black (18 мм)", sku="TSB-18mm")
+        source20 = product("244358", name="Time Studio Black (20 мм)", sku="TSB-20mm")
+        service = BitrixERPProductSync(self.database)
+        saved20 = service.apply_single(source20, "create", quantity=2)["erp_product_id"]
+        BitrixCatalogImporter(self.database).import_products([source18], mode="full_sync")
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE catalog_excel_products SET bitrix_external_product_id = NULL, "
+                "bitrix_xml_id = NULL, bitrix_catalog_product_id = "
+                "(SELECT id FROM catalog_products WHERE external_product_id = '243767') "
+                "WHERE id = ?", (saved20,),
+            )
+        with self.assertRaisesRegex(ValueError, "артикул"):
+            service.preview_single(source18)
+        with self.assertRaisesRegex(ValueError, "артикул"):
+            service.apply_single(source18, "update", quantity=3)
+        self.assertEqual(ExcelProductCatalog(self.database).get_product(saved20)["stock"], 2)
+
+    def test_single_import_keeps_valid_catalog_only_link(self):
+        source = product("243767", name="Time Studio Black (18 мм)", sku="TSB-18mm")
+        service = BitrixERPProductSync(self.database)
+        saved = service.apply_single(source, "create", quantity=2)["erp_product_id"]
+        BitrixCatalogImporter(self.database).import_products([source], mode="full_sync")
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE catalog_excel_products SET bitrix_external_product_id = NULL, "
+                "bitrix_xml_id = NULL, bitrix_catalog_product_id = "
+                "(SELECT id FROM catalog_products WHERE external_product_id = '243767') "
+                "WHERE id = ?", (saved,),
+            )
+        preview = service.preview_single(source)
+        self.assertEqual(preview["existing"]["id"], saved)
+        self.assertEqual(preview["match_method"], "bitrix_id")
+        result = service.apply_single(source, "update", quantity=3)
+        self.assertEqual(result["erp_product_id"], saved)
+        self.assertEqual(ExcelProductCatalog(self.database).get_product(saved)["stock"], 5)
+
     def test_missing_source_active_is_preserved_as_unknown(self):
         missing = product()
         missing.pop("active")
