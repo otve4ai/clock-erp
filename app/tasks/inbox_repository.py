@@ -11,7 +11,19 @@ class InboxQueries:
     PENDING = ("e.recipient_id=? AND e.handled_at IS NULL AND "
                "t.assigned_to=e.recipient_id AND t.deleted_at IS NULL AND t.status!='done'")
 
-    def assignment_event(self, task, actor, timestamp, previous_assignee=None):
+    def cdek_assignment_event(self, task, timestamp):
+        if (task['related_entity_type'] != 'cdek_call' or task['task_type'] != 'micro'
+                or task['deleted_at'] is not None or task['status'] == 'done'):
+            return False
+        # Never resurrect a handled event or duplicate a previous assignment.
+        if self.connection.execute(
+                'SELECT id FROM task_inbox_events WHERE task_id=? AND recipient_id=? LIMIT 1',
+                (task['id'], task['assigned_to'])).fetchone():
+            return False
+        self.assignment_event(task, task['assigned_to'], timestamp, automated=True)
+        return True
+
+    def assignment_event(self, task, actor, timestamp, previous_assignee=None, automated=False):
         if previous_assignee is not None:
             # Retire old pending assignments and unsent toasts atomically with
             # reassignment. A former assignee must not get a stale new-task toast.
@@ -19,7 +31,7 @@ class InboxQueries:
                 "UPDATE task_inbox_events SET handled_at=COALESCE(handled_at,?),"
                 "notified_at=COALESCE(notified_at,?) WHERE task_id=? AND recipient_id=?",
                 (timestamp, timestamp, task["id"], previous_assignee))
-        if task["assigned_to"] == actor:
+        if task["assigned_to"] == actor and not automated:
             return
         event = "task_assigned" if previous_assignee is None else "task_reassigned"
         key = "{}:{}:{}:{}".format(task["id"], event, task["assigned_to"], task["version"])
@@ -29,7 +41,8 @@ class InboxQueries:
             "INSERT INTO task_inbox_events(recipient_id,task_id,actor_id,event_type,created_at,dedupe_key,payload) "
             "VALUES(?,?,?,?,?,?,?)",
             (task["assigned_to"], task["id"], actor, event, timestamp, key,
-             json.dumps({"title": task["title"], "task_type": task["task_type"]}, ensure_ascii=False)))
+             json.dumps({"title": task["title"], "task_type": task["task_type"],
+                         "source": "cdek" if automated else None}, ensure_ascii=False)))
 
     @staticmethod
     def _inbox_row(row):
@@ -99,5 +112,6 @@ class InboxQueries:
                                     (timestamp, row["id"], recipient))
             item = self._inbox_row(row)
             result.append({"id": item["id"], "task_id": item["task_id"], "actor_id": item["actor_id"],
-                           "title": item["payload"]["title"], "task_type": item["payload"]["task_type"]})
+                           "title": item["payload"]["title"], "task_type": item["payload"]["task_type"],
+                           "source": item["payload"].get("source")})
         return {"items": result}

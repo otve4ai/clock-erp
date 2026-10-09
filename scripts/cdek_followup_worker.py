@@ -72,6 +72,8 @@ def main():
         if args.check:
             print('CDEK_FOLLOWUPS_CONFIG=ok assignee=ops')
             return 0
+        repaired = tasks.repair_cdek_inbox(person)
+        print('CDEK_INBOX_REPAIRED={}'.format(repaired))
         result = CdekFollowups(CDEK_DELIVERY, SmsService(store, client), tasks, person).run(group_sales(api_sales_records()))
         print('CDEK_FOLLOWUPS checked={checked} errors={errors}'.format(**result))
         return 1 if result['errors'] else 0
