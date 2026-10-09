@@ -281,7 +281,8 @@
             const row = node('div', `tm-inbox-row tm-inbox-task${micro ? ' tm-inbox-micro' : ''}`); const content = node('div', 'tm-inbox-content');
             row.dataset.inboxTask = event.task_id;
             const icon = node('span', 'tm-inbox-icon', micro ? '⚡' : '✓'); icon.setAttribute('aria-hidden', 'true');
-            const metadata = `${event.event_type === 'task_reassigned' ? 'Переназначение' : 'Новое поручение'} от ${name(event.actor_id)} · ${displayInstant(event.created_at)}`;
+            const origin = event.payload?.source === 'cdek' ? 'Автоматически · СДЭК' : `${event.event_type === 'task_reassigned' ? 'Переназначение' : 'Новое поручение'} от ${name(event.actor_id)}`;
+            const metadata = `${origin} · ${displayInstant(event.created_at)}`;
             const meta = node('p', 'tm-inbox-meta', metadata); meta.title = metadata;
             content.append(node('span', 'tm-inbox-kind', micro ? 'Микрозадача · 24 ч' : 'Обычная задача'), node('strong', 'tm-inbox-title', event.title), meta);
             const actions = node('div', 'tm-inbox-actions');

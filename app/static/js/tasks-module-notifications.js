@@ -51,7 +51,7 @@
                 if (!Number.isSafeInteger(item.task_id) || item.task_id <= 0) return;
                 const actor = directory.find(user => user.id === item.actor_id);
                 window.VechasuNotify.info(item.task_type === "micro" ? "⚡ Микрозадача · 24 часа" : "Новое поручение", {
-                    detail: (actor ? "От " + actor.name + " · " : "") + String(item.title || ""),
+                    detail: (item.source === "cdek" ? "Автоматически · СДЭК · " : actor ? "От " + actor.name + " · " : "") + String(item.title || ""),
                     action: {label: "Ознакомиться", href: "/app/tasks-module?view=inbox&preview=" + item.task_id},
                 });
             });

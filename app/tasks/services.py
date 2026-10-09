@@ -88,14 +88,29 @@ class TasksService:
                     "SELECT * FROM tasks WHERE related_entity_type='cdek_call' AND related_entity_id=? LIMIT 1",
                     (source_key,)).fetchone()
                 if existing:
+                    session.cdek_assignment_event(dict(existing), now)
                     return dict(existing)
             self._project(session, user, task["project_id"])
             task = session.create(task)
             session.add_activity(task, user["id"], "created", now, {"task": task})
             if task["status"] == "done":
                 session.add_activity(task, user["id"], "completed", now, {"completed_at": now})
-            session.assignment_event(task, user["id"], now)
+            if source_key:
+                session.cdek_assignment_event(task, now)
+            else:
+                session.assignment_event(task, user["id"], now)
             return task
+
+    def repair_cdek_inbox(self, user):
+        """Trusted worker repair; no task writes and no generic API route."""
+        permissions.require_actor(user)
+        self._assignee(user['id'])
+        with self.repository.transaction(write=True) as session:
+            rows = session.connection.execute(
+                "SELECT * FROM tasks WHERE related_entity_type='cdek_call' "
+                "AND task_type='micro' AND deleted_at IS NULL AND status!='done' AND assigned_to=?",
+                (user['id'],)).fetchall()
+            return sum(session.cdek_assignment_event(dict(row), self.now()) for row in rows)
 
     def get(self, user, task_id, include_inbox=False):
         permissions.require_actor(user)

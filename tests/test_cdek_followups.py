@@ -118,6 +118,8 @@ class FollowupsTest(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:
             tasks=list(pool.map(lambda _:create(),range(2)))
         self.assertEqual(tasks[0]['id'],tasks[1]['id'])
+        with self.repo.transaction() as session:
+            self.assertEqual(session.inbox_counts(2)['micro'], 1)
         task=tasks[0]
         self.tasks.mutate(self.person,task['id'],{'version':task['version']},'delete')
         self.assertEqual(create()['id'],task['id'])
@@ -190,3 +192,36 @@ class FollowupsTest(unittest.TestCase):
             db.execute("UPDATE users SET email='someone@example.test'")
         with self.assertRaises(ValueError):
             assignee(path)
+
+    def test_automatic_micro_creates_one_lightning_event_and_toast(self):
+        task = self.tasks.create_automated_micro(self.person, 'Call', '123', 'a'*64)
+        self.tasks.create_automated_micro(self.person, 'Call', '123', 'a'*64)
+        with self.repo.transaction(write=True) as session:
+            self.assertEqual(session.inbox_counts(2), {'count':1,'normal':0,'micro':1})
+            event = session.inbox(2, 20, 0)['items'][0]
+            self.assertEqual(event['payload']['source'], 'cdek')
+            self.assertEqual(session.inbox_counts(3)['count'], 0)
+            self.assertEqual(session.claim_notifications(2, self.tasks.now(), 20)['items'][0]['source'], 'cdek')
+            self.assertEqual(session.claim_notifications(2, self.tasks.now(), 20)['items'], [])
+        self.tasks.mutate(self.person,task['id'],{'version':task['version'],'status':'done'},'status')
+        self.assertEqual(self.tasks.repair_cdek_inbox(self.person), 0)
+        with self.repo.transaction() as session:
+            self.assertEqual(session.inbox_counts(2)['micro'], 0)
+
+    def test_repair_legacy_active_only_once_without_changing_task(self):
+        active = self.tasks.create_automated_micro(self.person, 'Call', '123', 'a'*64)
+        done = self.tasks.create_automated_micro(self.person, 'Done', '456', 'b'*64)
+        deleted = self.tasks.create_automated_micro(self.person, 'Deleted', '789', 'c'*64)
+        self.tasks.mutate(self.person,done['id'],{'version':done['version'],'status':'done'},'status')
+        self.tasks.mutate(self.person,deleted['id'],{'version':deleted['version']},'delete')
+        self.tasks.create_micro(self.person, {'title':'Self assigned'})
+        with self.repo.transaction(write=True) as session:
+            session.connection.execute('DELETE FROM task_inbox_events')
+        self.assertEqual(self.tasks.repair_cdek_inbox(self.person), 1)
+        self.assertEqual(self.tasks.repair_cdek_inbox(self.person), 0)
+        with self.repo.transaction(write=True) as session:
+            self.assertEqual(session.get(active['id']), active)
+            self.assertEqual(session.inbox_counts(2)['micro'], 1)
+            session.finish_inbox(active['id'], self.tasks.now())
+        self.assertEqual(self.tasks.repair_cdek_inbox(self.person), 0)
+        self.assertEqual(self.count_tasks(), 4)
