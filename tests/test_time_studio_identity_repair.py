@@ -53,7 +53,8 @@ class TimeStudioIdentityRepairTest(unittest.TestCase):
         self.assertTrue(Path(result["backup"]).is_file())
         after = self.card()
         self.assertEqual(after["bitrix_external_product_id"], "244358")
-        for key in before.keys() - {"bitrix_external_product_id", "bitrix_xml_id", "bitrix_catalog_product_id"}:
+        self.assertEqual(after["source_key"], "bitrix:244358")
+        for key in before.keys() - {"bitrix_external_product_id", "bitrix_xml_id", "bitrix_catalog_product_id", "source_key"}:
             self.assertEqual(before[key], after[key], key)
         self.assertEqual(after["stock"], 7)
         self.assertFalse(self.service.preview_single(self.sources["243767"])["duplicate"])
@@ -65,6 +66,27 @@ class TimeStudioIdentityRepairTest(unittest.TestCase):
             self.assertEqual(cached, {"243767": "TSB-18mm", "244358": "TSB-20mm"})
         finally:
             connection.close()
+        self.assert_new_18mm_can_be_created()
+
+    def assert_new_18mm_can_be_created(self):
+        added = self.service.apply_single(self.sources["243767"], "create", quantity=4)
+        self.assertNotEqual(added["erp_product_id"], self.erp_id)
+        catalog = ExcelProductCatalog(self.database)
+        self.assertEqual(catalog.get_product(added["erp_product_id"])["stock"], 4)
+        self.assertEqual(catalog.get_product(self.erp_id)["stock"], 7)
+
+    def test_completes_previous_repair_with_stale_source_key(self):
+        self.run_repair()
+        with self.database.transaction() as connection:
+            connection.execute("UPDATE catalog_excel_products SET source_key = 'bitrix:243767' WHERE id = ?", (self.erp_id,))
+        before = self.card()
+        self.assertEqual(self.run_repair(False)["status"], "preview")
+        self.assertEqual(before, self.card())
+        self.assertEqual(self.run_repair()["status"], "repaired")
+        after = self.card()
+        self.assertEqual({key for key in before if before[key] != after[key]}, {"source_key"})
+        self.assertEqual(after["source_key"], "bitrix:244358")
+        self.assert_new_18mm_can_be_created()
 
     def test_preview_does_not_write_or_create_backup(self):
         before = self.card()
@@ -97,6 +119,19 @@ class TimeStudioIdentityRepairTest(unittest.TestCase):
         ExcelProductCatalog(self.database).create_product(name="Time Studio Black (18 мм)", article="TSB-18mm")
         before = self.card()
         with self.assertRaisesRegex(ValueError, "ERP cards"):
+            self.run_repair()
+        self.assertEqual(before, self.card())
+        self.assertFalse(self.backups.exists())
+
+    def test_rejects_source_key_owned_by_inactive_card(self):
+        other = ExcelProductCatalog(self.database).create_product(name="Other", article="OTHER")
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE catalog_excel_products SET source_key = 'bitrix:244358', active = 0 WHERE id = ?",
+                (other["id"],),
+            )
+        before = self.card()
+        with self.assertRaisesRegex(ValueError, "already occupied"):
             self.run_repair()
         self.assertEqual(before, self.card())
         self.assertFalse(self.backups.exists())
