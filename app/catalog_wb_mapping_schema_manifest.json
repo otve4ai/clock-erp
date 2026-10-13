@@ -1,0 +1,59 @@
+{
+  "indexes": [
+    [
+      "erp_wb_product_mappings",
+      "sqlite_autoindex_erp_wb_product_mappings_1",
+      1,
+      [
+        "identity_key"
+      ]
+    ]
+  ],
+  "tables": {
+    "erp_wb_product_mappings": {
+      "checks": [],
+      "columns": [
+        [
+          "created_at",
+          "TEXT",
+          1,
+          null,
+          0
+        ],
+        [
+          "identity_key",
+          "TEXT",
+          0,
+          null,
+          1
+        ],
+        [
+          "product_id",
+          "INTEGER",
+          1,
+          null,
+          0
+        ],
+        [
+          "updated_at",
+          "TEXT",
+          1,
+          null,
+          0
+        ]
+      ],
+      "foreign_keys": [
+        [
+          "catalog_excel_products",
+          "product_id",
+          "id",
+          "NO ACTION",
+          "NO ACTION",
+          "NONE"
+        ]
+      ]
+    }
+  },
+  "triggers": [],
+  "views": []
+}

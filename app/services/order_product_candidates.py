@@ -1,5 +1,7 @@
 """Bounded catalog candidate lookup shared by order lists and cards."""
 
+from app.services.wildberries_product_mappings import remembered_products
+
 
 def _text(value):
     return str(value or '').strip()
@@ -11,11 +13,15 @@ def _lower(value):
 
 
 def batch_order_candidates(connection, products, identities, saved_rows):
+    remembered = remembered_products(connection, products)
     attempts = []
     values = {'article': set(), 'barcode': set(), 'nm': set(), 'bitrix': set(), 'xml': set()}
-    for product, identity, saved in zip(products, identities, saved_rows):
+    for product, identity, saved, remembered_id in zip(products, identities, saved_rows, remembered):
         rules = []
         if not (isinstance(saved, dict) and saved.get('product_id')):
+            if remembered_id is not None:
+                attempts.append([])
+                continue
             if identity['source'] == 'wildberries':
                 article = _text(product.get('article') or product.get('supplierArticle') or product.get('vendorCode'))
                 if article:
@@ -70,7 +76,10 @@ def batch_order_candidates(connection, products, identities, saved_rows):
                         found = candidates.setdefault((kind, value), set())
                         found.add(row['id'])
     result = []
-    for rules in attempts:
+    for rules, saved, remembered_id in zip(attempts, saved_rows, remembered):
+        if remembered_id is not None and not (isinstance(saved, dict) and saved.get('product_id')):
+            result.append((remembered_id, 'remembered_wb'))
+            continue
         found, method = set(), ''
         for kind, value, match_method in rules:
             ids = sorted(candidates.get((kind, value), ()))[:2]

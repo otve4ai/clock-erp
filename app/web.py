@@ -3038,7 +3038,7 @@ def load_all_order_product_mappings(database=None):
     }
 
 
-def save_order_product_mapping(order_id, order_item_id, product_id, database=None):
+def save_order_product_mapping(order_id, order_item_id, product_id, database=None, wb_product=None):
     """Atomically upsert one explicit order-line to ERP-product relation."""
     database = database or CatalogDatabase()
     database.initialize()
@@ -3060,12 +3060,15 @@ def save_order_product_mapping(order_id, order_item_id, product_id, database=Non
                 "VALUES (?, ?, ?, ?, ?)",
                 (order_id, order_item_id, int(product_id), now, now),
             )
+        if wb_product is not None:
+            from app.services.wildberries_product_mappings import remember_product
+            remember_product(connection, wb_product, product_id, now)
     return load_order_product_mappings(order_id, database).get(
         "line:{}".format(order_item_id)
     )
 
 
-def delete_order_product_mapping(order_id, order_item_id, database=None):
+def delete_order_product_mapping(order_id, order_item_id, database=None, wb_product=None):
     database = database or CatalogDatabase()
     database.initialize()
     with database.transaction() as connection:
@@ -3074,6 +3077,9 @@ def delete_order_product_mapping(order_id, order_item_id, database=None):
             "WHERE order_id = ? AND order_item_id = ?",
             (str(order_id), str(order_item_id)),
         )
+        if wb_product is not None:
+            from app.services.wildberries_product_mappings import forget_product
+            forget_product(connection, wb_product)
     return cursor.rowcount > 0
 
 
@@ -3166,7 +3172,9 @@ def build_order_sale_readiness(order, mapping_context, already_conducted=False):
     products = (order or {}).get("products") or []
     if already_conducted:
         issues.append("Продажа уже проведена")
-    if status not in {"A", "D"}:
+    # WB posting is independent of Bitrix's confirmation status codes.
+    # Keep the mapping API readiness consistent with the initial order card.
+    if (order or {}).get("source") != "wildberries" and status not in {"A", "D"}:
         issues.append("Заказ не подтверждён")
     if not products:
         issues.append("Состав заказа не загружен")
@@ -4222,7 +4230,8 @@ def order_item_mapping_api(order_id, order_item_id):
         )
     if request.method == "DELETE":
         try:
-            delete_order_product_mapping(order_id, order_item_id, database)
+            delete_order_product_mapping(order_id, order_item_id, database,
+                                         wb_product=order_item if order.get('source') == 'wildberries' else None)
             state = order_item_mapping_state(order, database, catalog)
         except sqlite3.Error:
             app.logger.exception(
@@ -4278,7 +4287,8 @@ def order_item_mapping_api(order_id, order_item_id):
         )
     try:
         saved = save_order_product_mapping(
-            order_id, order_item_id, product["id"], database
+            order_id, order_item_id, product["id"], database,
+            wb_product=order_item if order.get('source') == 'wildberries' else None,
         )
         response_data = order_item_mapping_response(
             order, order_item_id, product, saved, database, catalog
