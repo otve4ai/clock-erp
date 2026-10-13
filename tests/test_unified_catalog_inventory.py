@@ -852,7 +852,7 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
         self.tearDown()
         # Build an actual pre-multiwarehouse database, not a current database
         # with its required movement triggers silently removed by DROP TABLE.
-        with patch.object(migrations, "MIGRATIONS", migrations.MIGRATIONS[:-1]), patch.object(
+        with patch.object(migrations, "MIGRATIONS", migrations.MIGRATIONS[:next(i for i, entry in enumerate(migrations.MIGRATIONS) if entry["id"] == migrations.MULTIWAREHOUSE_MIGRATION_ID)]), patch.object(
             migrations, "verify_complete_catalog_contract", return_value=True
         ):
             self.setUp()
@@ -906,7 +906,7 @@ class UnifiedCatalogInventoryTest(unittest.TestCase):
 
     def test_legacy_receipt_schema_is_migrated_without_losing_history(self):
         self.tearDown()
-        with patch.object(migrations, "MIGRATIONS", migrations.MIGRATIONS[:-1]), patch.object(
+        with patch.object(migrations, "MIGRATIONS", migrations.MIGRATIONS[:next(i for i, entry in enumerate(migrations.MIGRATIONS) if entry["id"] == migrations.MULTIWAREHOUSE_MIGRATION_ID)]), patch.object(
             migrations, "verify_complete_catalog_contract", return_value=True
         ):
             self.setUp()

@@ -70,7 +70,7 @@
     },
     {
       "file": "app/schema_migrations.py",
-      "sha256": "f0568c3fe47cdfdd68222981bfe04a70c2ceb3210987a24466b8ddbe6f54d65c",
+      "sha256": "dc31c773d1f1c18d4c01bb70add024141d3624e19b4b1332b705d1007fa31bd6",
       "owner": "migration-platform"
     },
     {
@@ -149,6 +149,18 @@
       "owner": "migration-platform",
       "reason": "Versioned multiwarehouse migration; no runtime DDL",
       "sha256": "b25c43e1ac5fceac88ccf34956df3e3d29eea66aae9eff43af907f8a8daa1ecf"
+    },
+    {
+      "file": "app/wildberries_mapping_migration.py",
+      "owner": "migration-platform",
+      "reason": "Versioned WB variant mapping migration; no runtime DDL",
+      "sha256": "5da75c7467da827dbaf3e6b6143b3ff893a72a11021bf39de3ee40966280ba6d"
+    },
+    {
+      "file": "app/catalog_wb_mapping_schema_manifest.json",
+      "owner": "migration-platform",
+      "reason": "Versioned WB variant mapping migration; no runtime DDL",
+      "sha256": "53c03d9be99182373709e39519383e2a77ebfa17ea13b5250278fd5224d84066"
     }
   ],
   "ensure_functions": [],

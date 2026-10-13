@@ -92,7 +92,7 @@ class WriteoffsTest(unittest.TestCase):
         import app.schema_migrations as migrations
         from unittest.mock import patch
         self.tearDown()
-        with patch.object(migrations, 'MIGRATIONS', migrations.MIGRATIONS[:-1]), patch.object(migrations, 'verify_complete_catalog_contract', return_value=True):
+        with patch.object(migrations, 'MIGRATIONS', migrations.MIGRATIONS[:next(i for i, entry in enumerate(migrations.MIGRATIONS) if entry["id"] == migrations.MULTIWAREHOUSE_MIGRATION_ID)]), patch.object(migrations, 'verify_complete_catalog_contract', return_value=True):
             self.setUp()
             p=self.create_product(7)
         with sqlite3.connect(str(self.database.path)) as c:

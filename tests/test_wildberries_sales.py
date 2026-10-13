@@ -273,6 +273,132 @@ class WildberriesSalesTest(unittest.TestCase):
         self.assertFalse(state['can_create_sale'])
         self.assertEqual(state['sale_id'], sale['id'])
 
+    def test_manual_mapping_response_keeps_wb_sale_ready_without_refresh(self):
+        self.order['products'][0]['article'] = 'arma_02'
+        endpoint = '/api/orders/{}/items/{}/mapping'.format(
+            self.order['id'],
+            web.bitrix_order_product_identity(self.order['products'][0])['bitrix_order_line_id'],
+        )
+        with self.route_context(), mock.patch.object(web, 'CatalogDatabase', return_value=self.database), mock.patch.object(web, 'SharedCatalog', return_value=self.shared):
+            client = web.app.test_client()
+            for status in ('new', 'confirm', 'complete'):
+                with self.subTest(status=status):
+                    self.order['status'] = status
+                    response = client.post(endpoint, json={'product_id': self.watch['id']})
+                    self.assertEqual(response.status_code, 200)
+                    state = response.json['data']['order']
+                    self.assertTrue(state['all_items_mapped'])
+                    self.assertTrue(state['sale_ready'], state['issues'])
+                    self.assertEqual(state['issues'], [])
+            removed = client.delete(endpoint)
+            self.assertEqual(removed.status_code, 200)
+            self.assertFalse(removed.json['data']['order']['sale_ready'])
+            self.assertIn('Есть несопоставленные позиции', removed.json['data']['order']['issues'])
+        self.assertEqual(self.stock(), 3)
+        self.assertEqual(self.effects()[0], 0)
+
+    def test_wb_readiness_preserves_stock_and_duplicate_guards(self):
+        context = web.build_order_product_mapping_context(self.order['products'], catalog=self.shared)
+        selected = web.get_order_product_mapping(context, self.order['products'][0])['product']
+        selected['stock'] = 0
+        self.assertIn('Недостаточно остатка', web.build_order_sale_readiness(self.order, context)['issues'])
+        selected['stock'] = 3
+        self.assertFalse(web.build_order_sale_readiness(self.order, context, already_conducted=True)['ready'])
+        bitrix_order = dict(self.order, source='tictactoy', status='N')
+        self.assertIn('Заказ не подтверждён', web.build_order_sale_readiness(bitrix_order, context)['issues'])
+
+    def map_variant(self, order=None, product=None):
+        order = order or self.order
+        product = product or self.watch
+        with self.route_context(), mock.patch.object(web, 'CatalogDatabase', return_value=self.database), mock.patch.object(web, 'SharedCatalog', return_value=self.shared), mock.patch.object(web, 'OrdersSnapshotStore', return_value=mock.Mock(get=mock.Mock(return_value=order))):
+            response = web.app.test_client().post(
+                '/api/orders/{}/items/{}/mapping'.format(order['id'], order['products'][0]['order_item_id']),
+                json={'product_id': product['id']},
+            )
+        self.assertEqual(response.status_code, 200)
+        return response
+
+    def test_remembers_variant_for_new_order_and_conducts_selected_product(self):
+        self.order['products'][0].update(article='arma_02', chrt_id=88)
+        self.map_variant()
+        next_order = copy.deepcopy(self.order)
+        next_order['id'] = 'wb:124'
+        next_order['products'][0]['order_item_id'] = '124'
+        context = self.resolve(next_order)
+        self.assertEqual(context[0]['mapping_method'], 'remembered_wb')
+        self.assertEqual(str(context[0]['product']['id']), str(self.watch['id']))
+        from app.services.wildberries_matching import order_product_candidates
+        with self.database.connect() as connection:
+            candidates, method = order_product_candidates(connection, next_order['products'][0])
+        self.assertEqual(method, 'remembered_wb')
+        self.assertEqual(str(candidates[0]['id']), str(self.watch['id']))
+        self.assertEqual(web.load_order_product_mappings('wb:124', self.database), {})
+        sale = self.service.conduct(next_order)
+        self.assertEqual(str(sale['product_id']), str(self.watch['id']))
+        self.assertEqual(self.stock(), 2)
+
+    def test_variant_memory_does_not_cross_size_or_card_and_manual_wins(self):
+        self.order['products'][0].update(article='unmatched', chrt_id=88)
+        self.map_variant()
+        for change in ({'chrt_id': 89}, {'nm_id': 78}, {'source': 'tictactoy'}):
+            other = copy.deepcopy(self.order)
+            other['products'][0].update(change)
+            self.assertNotEqual(self.resolve(other)[0]['state'], 'mapped')
+        replacement = self.catalog.create_product('Other variant', article='OTHER', brand='Brand', category='Ремни', stock=2)
+        newer = copy.deepcopy(self.order)
+        newer['id'] = 'wb:124'
+        newer['products'][0]['order_item_id'] = '124'
+        self.map_variant(newer, replacement)
+        self.assertEqual(str(self.resolve(newer)[0]['product']['id']), str(replacement['id']))
+        original = web.build_order_product_mapping_context(self.order['products'],
+            mappings=web.load_order_product_mappings(self.order['id'], self.database), catalog=self.shared)
+        self.assertEqual(str(web.get_order_product_mapping(original, self.order['products'][0])['product']['id']), str(self.watch['id']))
+
+    def test_barcode_memory_and_weak_identity_stays_order_local(self):
+        self.order['products'][0]['article'] = 'unmatched'
+        self.map_variant()
+        self.assertEqual(self.resolve(self.order)[0]['mapping_method'], 'remembered_wb')
+        different = copy.deepcopy(self.order)
+        different['products'][0].update(barcode='other', sku='other', skus=['other'])
+        self.assertNotEqual(self.resolve(different)[0]['state'], 'mapped')
+        weak = copy.deepcopy(self.order)
+        weak['products'][0].update(nm_id=99, barcode='', sku='', skus=[])
+        self.map_variant(weak)
+        self.assertNotEqual(self.resolve(weak)[0]['state'], 'mapped')
+
+    def test_remembered_archived_product_does_not_fall_back_to_article(self):
+        self.order['products'][0]['article'] = 'unmatched'
+        self.map_variant()
+        with self.database.transaction() as connection:
+            connection.execute('UPDATE catalog_excel_products SET active=0 WHERE id=?', (self.watch['id'],))
+        self.catalog.create_product('Wrong fallback', article='unmatched', brand='Brand', category='Ремни', stock=2)
+        self.assertEqual(self.resolve(self.order)[0]['state'], 'archived')
+        with self.assertRaises(SalesInventoryError):
+            self.service.conduct(self.order)
+        with self.database.connect() as connection:
+            self.assertEqual(connection.execute('SELECT stock FROM catalog_excel_products WHERE id=?', (self.watch['id'],)).fetchone()[0], 3)
+
+    def test_mapping_memory_and_order_choice_are_atomic(self):
+        from app.services import wildberries_product_mappings
+        import sqlite3
+        with mock.patch.object(wildberries_product_mappings, 'remember_product', side_effect=sqlite3.OperationalError('test rollback')):
+            with self.assertRaises(sqlite3.OperationalError):
+                web.save_order_product_mapping(self.order['id'], '123', self.watch['id'], self.database,
+                                               wb_product=self.order['products'][0])
+        self.assertEqual(web.load_order_product_mappings(self.order['id'], self.database), {})
+
+    def test_remembered_mapping_can_be_cleared_from_another_order(self):
+        self.order['products'][0]['article'] = 'unmatched'
+        self.map_variant()
+        self.order['id'] = 'wb:124'
+        self.order['products'][0]['order_item_id'] = '124'
+        with self.route_context(), mock.patch.object(web, 'CatalogDatabase', return_value=self.database), mock.patch.object(web, 'SharedCatalog', return_value=self.shared):
+            response = web.app.test_client().delete('/api/orders/wb:124/items/124/mapping')
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json['data']['order']['sale_ready'])
+        self.assertNotEqual(self.resolve(self.order)[0]['state'], 'mapped')
+        self.assertTrue(web.load_order_product_mappings('wb:123', self.database))
+
     def link_identity(self, product, barcode, nm_id):
         with self.database.transaction() as connection:
             connection.execute(

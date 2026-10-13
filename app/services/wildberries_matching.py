@@ -5,6 +5,7 @@ from __future__ import print_function
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
+from app.services.wildberries_product_mappings import remembered_products
 
 
 def _text(value):
@@ -141,7 +142,10 @@ def build_matching_report(prices, statistics_stocks, fbs_orders, erp_index):
 def order_product_candidates(connection, product, saved_id=None):
     """Exact WB identities shared by the order card and read-only recovery."""
     attempts = []
-    if saved_id:
+    remembered_id = remembered_products(connection, [product])[0] if not saved_id else None
+    if remembered_id is not None:
+        attempts.append(("p.id = ?", [remembered_id], "remembered_wb"))
+    elif saved_id:
         attempts.append(("p.id = ?", [saved_id], "manual"))
     else:
         article = _text(product.get("article") or product.get("supplierArticle") or product.get("vendorCode"))
