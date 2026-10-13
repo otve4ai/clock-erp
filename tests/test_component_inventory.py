@@ -224,7 +224,7 @@ class ComponentInventoryTest(unittest.TestCase):
         # Build the pre-multiwarehouse fixture before removing the older slice;
         # dropping a table from a current DB also drops later migration triggers.
         self.tearDown()
-        with patch.object(migrations, 'MIGRATIONS', migrations.MIGRATIONS[:-1]), patch.object(migrations, 'verify_complete_catalog_contract', return_value=True):
+        with patch.object(migrations, 'MIGRATIONS', migrations.MIGRATIONS[:next(i for i, entry in enumerate(migrations.MIGRATIONS) if entry["id"] == migrations.MULTIWAREHOUSE_MIGRATION_ID)]), patch.object(migrations, 'verify_complete_catalog_contract', return_value=True):
             self.setUp()
             sku=self.create_product(0,'Old bundle','OLD');h=self.create_product(998,'Head','HEAD')
         with sqlite3.connect(str(self.database.path)) as c:

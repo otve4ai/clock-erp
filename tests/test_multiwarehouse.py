@@ -282,7 +282,7 @@ class MultiwarehouseMigrationTest(unittest.TestCase):
         import app.schema_migrations as migrations
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'legacy.db'
-            with patch.object(migrations, 'MIGRATIONS', migrations.MIGRATIONS[:-1]), patch.object(migrations, 'verify_complete_catalog_contract', return_value=True):
+            with patch.object(migrations, 'MIGRATIONS', migrations.MIGRATIONS[:next(i for i, entry in enumerate(migrations.MIGRATIONS) if entry["id"] == migrations.MULTIWAREHOUSE_MIGRATION_ID)]), patch.object(migrations, 'verify_complete_catalog_contract', return_value=True):
                 migrations.apply_migrations(path)
                 with sqlite3.connect(str(path)) as c:
                     c.execute("INSERT INTO erp_warehouses VALUES('existing-hk','HK','Гонконг',1,0,'2026-01-01','2026-01-01')")
@@ -298,7 +298,7 @@ class MultiwarehouseMigrationTest(unittest.TestCase):
         for other in (4, 12):
             with self.subTest(other=other), tempfile.TemporaryDirectory() as directory:
                 path = Path(directory) / 'legacy.db'
-                with patch.object(migrations, 'MIGRATIONS', migrations.MIGRATIONS[:-1]), patch.object(migrations, 'verify_complete_catalog_contract', return_value=True):
+                with patch.object(migrations, 'MIGRATIONS', migrations.MIGRATIONS[:next(i for i, entry in enumerate(migrations.MIGRATIONS) if entry["id"] == migrations.MULTIWAREHOUSE_MIGRATION_ID)]), patch.object(migrations, 'verify_complete_catalog_contract', return_value=True):
                     migrations.apply_migrations(path)
                     db = CatalogDatabase(path)
                     pid = int(SupplyEngine(db).resolve_bitrix({'external_product_id':'old', 'name':'Old stock', 'brand':'Test'})['id'])
