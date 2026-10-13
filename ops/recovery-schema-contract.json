@@ -15,7 +15,8 @@
       "erp_stock_transfers",
       "erp_stock_transfer_items",
       "erp_warehouse_stocks",
-      "erp_warehouses"
+      "erp_warehouses",
+      "erp_wb_product_mappings"
     ],
     "customers.db": [
       "customers",
