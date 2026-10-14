@@ -160,6 +160,80 @@ class WildberriesSyncTest(unittest.TestCase):
         self.assertEqual(result['outcome'],'partial')
         self.assertGreater(result['errors'],0)
         self.assertFalse(result['recovery'].get('last_success_at'))
+        self.assertEqual(self.client.polled, ['101', '101'])
+        self.assertEqual(result['recovery']['errors'][0]['order_ids'], ['101'])
+
+    def test_missing_status_retried_without_repeating_successful_ids(self):
+        self.client.rows.append(dict(id=102, article='TEST', price=10000))
+        first = dict(id=101, supplierStatus='complete', wbStatus='waiting')
+        second = dict(id=102, supplierStatus='complete', wbStatus='sold')
+        with mock.patch.object(self.client, 'get_order_statuses',
+                               side_effect=[{'101': first}, {'102': second}]) as reader:
+            result = self.sync()
+        self.assertEqual(reader.call_args_list, [mock.call(['101', '102']), mock.call(['102'])])
+        self.assertEqual(result['outcome'], 'success')
+        self.assertEqual(result['errors'], 0)
+        self.assertTrue(result['recovery']['last_success_at'])
+        self.assertEqual(self.store.get('wb:102')['wb_status'], 'sold')
+
+    def test_retry_error_preserves_received_statuses_and_reports_missing_ids(self):
+        self.client.rows.append(dict(id=102, article='TEST', price=10000))
+        first = dict(id=101, supplierStatus='complete', wbStatus='sold')
+        error = WildberriesReadOnlyError('budget exhausted', 'WB_SYNC_BUDGET')
+        with mock.patch.object(self.client, 'get_order_statuses',
+                               side_effect=[{'101': first}, error]):
+            result = self.sync()
+        self.assertEqual(result['outcome'], 'partial')
+        self.assertEqual(self.store.get('wb:101')['wb_status'], 'sold')
+        self.assertEqual(result['recovery']['errors'][0]['code'], 'WB_SYNC_BUDGET')
+        self.assertEqual(result['recovery']['errors'][0]['order_ids'], ['102'])
+        self.assertFalse(result['recovery'].get('last_success_at'))
+
+    def test_missing_terminal_status_does_not_starve_next_history_batch(self):
+        self.client.rows = []
+        rows = [normalize_wildberries_order(dict(
+            id=i, createdAt='2020-01-01T00:00:00Z',
+            supplierStatus='complete', wbStatus='sold')) for i in range(1000, 1101)]
+        self.store.upsert_wildberries(rows)
+        self.client.statuses = {str(i): dict(id=i, supplierStatus='complete', wbStatus='sold')
+                                for i in range(1001, 1101)}
+        first = self.sync('full')
+        self.assertEqual(first['outcome'], 'success')
+        self.assertEqual(first['recovery']['terminal_cursor'], '1099')
+        self.assertEqual(first['recovery']['historical_status_missing'], ['1000'])
+        self.assertEqual(first['recovery']['full_errors'], [])
+        fast = self.sync()
+        self.assertEqual(fast['outcome'], 'success')
+        self.assertEqual(fast['recovery']['historical_status_missing'], ['1000'])
+        self.client.polled = []
+        self.assertEqual(self.sync('full')['outcome'], 'success')
+        self.assertEqual(self.client.polled, ['1100'])
+        self.client.polled = []
+        self.assertEqual(self.sync('full')['outcome'], 'success')
+        self.assertIn('1000', self.client.polled)
+        self.assertEqual(self.store.get('wb:1000')['wb_status'], 'sold')
+        self.assertFalse(self.store.get('wb:1000').get('wb_status_checked_at'))
+
+    def test_missing_active_status_still_blocks_full_sync_with_terminal_missing(self):
+        self.store.upsert_wildberries([normalize_wildberries_order(dict(
+            id=1000, supplierStatus='complete', wbStatus='canceled_by_client'))])
+        self.client.statuses = {}
+        with mock.patch('app.services.wildberries_sync.WildberriesRecovery.reconcile',
+                        return_value={'recovered': 0, 'errors': []}):
+            result = self.sync('full')
+        self.assertEqual(result['outcome'], 'partial')
+        self.assertEqual(result['recovery']['historical_status_missing'], ['1000'])
+        self.assertEqual(result['recovery']['errors'][0]['order_ids'], ['101'])
+
+    def test_transport_error_does_not_advance_history_cursor(self):
+        self.client.rows = []
+        self.store.upsert_wildberries([normalize_wildberries_order(dict(
+            id=1000, supplierStatus='complete', wbStatus='sold'))])
+        with mock.patch.object(self.client, 'get_order_statuses', side_effect=
+                               WildberriesReadOnlyError('temporary', 'WB_UNAVAILABLE')):
+            result = self.sync('full')
+        self.assertEqual(result['outcome'], 'partial')
+        self.assertFalse(result['recovery'].get('terminal_cursor'))
 
     def test_lock_blocks_concurrent_fast_while_full_owns_shared_resource(self):
         lock = SyncLock()

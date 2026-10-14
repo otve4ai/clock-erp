@@ -4,6 +4,7 @@
     {% if not unified_orders_sync|default(false) %}<button class="button button-secondary wb-refresh" type="button" data-wb-sync>Обновить WB</button>{% endif %}
     <input type="hidden" value="{{ csrf_token() }}" data-wb-sync-csrf>
     <p data-wb-diagnostic role="status"></p>
+    <p data-wb-history-note hidden></p>
     <p class="warning" data-wb-missing hidden></p>
     <button class="button button-secondary" type="button" data-wb-restore hidden>Восстановить</button>
     <h3>Импортировать поставку WB</h3>

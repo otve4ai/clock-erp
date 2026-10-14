@@ -132,21 +132,38 @@ def run_sync(client, store, catalog_path, mode='fast', locked=False):
         except WildberriesReadOnlyError as error:
             failures.append(failure_details(error, 'new_orders'))
         ids, cursor = status_ids(store, mode, previous.get('terminal_cursor', ''))
-        status_failed = False
+        active_ids = set(status_ids(store, 'fast')[0]) if mode == 'full' else set(ids)
+        if mode == 'full':
+            info['historical_status_missing'] = []
+        status_request_failed = False
         for offset in range(0, len(ids), 100):
             chunk = ids[offset:offset + 100]
+            statuses = {}
             try:
                 statuses = client.get_order_statuses(chunk)
-                missing = [value for value in chunk if value not in statuses]
-                if missing:
-                    status_failed = True
-                    failures.append({'error': 'WB не вернул статусы', 'order_ids': missing,
-                                     'stage': 'order_statuses'})
+                # Persist the successful part before retrying: a timeout or budget
+                # error on the retry must not discard statuses already received.
                 result['statuses_updated'] += store.update_wildberries_statuses(statuses)
                 completed += 1
+                missing = [value for value in chunk if value not in statuses]
+                if missing:
+                    retry_statuses = client.get_order_statuses(missing)
+                    result['statuses_updated'] += store.update_wildberries_statuses(retry_statuses)
+                    statuses.update(retry_statuses)
+                    missing = [value for value in missing if value not in statuses]
+                if missing:
+                    historical_missing = [value for value in missing if value not in active_ids]
+                    info.setdefault('historical_status_missing', []).extend(historical_missing)
+                    missing = [value for value in missing if value in active_ids]
+                if missing:
+                    failures.append({'error': 'WB не вернул статусы {} заказов после повторной проверки'.format(len(missing)),
+                                     'code': 'WB_MISSING_STATUSES', 'order_ids': missing,
+                                     'stage': 'order_statuses'})
             except WildberriesReadOnlyError as error:
-                status_failed = True
-                failures.append(failure_details(error, 'order_statuses'))
+                status_request_failed = True
+                failure = failure_details(error, 'order_statuses')
+                failure['order_ids'] = [value for value in chunk if value not in statuses]
+                failures.append(failure)
                 if error.code in ('WB_SYNC_BUDGET', 'WB_UNAUTHORIZED', 'WB_FORBIDDEN', 'WB_RATE_LIMITED'):
                     break
         if mode == 'full':
@@ -160,7 +177,10 @@ def run_sync(client, store, catalog_path, mode='fast', locked=False):
                 completed += 1
             except (WildberriesReadOnlyError, ValueError) as error:
                 failures.append(failure_details(error, 'full_recovery'))
-        if not status_failed:
+        # A valid but incomplete response must not pin the history cursor forever.
+        # Missing historical statuses are reported separately, without changing
+        # saved statuses/freshness. Missing active orders remain errors.
+        if not status_request_failed:
             info['terminal_cursor'] = cursor
         result['errors'] = max(result['errors'], len(failures))
         critical = any(item.get('code') in CRITICAL_ERROR_CODES for item in failures)
