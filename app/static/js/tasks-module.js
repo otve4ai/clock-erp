@@ -170,7 +170,7 @@
             collapseMicro(!list.items.length || microCollapsePreference, false);
             $('#tm-micro-error').hidden = true;
             const root = $('#tm-micro-list'); root.replaceChildren(...list.items.map(task => taskRow(task, true)));
-            if (!list.items.length) empty(root, 'Нет активных микрозадач', 'Добавьте небольшое поручение на ближайшие 24 часа.');
+            if (!list.items.length) empty(root, 'Нет активных микрозадач');
             $$('[data-micro-count]').forEach(item => { item.textContent = summary[item.dataset.microCount]; });
             $$('[data-micro-scope]').forEach(item => item.setAttribute('aria-pressed', String(item.dataset.microScope === state.microScope)));
             const count = summary.my_active; const last = count % 10; const teen = count % 100 >= 11 && count % 100 <= 14;
