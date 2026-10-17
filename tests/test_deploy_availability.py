@@ -166,6 +166,8 @@ class DeployAvailabilityTest(unittest.TestCase):
             self.assertIn(stage, smoke)
         self.assertIn("object_label_snapshot,object_secondary_snapshot", smoke)
         self.assertIn('connection.execute("DELETE FROM services', smoke)
+        self.assertIn('"DELETE FROM erp_audit_events', smoke)
+        self.assertIn('cleanup_audit("instance/catalog.db")', smoke)
         self.assertIn("secrets.token_urlsafe", smoke)
         self.assertIn("app.config.update(TESTING=True, AUTH_TESTING=True)", smoke)
 
